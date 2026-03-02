@@ -6,8 +6,10 @@ services:
       - "8000:8000"
     depends_on:
       - redis
+      - db
     environment:
       - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/resumes
     volumes:
       - ./src:/app 
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
@@ -18,8 +20,10 @@ services:
     command: celery -A app.celery_app.celery worker --loglevel=info --pool=solo
     depends_on:
       - redis
+      - db
     environment:
       - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/resumes
     volumes:
       - ./src:/app
 
@@ -27,3 +31,19 @@ services:
     image: redis:7
     ports:
       - "6379:6379"
+
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: postgres_pgvector
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 2023
+      POSTGRES_DB: resume_tracker_db
+    ports:
+      - "5436:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./src/db:/docker-entrypoint-initdb.d
+
+volumes:
+  pgdata:

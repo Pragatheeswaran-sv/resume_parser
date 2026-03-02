@@ -1,5 +1,6 @@
 import os
 import time
+import re
 import json
 import logging
 import ollama
@@ -9,12 +10,60 @@ from docx import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
+from db.connection import SessionLocal
+from resume_filter.models import Resume
+from sqlalchemy import select, and_, cast, String, func, exists, text
+from sqlalchemy.orm import Session
 
 load_dotenv()
 
 logger = logging.getLogger(__name__)
 
 VECTORDB_PATH = "faiss_index"
+
+def normalize_experience(exp_value) -> int:
+    """Ensure experience is always integer for DB"""
+    if exp_value is None:
+        return 0
+
+    # already numeric
+    if isinstance(exp_value, (int, float)):
+        return int(exp_value)
+
+    text = str(exp_value).lower()
+
+    match = re.search(r"\d+(\.\d+)?", text)
+    if match:
+        return int(float(match.group()))
+
+    return 0
+
+def save_resumes_to_db(resumes):
+    db = SessionLocal()
+
+    embedding_model = HuggingFaceEmbeddings(
+        model_name="sentence-transformers/all-MiniLM-L6-v2"
+    )
+
+    for r in resumes:
+        raw_text = r["text"] 
+        logger.info(f'NAv----> the raw_text {raw_text}')
+        info = r["info"]            
+        vector = embedding_model.embed_query(raw_text)
+
+        row = Resume(
+            file_name=info.get("file_name"),
+            name=info.get("name"),
+            total_experience=normalize_experience(info.get("total_experience")),
+            skills=info.get("skills"),
+            companies=info.get("companies"),
+            education=info.get("education"),
+            embedding=vector
+        )
+        db.add(row)
+
+    db.commit()
+    db.close()
 
 def save_to_faiss(resumes, save_path=VECTORDB_PATH):
     splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
@@ -43,7 +92,6 @@ def extract_text_from_pdf(path):
     except Exception as e:
         print(f"[ERROR] PDF read failed: {path} -> {e}")
     return text
-
 
 def extract_text_from_docx(path):
     text = ""
@@ -130,11 +178,99 @@ def process_resumes(folder_path):
         info = extract_basic_info(text)
         if info:
             info["file_name"] = file
-            results.append(info)
+            # results.append(info)cls
+            results.append({
+                "info": info,
+                "text": text
+            })
+
     
     if results:
-        logger.info("This result section executed--->")
+        logger.info(f"NACV----> This result section executed {results}")
         save_to_faiss(results)
+        save_resumes_to_db(results)
 
     print(f"\n[TIME] {round(time.time()-start,2)} sec")
     return os.listdir()
+
+def search_resumes(filters: dict):
+    """Search resumes based on dynamic filters."""
+
+    query = select(Resume)
+    conditions = []
+
+    name = filters.get("name")
+    if name:
+        conditions.append(Resume.name.ilike(f"%{name}%"))
+
+    file_name = filters.get("file_name")
+    if file_name:
+        conditions.append(Resume.file_name.ilike(f"%{file_name}%"))
+
+    exp_min = filters.get("experience_min")
+    if exp_min is not None:
+        conditions.append(Resume.total_experience >= exp_min)
+
+    exp_max = filters.get("experience_max")
+    if exp_max is not None:
+        conditions.append(Resume.total_experience <= exp_max)
+
+    skills = filters.get("skills")
+    if skills:
+        for skill in skills:
+            logger.info("NAV----> skills any %s", skill)
+            conditions.append(Resume.skills.any(skill))
+
+    companies = filters.get("companies")
+    if companies:
+        for comp in companies:
+            conditions.append(Resume.companies.any(comp))
+
+    education = filters.get("education")
+    if education:
+        for edu in education:
+            conditions.append(
+                cast(Resume.education, String).ilike(f"%{edu}%")
+            )
+
+    if conditions:
+        query = query.where(and_(*conditions))
+
+    with SessionLocal() as db:
+        results = db.execute(query).scalars().all()
+
+    return results
+
+embedding_model = HuggingFaceEmbeddings(
+    model_name="sentence-transformers/all-MiniLM-L6-v2"
+)
+
+
+def get_query_embedding(query: str):
+    return embedding_model.embed_query(query)
+
+
+def semantic_search_resumes(query: str, top_k: int = 5):
+    db = SessionLocal()
+    try:
+        query_embedding = get_query_embedding(query)
+
+        sql = text("""
+            SELECT id, file_name, name, total_experience, skills, companies, education
+            FROM resumes
+            ORDER BY embedding <=> CAST(:query_embedding AS vector)
+            LIMIT :top_k
+        """)
+
+        results = db.execute(
+            sql,
+            {
+                "query_embedding": query_embedding,
+                "top_k": top_k
+            }
+        ).fetchall()
+
+        return results
+
+    finally:
+        db.close()
