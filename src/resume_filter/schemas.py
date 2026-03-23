@@ -1,7 +1,6 @@
 from pydantic import BaseModel
 from typing import List, Optional
 
-
 class ResumeFilterRequest(BaseModel):
     action_type:str = "filter"
     name: Optional[str] = None

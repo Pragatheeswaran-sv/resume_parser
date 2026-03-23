@@ -5,7 +5,8 @@ from dotenv import load_dotenv
 import logging
 from db.connection import engine, Base
 from sqlalchemy import text
-from resume_filter.api import router as resume_router
+from src.resume_filter.api import router as resume_router
+from src.email_reader.api import router as email_router
 
 load_dotenv()
 
@@ -17,17 +18,22 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI()
 app.include_router(resume_router)
+app.include_router(email_router)
+
 
 @app.on_event("startup")
 def startup():
+    """Initialize database and pgvector extension on application startup."""
+
     with engine.connect() as conn:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
     Base.metadata.create_all(bind=engine)
-    logger.info("✅ Database & pgvector ready")
+    logger.info("Database & pgvector ready")
 
 
 @app.get("/health")
-def health_check():
+def health_check()-> dict:
+    """Simple health check endpoint."""
     return {"message": "Resume tracker application running successful"}
 
 
