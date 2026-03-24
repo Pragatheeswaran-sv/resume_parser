@@ -39,7 +39,6 @@ def fetch_email():
             status_code=status.HTTP_200_OK,
             content={
                 "status": "success",
-                "message": "Emails fetched and processed successfully",
                 "data": data
             }
         )

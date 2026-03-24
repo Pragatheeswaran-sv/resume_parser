@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, Text, Numeric, ARRAY, JSON, TIMESTAMP, ForeignKey
+# from tokenize import String
+from sqlalchemy import Column, Integer, Text, Numeric, ARRAY, JSON, TIMESTAMP, ForeignKey,String
 from sqlalchemy.sql import func
 from pgvector.sqlalchemy import Vector
 from db.connection import Base
@@ -11,6 +12,8 @@ class Resume(Base):
     id = Column(Integer, primary_key=True, index=True)
     file_name = Column(Text)
     name = Column(Text)
+    email_address = Column(String(255), nullable=True)
+    phone_number = Column(String(20), nullable=True)
     total_experience = Column(Numeric)
     skills = Column(ARRAY(Text))
     companies = Column(ARRAY(Text))

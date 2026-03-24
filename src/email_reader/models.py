@@ -3,7 +3,6 @@ from sqlalchemy.orm import relationship
 from db.connection import Base
 import datetime
 
-
 class FetchedMails(Base):
     __tablename__ = "fetched_mails"
 
@@ -11,7 +10,6 @@ class FetchedMails(Base):
     mailbox = Column(String)
     last_uid = Column(Integer)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow)
-
 
 class Email(Base):
     __tablename__ = "emails"
@@ -22,7 +20,6 @@ class Email(Base):
     subject = Column(String)
     sender = Column(String)
     processed = Column(Boolean, default=False)
-
 
 class Attachment(Base):
     __tablename__ = "attachments"

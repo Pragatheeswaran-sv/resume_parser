@@ -1,5 +1,4 @@
 import os
-import time
 import re
 import json
 import logging
@@ -12,8 +11,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from db.connection import SessionLocal
 from src.resume_filter.models import Resume
-from sqlalchemy import select, and_, cast, String, func, exists, text
-from sqlalchemy.orm import Session
+from sqlalchemy import select, and_, cast, String, text
 from src.email_reader.models import Email, Attachment
 
 load_dotenv()
@@ -25,7 +23,6 @@ def normalize_experience(exp_value) -> int:
     
     if exp_value is None:
         return 0
-    # already numeric
     if isinstance(exp_value, (int, float)):
         return int(exp_value)
     text = str(exp_value).lower()
@@ -42,15 +39,17 @@ def save_resumes_to_db(resumes, email_obj):
     embedding_model = HuggingFaceEmbeddings(
         model_name="sentence-transformers/all-MiniLM-L6-v2"
     )
-
     for r in resumes:
-        raw_text = r["text"] 
-        logger.info(f'NAv----> the raw_text {raw_text}')
+        raw_text = r["text"]
+        # logger.info(f'NAv----> the raw_text {raw_text}')
         info = r["info"]            
+        logger.info(f'NAV----> the info extracted {info}')
         vector = embedding_model.embed_query(raw_text)
         row = Resume(
             file_name=info.get("file_name"),
             name=info.get("name"),
+            email_address=info.get("email", ""),
+            phone_number=info.get("phone_number", ""),
             total_experience=normalize_experience(info.get("total_experience")),
             skills=info.get("skills"),
             companies=info.get("companies"),
@@ -115,6 +114,8 @@ def extract_basic_info(resume_text):
         {
             name:"",
             total_experience:"",
+            email:"",
+            phone_number:"",
             skills:[]
             companies:[]
             education:[]
@@ -194,28 +195,24 @@ def extract_basic_info(resume_text):
 #     return os.listdir()
 
 def process_resumes(message_id: int) -> dict:
-    """This function processes resumes from email attachments. It performs the following    steps:
+    """
+    This function processes resumes from email attachments. It performs the following    steps:
         1. Fetches the email and its attachments using the provided message_id. It looks for attachments marked as resumes in the database.
         2. For each resume attachment, it extracts text content (supports PDF and DOCX formats).
         3. Uses a local Ollama LLM (llama3) to extract structured information such as name, experience, skills, companies, and education.
         4. Generates vector embeddings for the resume text using the HuggingFace model `all-MiniLM-L6-v2`.
         5. Stores the extracted resume data in the PostgreSQL database, linking it to the email.
         6. Saves vector embeddings in a FAISS vector database for semantic search.
-        """
+    """
     
     logger.info("NAV----> the process resume function called")
-
     db = SessionLocal()
-
-    # get email
     email_obj = db.query(Email).filter(
         Email.id == message_id
     ).first()
 
     if not email_obj:
         return {"message": "Email not found"}
-
-    # get attachments for this email
     attachments = db.query(Attachment).filter(
         Attachment.email_id == email_obj.id,
         Attachment.is_resume == True
@@ -224,10 +221,7 @@ def process_resumes(message_id: int) -> dict:
     results = []
 
     for att in attachments:
-
         file_path = att.file_path
-
-        # extract text
         if file_path.endswith(".pdf"):
             text = extract_text_from_pdf(file_path)
         elif file_path.endswith(".docx"):
@@ -238,19 +232,17 @@ def process_resumes(message_id: int) -> dict:
         if not text.strip():
             continue
 
-        # LLM extraction
         info = extract_basic_info(text)
-
         if info:
             info["file_name"] = att.file_name
-
             results.append({
                 "info": info,
                 "text": text
             })
 
     if results:
-        save_to_faiss(results)
+        # save_to_faiss(results)
+        logger.info(f"NACV----> This result section executed {results}")
         save_resumes_to_db(results, email_obj.id)
 
     db.close()
@@ -297,12 +289,11 @@ def search_resumes(filters: dict):
         results = db.execute(query).scalars().all()
 
     return results
-embedding_model = HuggingFaceEmbeddings(
-    model_name="sentence-transformers/all-MiniLM-L6-v2"
-)
 
 def get_query_embedding(query: str):
-
+    embedding_model = HuggingFaceEmbeddings(
+    model_name="sentence-transformers/all-MiniLM-L6-v2"
+    )
     return embedding_model.embed_query(query)
 
 def semantic_search_resumes(query: str, top_k: int = 5):

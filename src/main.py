@@ -20,20 +20,17 @@ app = FastAPI()
 app.include_router(resume_router)
 app.include_router(email_router)
 
-
 @app.on_event("startup")
 def startup():
     """Initialize database and pgvector extension on application startup."""
 
     with engine.connect() as conn:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        conn.commit()
     Base.metadata.create_all(bind=engine)
     logger.info("Database & pgvector ready")
-
 
 @app.get("/health")
 def health_check()-> dict:
     """Simple health check endpoint."""
     return {"message": "Resume tracker application running successful"}
-
-

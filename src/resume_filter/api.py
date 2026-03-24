@@ -22,7 +22,6 @@ router = APIRouter(
 	},
 )
 
-
 @router.post("/filter_resumes")
 def filter_resumes(filters: dict)-> List[Dict[str, Any]]:
     """
@@ -98,7 +97,6 @@ def filter_resumes(filters: dict)-> List[Dict[str, Any]]:
             logger.info(f"this if section executed{filters}")
             rows = search_resumes(filters)
             logger.info(f'Rows----> {rows}')
-
         logger.info(f"NAV---> the source {rows}")
         result = [
             {
@@ -134,12 +132,10 @@ def filter_resumes(filters: dict)-> List[Dict[str, Any]]:
             }
         )
 
-
 @router.post("/semantic_search")
 def semantic_search(body: dict):
     query = body.get("query")
     top_k = body.get("top_k", 1)
-
     results = semantic_search_resumes(query, top_k)
 
     return [

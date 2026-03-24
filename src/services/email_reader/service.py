@@ -20,35 +20,25 @@ def process_email(snapshot):
 
     email_id = snapshot["email_id"]
     attachments = snapshot["attachments"]
-
     logger.info(f"Processing email {email_id}")
-
     for file in attachments:
         logger.info(f"Processing attachment {file}")
-
     logger.info("Done")
-
 
 attachment_dir = os.getenv("ATTACHMENT_DIR","attachments")
 IMAP_SERVER = os.getenv("IMAP_SERVER","imap.gmail.com")
 EMAIL_ACCOUNT = os.getenv("EMAIL_ACCOUNT","")
 PASSWORD = os.getenv("PASSWORD","")
 
-
 def save_attachment(part, message_id):
     """Save email attachment to attachment directory and return its filename and path."""
 
     if not os.path.exists(attachment_dir):
         os.makedirs(attachment_dir)
-
     filename = part.get_filename()
-
     ext = filename.split(".")[-1]
-
     unique_name = f"{message_id}_{uuid.uuid4()}.{ext}"
-
     path = os.path.join(attachment_dir, unique_name)
-
     with open(path, "wb") as f:
         f.write(part.get_payload(decode=True))
 
@@ -56,7 +46,6 @@ def save_attachment(part, message_id):
 
 def is_resume(text: str) -> bool:
     logger.info("NAV----> process started")
-
     # prompt = """
     #     You are a document classifier.
 
@@ -105,12 +94,9 @@ def is_resume(text: str) -> bool:
         )
 
         content = response["message"]["content"].strip()
-
         start = content.find("{")
         end = content.rfind("}") + 1
-
         data = json.loads(content[start:end])
-
         logger.info(f"NAV----> the resume content data {data} ")
 
         return data.get("is_resume", False)
@@ -123,19 +109,14 @@ def extract_attachment_text(path):
     """Extract text from PDF or DOCX attachment."""
 
     if path.endswith(".pdf"):
-
         text = ""
         reader = PdfReader(path)
-
         for page in reader.pages:
             text += page.extract_text() or ""
-
         return text
 
     if path.endswith(".docx"):
-
         doc = Document(path)
-
         return "\n".join(p.text for p in doc.paragraphs)
 
     return ""
@@ -157,7 +138,6 @@ def  fetch_emails() -> dict:
     mail = imaplib.IMAP4_SSL(IMAP_SERVER)
     mail.login(EMAIL_ACCOUNT, PASSWORD)
     mail.select("INBOX")
-
     state = db.query(FetchedMails).first()
     if not state:
         status, data = mail.uid("search", None, "ALL")
@@ -166,17 +146,14 @@ def  fetch_emails() -> dict:
             return {"message": "Mailbox empty"}
 
         latest_uid = int(uids[-1])
-
         state = FetchedMails(
             mailbox="INBOX",
             last_uid=latest_uid
         )
-
         db.add(state)
         db.commit()
 
         return {"message": f"Initialized last_uid = {latest_uid}"}
-
     last_uid = state.last_uid
     status, data = mail.uid("search", None, "ALL")
     all_uids = data[0].split()
@@ -202,48 +179,28 @@ def  fetch_emails() -> dict:
             subject=subject,
             sender=sender
         )
-
         db.add(email_obj)
         db.commit()
         db.refresh(email_obj)
-
         for part in msg.walk():
-
             if part.get_content_disposition() == "attachment":
-
                 filename, path = save_attachment(part, message_id)
                 text = extract_attachment_text(path)
                 if not text.strip():
                     logger.info("Empty document:", filename)
                     continue
-
                 resume_flag = is_resume(text)
-
+                logger.info(f"NAV----> the resume flag {resume_flag} for the file {filename}")
                 attachment = Attachment(
                     email_id=email_obj.id,
                     file_name=filename,
                     file_path=path,
                     is_resume = resume_flag
                 )
-
                 db.add(attachment)
-
-                # logger.info("NAV----> Before is_resume block")
-                # resume_flag = is_resume(text)
-                # logger.info('NAV----> the is resume completed')
-                # if resume_flag:
-                #     logger.info("NAV----> resume:", filename)
-                # else:
-                #     logger.info("NAV----> not an resume")
-
-                # logger.info("Valid resume:", filename)
-
-        db.commit()
-
+                db.commit()
         max_uid = max(max_uid, uid)
-
-        logger.info("Processed email:", subject)
-
+        logger.info(f"Processed email: {subject}")
         # celery_task = resume_track(email_obj.id)
         logger.info("NAV----> the celery work started")
         celery_task = resume_track.delay(email_obj.id)
