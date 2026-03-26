@@ -1,6 +1,6 @@
 import imaplib
 import email
-from src.email_reader.models import FetchedMails, Email, Attachment
+from src.email_reader.models import EmailVersion, EmailLogs, Attachment
 from db.connection import SessionLocal
 import os
 import uuid
@@ -138,7 +138,7 @@ def  fetch_emails() -> dict:
     mail = imaplib.IMAP4_SSL(IMAP_SERVER)
     mail.login(EMAIL_ACCOUNT, PASSWORD)
     mail.select("INBOX")
-    state = db.query(FetchedMails).first()
+    state = db.query(EmailVersion).first()
     if not state:
         status, data = mail.uid("search", None, "ALL")
         uids = data[0].split()
@@ -146,7 +146,7 @@ def  fetch_emails() -> dict:
             return {"message": "Mailbox empty"}
 
         latest_uid = int(uids[-1])
-        state = FetchedMails(
+        state = EmailVersion(
             mailbox="INBOX",
             last_uid=latest_uid
         )
@@ -163,7 +163,7 @@ def  fetch_emails() -> dict:
 
     max_uid = last_uid
     for uid in new_uids:
-        existing = db.query(Email).filter(Email.uid == uid).first()
+        existing = db.query(EmailLogs).filter(EmailLogs.uid == uid).first()
         if existing:
             continue
         result, msg_data = mail.uid("fetch", str(uid), "(RFC822)")
@@ -173,7 +173,7 @@ def  fetch_emails() -> dict:
         subject = msg.get("Subject")
         sender = msg.get("From")
 
-        email_obj = Email(
+        email_obj = EmailLogs(
             message_id=message_id,
             uid=uid,
             subject=subject,
