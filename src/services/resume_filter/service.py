@@ -507,7 +507,7 @@ def process_resumes(email_id: UUID) -> dict:
     if results:
         # save_to_faiss(results)
         logger.info(f"NACV----> This result section executed {results}")
-        save_resumes_to_db(results, email_obj.id)
+        save_resumes_to_db(results)
 
     db.close()
 
