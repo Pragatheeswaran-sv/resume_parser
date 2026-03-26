@@ -14,6 +14,7 @@ from langchain_community.vectorstores import FAISS
 from db.connection import SessionLocal
 from src.resume_filter.models import Resume
 from sqlalchemy import select, and_, cast, String, text
+from sqlalchemy.orm import joinedload
 from src.email_reader.models import EmailLogs, Attachment
 from src.candidate.models import (
 	Candidate, CandidateSkills, CandidateEducation, 
@@ -517,42 +518,83 @@ def process_resumes(email_id: UUID) -> dict:
     }
 
 def search_resumes(filters: dict):
-    """Search resumes based on dynamic filters."""
-    query = select(Resume)
-    conditions = []
-    name = filters.get("name")
-    if name:
-        conditions.append(Resume.name.ilike(f"%{name}%"))
-    file_name = filters.get("file_name")
-    if file_name:
-        conditions.append(Resume.file_name.ilike(f"%{file_name}%"))
-    exp_min = filters.get("experience_min")
-    if exp_min is not None:
-        conditions.append(Resume.total_experience >= exp_min)
-    exp_max = filters.get("experience_max")
-    if exp_max is not None:
-        conditions.append(Resume.total_experience <= exp_max)
-    skills = filters.get("skills")
-    if skills:
-        for skill in skills:
-            logger.info("NAV----> skills any %s", skill)
-            conditions.append(Resume.skills.any(skill))
-    companies = filters.get("companies")
-    if companies:
-        for comp in companies:
-            conditions.append(Resume.companies.any(comp))
-    education = filters.get("education")
-    if education:
-        for edu in education:
-            conditions.append(
-                cast(Resume.education, String).ilike(f"%{edu}%")
-            )
-    if conditions:
-        query = query.where(and_(*conditions))
-    with SessionLocal() as db:
-        results = db.execute(query).scalars().all()
-
-    return results
+    """Search resumes based on dynamic filters using relationships."""
+    
+    db = SessionLocal()
+    try:
+        query = select(Resume).options(
+            joinedload(Resume.canditate)
+        )
+        conditions = []
+        
+        name = filters.get("name")
+        if name:
+            conditions.append(Candidate.name.ilike(f"%{name}%"))
+        
+        exp_min = filters.get("experience_min")
+        if exp_min is not None:
+            conditions.append(Candidate.total_experience >= exp_min)
+        
+        exp_max = filters.get("experience_max")
+        if exp_max is not None:
+            conditions.append(Candidate.total_experience <= exp_max)
+        
+        skills = filters.get("skills")
+        if skills:
+            for skill in skills:
+                logger.info("NAV----> searching for skill: %s", skill)
+                skill_obj = db.query(Skill).filter(
+                    Skill.skill.ilike(f"%{skill}%")
+                ).all()
+                if skill_obj:
+                    skill_ids = [s.skill_id for s in skill_obj]
+                    conditions.append(
+                        Resume.candidate_id.in_(
+                            db.query(CandidateSkills.candidate_id).filter(
+                                CandidateSkills.skill_id.in_(skill_ids)
+                            )
+                        )
+                    )
+        
+        companies = filters.get("companies")
+        if companies:
+            for comp in companies:
+                company_obj = db.query(Company).filter(
+                    Company.company_name.ilike(f"%{comp}%")
+                ).all()
+                if company_obj:
+                    company_ids = [c.company_id for c in company_obj]
+                    conditions.append(
+                        Resume.candidate_id.in_(
+                            db.query(WorkExperience.candidate_id).filter(
+                                WorkExperience.company_id.in_(company_ids)
+                            )
+                        )
+                    )
+        
+        education = filters.get("education")
+        if education:
+            for edu in education:
+                education_obj = db.query(Education).filter(
+                    Education.education.ilike(f"%{edu}%")
+                ).all()
+                if education_obj:
+                    education_ids = [e.education_id for e in education_obj]
+                    conditions.append(
+                        Resume.candidate_id.in_(
+                            db.query(CandidateEducation.candidate_id).filter(
+                                CandidateEducation.education_id.in_(education_ids)
+                            )
+                        )
+                    )
+        
+        if conditions:
+            query = query.where(and_(*conditions))
+        
+        results = db.execute(query).unique().scalars().all()
+        return results
+    finally:
+        db.close()
 
 def get_query_embedding(query: str):
     embedding_model = HuggingFaceEmbeddings(
@@ -566,10 +608,18 @@ def semantic_search_resumes(query: str, top_k: int = 5):
     db = SessionLocal()
     try:
         query_embedding = get_query_embedding(query)
+        # Use PostgreSQL vector similarity search via vector operator <=>
         sql = text("""
-            SELECT id, file_name, name, total_experience, skills, companies, education
-            FROM resumes
-            ORDER BY embedding <=> CAST(:query_embedding AS vector)
+            SELECT 
+                r.resume_id,
+                c.candidate_id,
+                c.name,
+                c.email_address,
+                c.total_experience,
+                r.embedding <=> CAST(:query_embedding AS vector) as similarity_distance
+            FROM resumes r
+            JOIN candidates c ON r.candidate_id = c.candidate_id
+            ORDER BY similarity_distance ASC
             LIMIT :top_k
         """)
 
