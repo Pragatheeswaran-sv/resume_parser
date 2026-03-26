@@ -3,7 +3,7 @@ import json
 import logging
 from dotenv import load_dotenv
 from fastapi import APIRouter
-from src.services.resume_filter.service import process_resumes, search_resumes, semantic_search_resumes
+from src.services.resume_filter.service import process_resumes, search_resumes, semantic_search_resumes, get_master_data
 from src.resume_filter.schemas import ResumeFilterRequest
 from typing import List, Dict, Any
 from src.celery.celery_app import celery
@@ -89,6 +89,8 @@ def filter_resumes(filters: dict)-> List[Dict[str, Any]]:
         rows = []
         if 'query' in filters :
             query = filters.get("query")
+            if not query:
+                raise HTTPException(status_code=400, detail="Query cannot be empty")
             top_k = filters.get("limit", 1)
             rows = semantic_search_resumes(query, top_k)
         else:
@@ -135,6 +137,8 @@ def filter_resumes(filters: dict)-> List[Dict[str, Any]]:
 @router.post("/semantic_search")
 def semantic_search(body: dict):
     query = body.get("query")
+    if not query:
+        raise HTTPException(status_code=400, detail="Query is required")
     top_k = body.get("top_k", 1)
     results = semantic_search_resumes(query, top_k)
 
@@ -148,3 +152,51 @@ def semantic_search(body: dict):
         }
         for r in results
     ]
+
+@router.get("/show_filter")
+def show_filter():
+    """
+    Fetch master data for filters: Roles, Education, Skills.
+    
+    This endpoint is called during initial page render to populate filter options.
+    
+    Returns:
+        JSON: Master data in structured format.
+    
+    Example Response:
+    ```json
+    {
+        "status": "success",
+        "data": {
+            "roles": [
+                {"id": "uuid", "name": "Software Engineer"}
+            ],
+            "education": [
+                {"id": "uuid", "name": "B.Tech"}
+            ],
+            "skills": [
+                {"id": "uuid", "name": "Python"}
+            ]
+        }
+    }
+    ```
+    """
+    try:
+        data = get_master_data()
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "status": "success",
+                "data": data
+            }
+        )
+    except Exception as e:
+        logger.error(f"ERROR in show_filter: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "status": "error",
+                "message": "Failed to fetch master data",
+                "error": str(e)
+            }
+        )

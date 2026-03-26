@@ -634,3 +634,20 @@ def semantic_search_resumes(query: str, top_k: int = 5):
         return results
     finally:
         db.close()
+
+def get_master_data():
+    """Fetch active data from master tables: Roles, Education, Skills."""
+    
+    db = SessionLocal()
+    try:
+        roles = db.query(Role).filter(Role.is_active == True).all()
+        educations = db.query(Education).filter(Education.is_active == True).all()
+        skills = db.query(Skill).filter(Skill.is_active == True).all()
+        
+        return {
+            "roles": [{"id": str(r.role_id), "name": r.role} for r in roles],
+            "education": [{"id": str(e.education_id), "name": e.education} for e in educations],
+            "skills": [{"id": str(s.skill_id), "name": s.skill} for s in skills]
+        }
+    finally:
+        db.close()
