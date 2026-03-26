@@ -104,31 +104,87 @@ def extract_basic_info(resume_text):
     logger.info("This section executed -----> ")
     OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
     prompt = """
-        You are a resume parser.
-
-        Extract ONLY basic candidate information from the resume.
-
-        Return ONLY valid JSON.
-        Do NOT add explanation.
-        Do NOT add text before or after JSON.
-
-        JSON format:
-        {
-            name:"",
-            total_experience:"",
-            email:"",
-            phone_number:"",
-            skills:[]
-            companies:[]
-            education:[]
-        }
-
-
-        Rules:
-        - If data missing → empty string or empty list
-        - Experience must be number (years)
-        - Skills must be list of strings
-    """
+		You are a highly accurate resume parser.
+	
+		Extract structured candidate information from the given resume.
+	
+		Return ONLY valid JSON.
+		Do NOT add explanation.
+		Do NOT add any text before or after JSON.
+	
+		STRICT JSON FORMAT:
+	
+		{
+			"name": "",
+			"total_experience": 0,
+			"email": "",
+			"phone_number": "",
+			"location": "",
+			"skills": [],
+			"education": [
+				{
+					"qualification": "",
+					"institution": "",
+					"percentage": "",
+					"passout_year": ""
+				}
+			],
+			"work_experience": [
+				{
+					"company_name": "",
+					"role": "",
+					"start_date": "",
+					"end_date": ""
+				}
+			]
+		}
+	
+		STRICT RULES:
+	
+		1. ALWAYS return all keys. Do NOT skip any field.
+	
+		2. If any value is missing:
+		- Use "" for strings
+		- Use 0 for total_experience
+		- Use [] for arrays
+	
+		3. DO NOT return null.
+	
+		4. total_experience must be a NUMBER (years).
+	
+		5. skills must be SHORT keywords (e.g., "Python", "SQL", "Communication").
+		Do NOT return full sentences.
+	
+		6. DATE NORMALIZATION (VERY IMPORTANT):
+		- Convert all dates to format:
+			YYYY-MM (e.g., 2016-06)
+			OR YYYY (e.g., 2016)
+		- Examples:
+			"June 2016" → "2016-06"
+			"Feb 2017" → "2017-02"
+			"2018" → "2018"
+		- If only month/year given → convert to YYYY-MM
+		- If invalid text like "Year 11" → return ""
+	
+		7. passout_year must be ONLY a YEAR (YYYY).
+		- If not a valid year → return ""
+	
+		8. work_experience dates must ALWAYS follow YYYY-MM or YYYY.
+		- If end_date is "present" → return "Present"
+	
+		9. DO NOT include words like:
+		- "June", "Feb", "Year 11", "Currently"
+		Only return normalized values.
+	
+		10. Do NOT guess missing data.
+	
+		11. Ensure output is valid JSON (parsable).
+	
+		IMPORTANT:
+		- No extra text
+		- No trailing commas
+		- Strict JSON only
+		"""
     try:
         response = ollama.chat(
             model="llama3",
