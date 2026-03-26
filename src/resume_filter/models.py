@@ -1,35 +1,30 @@
 # from tokenize import String
-from sqlalchemy import Column, Integer, Text, Numeric, ARRAY, JSON, TIMESTAMP, ForeignKey,String
+import datetime
+import uuid
+from sqlalchemy import UUID, Boolean, Column, DateTime, Integer, Text, Numeric, ARRAY, JSON, TIMESTAMP, ForeignKey,String
 from sqlalchemy.sql import func
 from pgvector.sqlalchemy import Vector
 from db.connection import Base
-from src.email_reader.models import Email
+from src.email_reader.models import Attachment
+from src.candidate.models import Candidate
 from sqlalchemy.orm import relationship
+from zoneinfo import ZoneInfo
+
+def ist_now():
+    return datetime.datetime.now(ZoneInfo("Asia/Kolkata"))
 
 class Resume(Base):
     __tablename__ = "resumes"
 
-    id = Column(Integer, primary_key=True, index=True)
-    file_name = Column(Text)
-    name = Column(Text)
-    email_address = Column(String(255), nullable=True)
-    phone_number = Column(String(20), nullable=True)
-    total_experience = Column(Numeric)
-    skills = Column(ARRAY(Text))
-    companies = Column(ARRAY(Text))
-    education = Column(JSON)
+    resume_id = Column(UUID, primary_key=True, index=True, default= uuid.uuid4)
     embedding = Column(Vector(384))
-    created_at = Column(
-        TIMESTAMP(timezone=True),
-        server_default=func.now(),
-        nullable=False
-    )
-    updated_at = Column(
-        TIMESTAMP(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
-        nullable=False
-    )
-    email_id = Column(Integer, ForeignKey("emails.id"))
-
-    email = relationship("Email")
+    attachment_id = Column(UUID(as_uuid=True), ForeignKey("attachments.attachment_id"), nullable = True)
+    candidate_id = Column(UUID(as_uuid=True), ForeignKey("candidates.candidate_id"), nullable = True)
+    created_at = Column(DateTime(timezone=False), default=ist_now)
+    updated_at = Column(DateTime(timezone=False), default=ist_now, onupdate=ist_now)
+    created_by = Column(String, nullable = True)
+    updated_by = Column(String, nullable = True)
+    is_active = Column(Boolean, default = True)
+    
+    attachment = relationship("Attachment")
+    canditate = relationship("Candidate")

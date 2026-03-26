@@ -5,7 +5,8 @@ from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 from db.connection import Base
 from src.email_reader import models
-# from src.resume_filter import models
+from src.resume_filter import models
+from src.candidate import models
 
 from alembic import context
 
