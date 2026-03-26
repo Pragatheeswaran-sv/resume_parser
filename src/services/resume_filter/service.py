@@ -12,7 +12,7 @@ from langchain_community.vectorstores import FAISS
 from db.connection import SessionLocal
 from src.resume_filter.models import Resume
 from sqlalchemy import select, and_, cast, String, text
-from src.email_reader.models import Email, Attachment
+from src.email_reader.models import EmailLogs, Attachment
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -207,8 +207,8 @@ def process_resumes(message_id: int) -> dict:
     
     logger.info("NAV----> the process resume function called")
     db = SessionLocal()
-    email_obj = db.query(Email).filter(
-        Email.id == message_id
+    email_obj = db.query(EmailLogs).filter(
+        EmailLogs.id == message_id
     ).first()
 
     if not email_obj:
