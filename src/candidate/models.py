@@ -121,5 +121,5 @@ class WorkExperience(Base):
     is_active = Column(Boolean, default = True)
 
     candidate = relationship("Candidate")
-    company = relationship("company")
-    role = relationship("roles")
+    company = relationship("Company")
+    role = relationship("Role")

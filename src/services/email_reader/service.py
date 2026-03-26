@@ -192,18 +192,17 @@ def  fetch_emails() -> dict:
                 resume_flag = is_resume(text)
                 logger.info(f"NAV----> the resume flag {resume_flag} for the file {filename}")
                 attachment = Attachment(
-                    email_id=email_obj.id,
+                    email_id=email_obj.email_id,
                     file_name=filename,
-                    file_path=path,
                     is_resume = resume_flag
                 )
                 db.add(attachment)
                 db.commit()
         max_uid = max(max_uid, uid)
         logger.info(f"Processed email: {subject}")
-        # celery_task = resume_track(email_obj.id)
+        # celery_task = resume_track(email_obj.email_id)
         logger.info("NAV----> the celery work started")
-        celery_task = resume_track.delay(email_obj.id)
+        celery_task = resume_track.delay(email_obj.email_id)
         logger.info(f"NAV----> celery task completed")
         logger.info(f"NAV----> celery task completed {celery_task.id}")
 
