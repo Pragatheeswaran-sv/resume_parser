@@ -15,6 +15,11 @@ from db.connection import SessionLocal
 from src.resume_filter.models import Resume
 from sqlalchemy import select, and_, cast, String, text
 from src.email_reader.models import EmailLogs, Attachment
+from src.candidate.models import (
+	Candidate, CandidateSkills, CandidateEducation, 
+	WorkExperience, Skill, Education, Company, Role
+)
+
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -34,32 +39,232 @@ def normalize_experience(exp_value) -> int:
 
     return 0
 
-def save_resumes_to_db(resumes, email_obj):
-    """Save extracted resume info to PostgreSQL database."""
-
+def save_resumes_to_db(resumes):
+    """Save extracted resume info to PostgreSQL database with normalized schema."""
+    
     db = SessionLocal()
     embedding_model = HuggingFaceEmbeddings(
         model_name="sentence-transformers/all-MiniLM-L6-v2"
     )
+
     for r in resumes:
-        raw_text = r["text"]
-        # logger.info(f'NAv----> the raw_text {raw_text}')
-        info = r["info"]            
-        logger.info(f'NAV----> the info extracted {info}')
-        vector = embedding_model.embed_query(raw_text)
-        row = Resume(
-            file_name=info.get("file_name"),
-            name=info.get("name"),
-            email_address=info.get("email", ""),
-            phone_number=info.get("phone_number", ""),
-            total_experience=normalize_experience(info.get("total_experience")),
-            skills=info.get("skills"),
-            companies=info.get("companies"),
-            education=info.get("education"),
-            embedding=vector,
-            email_id= email_obj
-        )
-        db.add(row)
+        try:
+            raw_text = r["text"]
+            info = r["info"]            
+            attachment_id = r.get("attachment_id")
+            logger.info(f'NAV----> the info extracted {info}')
+            vector = embedding_model.embed_query(raw_text)
+            logger.info(f'NAV----> the email {info.get("email")}...')
+            # Check for existing candidate by email/phone to avoid duplicates
+            existing_candidate = None
+            if info.get("email"):
+                existing_candidate = db.query(Candidate).filter(
+                    Candidate.email_address == info.get("email")
+                ).first()
+            if not existing_candidate and info.get("phone_number"):
+                existing_candidate = db.query(Candidate).filter(
+                    Candidate.phone_number == info.get("phone_number")
+                ).first()
+
+            if existing_candidate:
+                candidate = existing_candidate
+                logger.info(f'Using existing candidate: {candidate.candidate_id}')
+            else:
+                candidate = Candidate(
+                    name=info.get("name", ""),
+                    email_address=info.get("email", ""),
+                    phone_number=info.get("phone_number", ""),
+                    location=info.get("location", ""),
+                    total_experience=normalize_experience(info.get("total_experience")),
+                    created_by="resume_parser"
+                )
+                db.add(candidate)
+                db.flush()
+            
+            # Add skills
+            skills_list = info.get("skills", [])
+            logger.info(f'NAV----> the skills {skills_list}...')
+            if skills_list:
+                for skill_name in skills_list:
+                    if skill_name and isinstance(skill_name, str):
+                        skill_name = skill_name.strip()
+                        # Get or create skill
+                        skill = db.query(Skill).filter(
+                            Skill.skill.ilike(skill_name)
+                        ).first()
+                        
+                        if not skill:
+                            skill = Skill(
+                                skill=skill_name,
+                                created_by="resume_parser"
+                            )
+                            db.add(skill)
+                            db.flush()
+                        
+                        # Check if already linked
+                        existing_link = db.query(CandidateSkills).filter(
+                            CandidateSkills.candidate_id == candidate.candidate_id,
+                            CandidateSkills.skill_id == skill.skill_id
+                        ).first()
+                        
+                        if not existing_link:
+                            candidate_skill = CandidateSkills(
+                                candidate_id=candidate.candidate_id,
+                                skill_id=skill.skill_id,
+                                created_by="resume_parser"
+                            )
+                            db.add(candidate_skill)
+            
+            # Add education from new structure (objects with qualification, institution, percentage, passout_year)
+            education_list = info.get("education", [])
+            logger.info(f'NAV----> the education {education_list}...')
+            if education_list:
+                for edu_item in education_list:
+                    if isinstance(edu_item, dict):
+                        qualification = edu_item.get("qualification", "").strip()
+                        institution = edu_item.get("institution", "").strip()
+                        percentage = edu_item.get("percentage", "")
+                        passout_year = edu_item.get("passout_year", "")
+                        
+                        if qualification:
+                            # Get or create education type
+                            education_type = db.query(Education).filter(
+                                Education.education.ilike(qualification)
+                            ).first()
+                            
+                            if not education_type:
+                                education_type = Education(
+                                    education=qualification,
+                                    created_by="resume_parser"
+                                )
+                                db.add(education_type)
+                                db.flush()
+                            
+                            # Parse passout_year to integer
+                            try:
+                                year_passed = int(passout_year) if passout_year else None
+                            except (ValueError, TypeError):
+                                year_passed = None
+                            
+                            # Parse percentage to float
+                            try:
+                                percentage_val = float(percentage) if percentage else None
+                            except (ValueError, TypeError):
+                                percentage_val = None
+                            
+                            # Check if already linked
+                            existing_edu = db.query(CandidateEducation).filter(
+                                CandidateEducation.candidate_id == candidate.candidate_id,
+                                CandidateEducation.education_id == education_type.education_id
+                            ).first()
+                            
+                            if not existing_edu:
+                                candidate_edu = CandidateEducation(
+                                    candidate_id=candidate.candidate_id,
+                                    education_id=education_type.education_id,
+                                    institution=institution if institution else None,
+                                    percentage=percentage_val,
+                                    year_of_passed=year_passed,
+                                    created_by="resume_parser"
+                                )
+                                db.add(candidate_edu)
+            
+            # Add work experience from new structure (objects with company_name, role, start_date, end_date)
+            work_experience_list = info.get("work_experience", [])
+            logger.info(f'NAV----> the work experience {work_experience_list}...')
+            if work_experience_list:
+                for work_exp_item in work_experience_list:
+                    if isinstance(work_exp_item, dict):
+                        company_name = work_exp_item.get("company_name", "").strip()
+                        role_name = work_exp_item.get("role", "Unknown").strip()
+                        start_date = work_exp_item.get("start_date", "")
+                        end_date = work_exp_item.get("end_date", "")
+                        
+                        if company_name:
+                            # Get or create company
+                            company = db.query(Company).filter(
+                                Company.company_name.ilike(company_name)
+                            ).first()
+                            
+                            if not company:
+                                company = Company(
+                                    company_name=company_name,
+                                    company_location="",
+                                    created_by="resume_parser"
+                                )
+                                db.add(company)
+                                db.flush()
+                            
+                            # Get or create role
+                            role = db.query(Role).filter(
+                                Role.role.ilike(role_name)
+                            ).first()
+                            
+                            if not role:
+                                role = Role(
+                                    role=role_name,
+                                    created_by="resume_parser"
+                                )
+                                db.add(role)
+                                db.flush()
+                            
+                            # Parse dates (YYYY-MM or YYYY format)
+                            start_dt = None
+                            end_dt = None
+                            
+                            try:
+                                if start_date and start_date != "":
+                                    if len(start_date) == 4:  # YYYY
+                                        start_dt = dt.date(int(start_date), 1, 1)
+                                    elif len(start_date) == 7:  # YYYY-MM
+                                        year, month = start_date.split("-")
+                                        start_dt = dt.date(int(year), int(month), 1)
+                            except (ValueError, TypeError):
+                                pass
+                            
+                            try:
+                                if end_date and end_date != "" and end_date.lower() != "present":
+                                    if len(end_date) == 4:  # YYYY
+                                        end_dt = dt.date(int(end_date), 12, 31)
+                                    elif len(end_date) == 7:  # YYYY-MM
+                                        year, month = end_date.split("-")
+                                        # Get last day of month
+                                        if month == "12":
+                                            end_dt = dt.date(int(year), 12, 31)
+                                        else:
+                                            next_month = dt.date(int(year), int(month) + 1, 1)
+                                            end_dt = next_month - dt.timedelta(days=1)
+                            except (ValueError, TypeError):
+                                pass
+                            
+                            # Create work experience record
+                            work_exp = WorkExperience(
+                                candidate_id=candidate.candidate_id,
+                                company_id=company.company_id,
+                                role_id=role.role_id,
+                                start_date=start_dt,
+                                end_date=end_dt,
+                                created_by="resume_parser"
+                            )
+                            db.add(work_exp)
+            
+            # Create Resume record linking to candidate and attachment
+            resume_record = Resume(
+                embedding=vector,
+                candidate_id=candidate.candidate_id,
+                attachment_id=attachment_id,
+                created_by="resume_parser"
+            )
+            db.add(resume_record)
+            db.flush()
+            
+            logger.info(f'Successfully saved resume for {info.get("name", "Unknown")}')
+            
+        except Exception as e:
+            logger.error(f"Error saving resume: {e}")
+            db.rollback()
+            continue
+    
     db.commit()
     db.close()
 
