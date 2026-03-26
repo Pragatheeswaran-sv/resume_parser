@@ -2,6 +2,8 @@ import os
 import re
 import json
 import logging
+from uuid import UUID
+import datetime as dt
 import ollama
 from dotenv import load_dotenv
 from pypdf import PdfReader
@@ -194,7 +196,7 @@ def extract_basic_info(resume_text):
 #     logger.info(f"\n[TIME] {round(time.time()-start,2)} sec")
 #     return os.listdir()
 
-def process_resumes(message_id: int) -> dict:
+def process_resumes(email_id: UUID) -> dict:
     """
     This function processes resumes from email attachments. It performs the following    steps:
         1. Fetches the email and its attachments using the provided message_id. It looks for attachments marked as resumes in the database.
@@ -208,13 +210,13 @@ def process_resumes(message_id: int) -> dict:
     logger.info("NAV----> the process resume function called")
     db = SessionLocal()
     email_obj = db.query(EmailLogs).filter(
-        EmailLogs.id == message_id
+        EmailLogs.email_id == email_id
     ).first()
 
     if not email_obj:
         return {"message": "Email not found"}
     attachments = db.query(Attachment).filter(
-        Attachment.email_id == email_obj.id,
+        Attachment.email_id == email_obj.email_id,
         Attachment.is_resume == True
     ).all()
 
@@ -248,7 +250,7 @@ def process_resumes(message_id: int) -> dict:
     db.close()
 
     return {
-        "message_id": message_id,
+        "message_id": str(email_id),
         "processed_files": len(results)
     }
 
