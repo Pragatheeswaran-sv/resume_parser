@@ -5,12 +5,13 @@ from dotenv import load_dotenv
 from src.services.resume_filter.service import process_resumes
 from typing import List, Dict, Any
 from src.celery.celery_app import celery
+from uuid import UUID
 
 load_dotenv()
 logger = logging.getLogger(__name__)
 
 @celery.task
-def resume_track(message_id: int):
+def resume_track(email_id: UUID):
     """
     Process resumes from the local `Resumes` folder.
 
@@ -51,5 +52,5 @@ def resume_track(message_id: int):
     logger.info("NAV----> the celery function initiated successfully")
     # os.environ["OLLAMA_HOST"] = "http://host.docker.internal:11434"
     # folder = "Resumes"
-    data = process_resumes(message_id)
+    data = process_resumes(email_id)
     return json.dumps(data, indent=2)
