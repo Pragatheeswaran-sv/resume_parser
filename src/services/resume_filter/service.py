@@ -223,7 +223,7 @@ def process_resumes(email_id: UUID) -> dict:
     results = []
 
     for att in attachments:
-        file_path = att.file_path
+        file_path = f"attachments/{att.file_name}"
         if file_path.endswith(".pdf"):
             text = extract_text_from_pdf(file_path)
         elif file_path.endswith(".docx"):
@@ -239,7 +239,8 @@ def process_resumes(email_id: UUID) -> dict:
             info["file_name"] = att.file_name
             results.append({
                 "info": info,
-                "text": text
+                "text": text,
+                "attachment_id": att.attachment_id
             })
 
     if results:
