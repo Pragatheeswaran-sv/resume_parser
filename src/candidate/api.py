@@ -22,9 +22,38 @@ router = APIRouter(
 	},
 )
 
-@router.get('/candidate_info')
-def candidate_info():
+@router.get('/candidate_info/')
+def candidate_info(page):
     """
-        This api is use to
+        Get Candidate Details
+
+        Retrieves complete candidate details by joining multiple related tables
+        such as Candidate, Education, WorkExperience, Skill, Resume, Company, CandidateSkills, CandidateSkills and Attachment data.
+
+        Returns:
+            list: A list of candidate detail objects containing structured profile information.
+
+        Response Includes:
+            - candidate_id
+            - personal details
+            - education details
+            - experience details
+            - skills
+            - resume information
+
+        Raises:
+            HTTPException: If candidate data retrieval fails.
     """
-    return candidate_datails()
+    try:
+        return candidate_datails(page)
+    except Exception as e:
+        logger.error(f"ERROR in candidate: {str(e)}")
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "status": "error",
+                "message": "Failed to get candidate information",
+                "error": str(e)
+            }
+        )

@@ -8,7 +8,10 @@ from sqlalchemy import text
 from src.resume_filter.api import router as resume_router
 from src.email_reader.api import router as email_router
 from src.candidate.api import router as candidate_route
+from fastapi.middleware.cors import CORSMiddleware
+ 
 
+ 
 load_dotenv()
 
 logging.basicConfig(
@@ -21,6 +24,14 @@ app = FastAPI()
 app.include_router(resume_router)
 app.include_router(email_router)
 app.include_router(candidate_route)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.on_event("startup")
 def startup():
