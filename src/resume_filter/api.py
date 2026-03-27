@@ -23,7 +23,7 @@ router = APIRouter(
 )
 
 @router.post("/filter_resumes")
-def filter_resumes(filters: dict)-> List[Dict[str, Any]]:
+def filter_resumes(filters: dict, page: int = 1, page_size: int = 20)-> List[Dict[str, Any]]:
     """
     Filter or search resumes stored in the database with pagination support.
 
@@ -126,40 +126,27 @@ def filter_resumes(filters: dict)-> List[Dict[str, Any]]:
     try:
         logger.info("this section executed")
         rows = []
-        if 'query' in filters :
+        if 'query' in filters and filters.get("query"):
             query = filters.get("query")
-            if not query:
-                raise HTTPException(status_code=400, detail="Query cannot be empty")
             top_k = filters.get("limit", 1)
             rows = semantic_search_resumes(query, top_k)
         else:
-            filters = ResumeFilterRequest()
-            filters = filters.model_dump()
-            logger.info(f"this if section executed{filters}")
-            rows = search_resumes(filters)
+            # Accept the standard filter model with IDs and range filters.
+            try:
+                parsed_filters = ResumeFilterRequest(**filters).model_dump()
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Invalid filter payload: {e}")
+
+            # Add pagination parameters
+            parsed_filters["page"] = page
+            parsed_filters["page_size"] = page_size
+
+            logger.info(f"this if section executed {parsed_filters}")
+            rows = search_resumes(parsed_filters)
             logger.info(f'Rows----> {rows}')
         logger.info(f"NAV---> the source {rows}")
-        result = [
-            {
-                "id": r.id,
-                "file_name": r.file_name,
-                "name": r.name,
-                "total_experience": float(r.total_experience),
-                "skills": r.skills,
-                "companies": r.companies,
-                "education": r.education,
-            }
-            for r in rows
-        ]
 
-        return JSONResponse(
-            status_code=status.HTTP_200_OK,
-            content={
-                "status": "success",
-                "count": len(result),
-                "data": result
-            }
-        )
+        return rows
 
     except Exception as e:
         logger.error(f"ERROR in filter_resumes: {str(e)}")
@@ -183,11 +170,11 @@ def semantic_search(body: dict):
 
     return [
         {
-            "id": r.id,
-            "name": r.name,
-            "file_name": r.file_name,
-            "experience": float(r.total_experience),
-            "skills": r.skills
+            "id": r.get("resume_id", ""),
+            "name": r.get("name"),
+            "file_name": r.get("file_name"),
+            "experience": r.get("total_experience", 0.0),
+            "skills": r.get("skills", [])
         }
         for r in results
     ]

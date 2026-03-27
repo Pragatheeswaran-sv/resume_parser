@@ -13,7 +13,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from db.connection import SessionLocal
 from src.resume_filter.models import Resume
-from sqlalchemy import select, and_, cast, String, text
+from sqlalchemy import select, and_, cast, String, text, func
 from sqlalchemy.orm import joinedload
 from src.email_reader.models import EmailLogs, Attachment
 from src.candidate.models import (
@@ -526,36 +526,29 @@ def search_resumes(filters: dict):
             joinedload(Resume.canditate)
         )
         conditions = []
-        
+
         name = filters.get("name")
         if name:
             conditions.append(Candidate.name.ilike(f"%{name}%"))
-        
-        exp_min = filters.get("experience_min")
-        if exp_min is not None:
-            conditions.append(Candidate.total_experience >= exp_min)
-        
-        exp_max = filters.get("experience_max")
-        if exp_max is not None:
-            conditions.append(Candidate.total_experience <= exp_max)
-        
+
+        exp_min = filters.get("min_experience") if filters.get("min_experience") is not None else filters.get("experience_min")
+        if exp_min is not None and exp_min != "":
+            conditions.append(Candidate.total_experience >= float(exp_min))
+
+        exp_max = filters.get("max_experience") if filters.get("max_experience") is not None else filters.get("experience_max")
+        if exp_max is not None and exp_max != "":
+            conditions.append(Candidate.total_experience <= float(exp_max))
+
+        # Skill filter: UUID list or name substrings
         skills = filters.get("skills")
         if skills:
-            for skill in skills:
-                logger.info("NAV----> searching for skill: %s", skill)
-                skill_obj = db.query(Skill).filter(
-                    Skill.skill.ilike(f"%{skill}%")
-                ).all()
-                if skill_obj:
-                    skill_ids = [s.skill_id for s in skill_obj]
-                    conditions.append(
-                        Resume.candidate_id.in_(
-                            db.query(CandidateSkills.candidate_id).filter(
-                                CandidateSkills.skill_id.in_(skill_ids)
-                            )
-                        )
-                    )
-        
+            conditions.append(
+                Resume.candidate_id.in_(
+                    db.query(CandidateSkills.candidate_id).filter(CandidateSkills.skill_id.in_(skills))
+                )
+            )
+
+        # Companies filter by name
         companies = filters.get("companies")
         if companies:
             for comp in companies:
@@ -571,27 +564,145 @@ def search_resumes(filters: dict):
                             )
                         )
                     )
-        
-        education = filters.get("education")
-        if education:
-            for edu in education:
-                education_obj = db.query(Education).filter(
-                    Education.education.ilike(f"%{edu}%")
-                ).all()
-                if education_obj:
-                    education_ids = [e.education_id for e in education_obj]
-                    conditions.append(
-                        Resume.candidate_id.in_(
-                            db.query(CandidateEducation.candidate_id).filter(
-                                CandidateEducation.education_id.in_(education_ids)
-                            )
-                        )
+
+        # Education filter: UUID list or keywords
+        education_vals = filters.get("education")
+        if education_vals:
+            conditions.append(
+                Resume.candidate_id.in_(
+                    db.query(CandidateEducation.candidate_id).filter(CandidateEducation.education_id.in_(education_vals))
+                )
+            )
+
+        # Role filter by Role UUID
+        roles = filters.get("roles")
+        if roles:
+            conditions.append(
+                Resume.candidate_id.in_(
+                    db.query(WorkExperience.candidate_id).filter(WorkExperience.role_id.in_(roles))
+                )
+            )
+
+        # Passout year filter
+        passout_start = filters.get("passout_start_year")
+        passout_end = filters.get("passout_end_year")
+        if passout_start is not None or passout_end is not None:
+            year_conditions = []
+            if passout_start is not None and passout_start != "":
+                year_conditions.append(CandidateEducation.year_of_passed >= int(passout_start))
+            if passout_end is not None and passout_end != "":
+                year_conditions.append(CandidateEducation.year_of_passed <= int(passout_end))
+            if year_conditions:
+                conditions.append(
+                    Resume.candidate_id.in_(
+                        db.query(CandidateEducation.candidate_id).filter(and_(*year_conditions))
                     )
-        
+                )
+
+        # Percentage filter
+        percentage = filters.get("percentage")
+        if percentage is not None and percentage != "":
+            conditions.append(
+                Resume.candidate_id.in_(
+                    db.query(CandidateEducation.candidate_id).filter(CandidateEducation.percentage >= float(percentage))
+                )
+            )
+
         if conditions:
             query = query.where(and_(*conditions))
+
+        # Get total count before pagination
+        total_query = select(func.count()).select_from(query.subquery())
+        total_count = db.execute(total_query).scalar() or 0
+
+        # Sorting
+        sort_by = filters.get("sort_by")
+        sort_order = (filters.get("sort_order") or "asc").lower()
+        sort_map = {
+            "name": Candidate.name,
+            "total_experience": Candidate.total_experience,
+            "created_at": Resume.created_at,
+            "updated_at": Resume.updated_at
+        }
+
+        if sort_by in sort_map:
+            sort_col = sort_map[sort_by]
+            query = query.order_by(sort_col.desc() if sort_order == "desc" else sort_col.asc())
+
+        # Pagination
+        page = int(filters.get("page", 1) or 1)
+        page_size = int(filters.get("page_size", 10) or 10)
+        if page < 1:
+            page = 1
+        if page_size < 1:
+            page_size = 20
+
+        query = query.offset((page - 1) * page_size).limit(page_size)
+
+        orm_resumes = db.execute(query).unique().scalars().all()
+
+        results = []
+        for r in orm_resumes:
+            candidate = r.canditate
+            if candidate:
+                candidate_id = str(candidate.candidate_id)
+                name = candidate.name
+                email = candidate.email_address or ""
+                phone_number = candidate.phone_number or ""
+                location = candidate.location or ""
+                total_experience = candidate.total_experience or 0
+                
+                # Fetch education
+                educations = db.query(CandidateEducation, Education).join(Education).filter(CandidateEducation.candidate_id == candidate.candidate_id).all()
+                education_list = [
+                    {
+                        "education_id": str(ce.education_id),
+                        "education": e.education,
+                        "institution": ce.institution or "",
+                        "percentage": float(ce.percentage) if ce.percentage else None,
+                        "year_of_passed": ce.year_of_passed
+                    }
+                    for ce, e in educations
+                ]
+                
+                # Fetch skills
+                skills = db.query(CandidateSkills, Skill).join(Skill).filter(CandidateSkills.candidate_id == candidate.candidate_id).all()
+                skills_list = [
+                    {
+                        "skill_id": str(cs.skill_id),
+                        "skill": s.skill
+                    }
+                    for cs, s in skills
+                ]
+                
+                # Fetch work experience
+                work_exps = db.query(WorkExperience, Role, Company).join(Role).join(Company).filter(WorkExperience.candidate_id == candidate.candidate_id).all()
+                work_experience_list = [
+                    {
+                        "role_id": str(we.role_id),
+                        "role": r.role,
+                        "company_name": c.company_name,
+                        "company_location": c.company_location or "",
+                        "start_date": str(we.start_date) if we.start_date else None,
+                        "end_date": str(we.end_date) if we.end_date else None,
+                        "is_present": we.end_date is None
+                    }
+                    for we, r, c in work_exps
+                ]
+                
+                results.append({
+                    "candidate_id": candidate_id,
+                    "name": name,
+                    "email": email,
+                    "phone_number": phone_number,
+                    "location": location,
+                    "total_experience": total_experience,
+                    "education": education_list,
+                    "skills": skills_list,
+                    "work_experience": work_experience_list
+                })
         
-        results = db.execute(query).unique().scalars().all()
+        results.append({"total_record": total_count})
         return results
     finally:
         db.close()
