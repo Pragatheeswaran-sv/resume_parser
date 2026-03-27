@@ -25,7 +25,7 @@ router = APIRouter(
 @router.post("/filter_resumes")
 def filter_resumes(filters: dict)-> List[Dict[str, Any]]:
     """
-    Filter or search resumes stored in the database.
+    Filter or search resumes stored in the database with pagination support.
 
     This endpoint supports two types of search:
 
@@ -37,13 +37,19 @@ def filter_resumes(filters: dict)-> List[Dict[str, Any]]:
     2. **Structured Filter Search**
        - If `query` is NOT provided.
        - Filters resumes based on fields such as:
+         - skills (UUID list)
+         - education (UUID list)
+         - roles (UUID list)
+         - min_experience / max_experience
+         - passout_start_year / passout_end_year
+         - percentage
+         - companies
          - name
          - file_name
-         - experience_min
-         - experience_max
-         - skills
-         - companies
-         - education
+
+    Query Parameters:
+        - page (int, default=1): Page number for pagination
+        - page_size (int, default=20): Number of records per page
 
     Request Body Examples:
 
@@ -58,28 +64,61 @@ def filter_resumes(filters: dict)-> List[Dict[str, Any]]:
     **Structured Filter Search**
     ```json
     {
-        "name": "John",
-        "experience_min": 3,
-        "skills": ["Python", "FastAPI"],
-        "companies": ["Infosys"],
-        "education": ["B.Tech"]
+        "skills": ["uuid", "uuid"],
+        "education": ["uuid"],
+        "roles": ["uuid"],
+        "min_experience": "3",
+        "max_experience": "5",
+        "passout_start_year": "2020",
+        "passout_end_year": "2023",
+        "percentage": "80",
+        "sort_by": "total_experience",
+        "sort_order": "desc"
     }
     ```
 
     Returns:
-        list[dict]: List of matching resumes.
+        list[dict]: List of matching candidate resumes with pagination info.
 
     Example Response:
     ```json
     [
         {
-            "id": 1,
-            "file_name": "john_resume.pdf",
+            "candidate_id": "uuid",
             "name": "John Doe",
+            "email": "john@example.com",
+            "phone_number": "1234567890",
+            "location": "New York",
             "total_experience": 5,
-            "skills": ["Python", "FastAPI", "PostgreSQL"],
-            "companies": ["Infosys"],
-            "education": ["B.Tech Computer Science"]
+            "education": [
+                {
+                    "education_id": "uuid",
+                    "education": "B.Tech",
+                    "institution": "MIT",
+                    "percentage": 8.5,
+                    "year_of_passed": 2020
+                }
+            ],
+            "skills": [
+                {
+                    "skill_id": "uuid",
+                    "skill": "Python"
+                }
+            ],
+            "work_experience": [
+                {
+                    "role_id": "uuid",
+                    "role": "Senior Developer",
+                    "company_name": "TechCorp",
+                    "company_location": "New York",
+                    "start_date": "2020-01-15",
+                    "end_date": null,
+                    "is_present": true
+                }
+            ]
+        },
+        {
+            "total_record": 150
         }
     ]
     ```
