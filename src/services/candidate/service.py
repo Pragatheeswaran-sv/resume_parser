@@ -14,27 +14,19 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 db = SessionLocal()
 
-def candidate_datails():
+def candidate_datails(page):
     try:
         details = []
-        # candidate_details = db.query(func.json_build_object(
-        #     "name",
-        #     Candidate.name,
-        #     "email",
-        #     Candidate.email_address,
-        #     "phone_number",
-        #     Candidate.phone_number,
-        #     "location",
-        #     Candidate.location,
-        #     "total_experience",
-        #     Candidate.total_experience
-        # )).select_from(Candidate)
+
+        per_page = 10
+        offset = (int(page) - 1) * per_page
 
         candidate_education = (
             db.query(
                 CandidateEducation.candidate_id.label("candidate_id"),
                 func.json_agg(
                     func.json_build_object(
+                        "education_id", Education.education_id,
                         "education", Education.education,
                         "institution", CandidateEducation.institution,
                         "percentage", CandidateEducation.percentage,
@@ -47,13 +39,13 @@ def candidate_datails():
             .group_by(CandidateEducation.candidate_id)
             .subquery()
         )
-        print(candidate_education)
 
         candidate_skills = (
             db.query(
                 CandidateSkills.candidate_id.label("candidate_id"),
                 func.json_agg(
                     func.json_build_object(
+                        "skill_id", Skill.skill_id,
                         "skill", Skill.skill
                     )
                 ).label("skills")
@@ -69,6 +61,7 @@ def candidate_datails():
                 WorkExperience.candidate_id.label("candidate_id"),
                 func.json_agg(
                     func.json_build_object(
+                        "role_id", Role.role_id,
                         "role", Role.role,
                         "company_name", Company.company_name,
                         "company_location", Company.company_location,
@@ -84,17 +77,7 @@ def candidate_datails():
             .group_by(WorkExperience.candidate_id)
             .subquery()
         )
-        
-        # candidate_prev_company =  db.query(func.json_build_object(
-        #     "company_name",
-        #     Company.company_name,
-        #     "Company_location",
-        #     Company.company_location
-        # )).select_from(Company).join(WorkExperience, Company.company_id == WorkExperience.company_id
-        #     ).join(
-        #         Candidate, WorkExperience.candidate_id == Candidate.candidate_id
-        #     ).all()
-        
+       
         data = (
             db.query(
                 func.json_build_object(
@@ -114,12 +97,28 @@ def candidate_datails():
             .outerjoin(candidate_skills, Candidate.candidate_id == candidate_skills.c.candidate_id)
             .outerjoin(candidate_work_exp, Candidate.candidate_id == candidate_work_exp.c.candidate_id)
             .filter(Candidate.is_active == True)
-            .all()
+            .limit(per_page).offset(offset)
         )
+
+        total_count = (
+            db.query(func.count(Candidate.candidate_id))
+            .filter(Candidate.is_active == True)
+            .scalar()
+        )
+
+        if not data:
+            return {"message": "Candidates not found"}
+        
         
         for info in data:
-            print(info.candidate_info)
-            details[info] = info.candidate_info
+            detail_dict = {}
+            for key in info.candidate_info:
+                detail_dict[key] = info.candidate_info[key]
+            details.append(detail_dict)
+
+        total ={}
+        total['total_record'] = total_count
+        details.append(total)
 
         return details
 
