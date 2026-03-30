@@ -14,7 +14,7 @@ from langchain_community.vectorstores import FAISS
 from db.connection import SessionLocal
 from src.resume_filter.models import Resume
 from sqlalchemy import select, and_, cast, String, text, func
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import aliased, joinedload
 from src.email_reader.models import EmailLogs, Attachment
 from src.candidate.models import (
 	Candidate, CandidateSkills, CandidateEducation, 
@@ -522,14 +522,15 @@ def search_resumes(filters: dict):
     
     db = SessionLocal()
     try:
-        query = select(Resume).options(
+        candidate_alias = aliased(Candidate)
+        query = select(Resume).join(candidate_alias, Resume.canditate, isouter=True).options(
             joinedload(Resume.canditate)
         )
         conditions = []
 
         name = filters.get("name")
         if name:
-            conditions.append(Candidate.name.ilike(f"%{name}%"))
+            conditions.append(candidate_alias.name.ilike(f"%{name}%"))
 
         exp_min = filters.get("min_experience") if filters.get("min_experience") is not None else filters.get("experience_min")
         if exp_min is not None and exp_min != "":
@@ -619,8 +620,8 @@ def search_resumes(filters: dict):
         sort_by = filters.get("sort_by")
         sort_order = (filters.get("sort_order") or "asc").lower()
         sort_map = {
-            "name": Candidate.name,
-            "total_experience": Candidate.total_experience,
+            "name": candidate_alias.name,
+            "total_experience": candidate_alias.total_experience,
             "created_at": Resume.created_at,
             "updated_at": Resume.updated_at
         }
