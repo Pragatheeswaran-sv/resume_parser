@@ -57,18 +57,18 @@ def candidate_info(page, sort_by, sort_type):
             }
         )
 
-@router.get('/sort')
-def sort_candidate(page, sort_by, sort_type):
-    try:
-        return sort(page, sort_by, sort_type)
-    except Exception as e:
-        logger.error(f"ERROR in candidate: {str(e)}")
+# @router.get('/sort')
+# def sort_candidate(page, sort_by, sort_type):
+#     try:
+#         return sort(page, sort_by, sort_type)
+#     except Exception as e:
+#         logger.error(f"ERROR in candidate: {str(e)}")
 
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={
-                "status": "error",
-                "message": "Failed to get candidate information",
-                "error": str(e)
-            }
-        )
+#         raise HTTPException(
+#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             detail={
+#                 "status": "error",
+#                 "message": "Failed to get candidate information",
+#                 "error": str(e)
+#             }
+#         )
