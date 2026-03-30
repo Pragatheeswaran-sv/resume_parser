@@ -1,5 +1,6 @@
 import imaplib
 import email
+from email.utils import parseaddr
 from src.email_reader.models import EmailVersion, EmailLogs, Attachment
 from db.connection import SessionLocal
 import os
@@ -35,9 +36,21 @@ def save_attachment(part, message_id):
 
     if not os.path.exists(attachment_dir):
         os.makedirs(attachment_dir)
+
     filename = part.get_filename()
-    ext = filename.split(".")[-1]
-    unique_name = f"{message_id}_{uuid.uuid4()}.{ext}"
+    if not filename:
+        ext = part.get_content_subtype() or "bin"
+        filename = f"{message_id}_{uuid.uuid4()}.{ext}"
+
+    # Keep the original filename, but avoid path traversal and collisions.
+    filename = os.path.basename(filename).strip().replace("/", "_").replace("\\", "_")
+    base_name, ext = os.path.splitext(filename)
+    unique_name = filename
+    counter = 0
+    while os.path.exists(os.path.join(attachment_dir, unique_name)):
+        counter += 1
+        unique_name = f"{base_name}_{counter}{ext}"
+
     path = os.path.join(attachment_dir, unique_name)
     with open(path, "wb") as f:
         f.write(part.get_payload(decode=True))
@@ -171,13 +184,14 @@ def  fetch_emails() -> dict:
         msg = email.message_from_bytes(raw_email)
         message_id = msg.get("Message-ID")
         subject = msg.get("Subject")
-        sender = msg.get("From")
+        sender_header = msg.get("From")
+        sender_address = parseaddr(sender_header or "")[1] or sender_header
 
         email_obj = EmailLogs(
             message_id=message_id,
             uid=uid,
             subject=subject,
-            sender=sender
+            sender=sender_address
         )
         db.add(email_obj)
         db.commit()
