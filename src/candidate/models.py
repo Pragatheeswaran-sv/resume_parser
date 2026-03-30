@@ -14,6 +14,7 @@ class Candidate(Base):
     candidate_id = Column(UUID, primary_key= True, default= uuid.uuid4)
     name = Column(Text)
     email_address = Column(String(255), nullable=True)
+    email_from_sender = Column(Boolean, default=False)
     phone_number = Column(String(20), nullable=True)
     location = Column(String(255), nullable=True)
     total_experience = Column(Integer)

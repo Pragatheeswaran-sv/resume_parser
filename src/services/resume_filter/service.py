@@ -6,6 +6,7 @@ from uuid import UUID
 import datetime as dt
 import ollama
 from dotenv import load_dotenv
+from email.utils import parseaddr
 from pypdf import PdfReader
 from docx import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -40,6 +41,11 @@ def normalize_experience(exp_value) -> int:
 
     return 0
 
+def parse_email_address(sender: str) -> str:
+    name, addr = parseaddr(sender or "")
+    return addr.strip().lower()
+
+
 def save_resumes_to_db(resumes):
     """Save extracted resume info to PostgreSQL database with normalized schema."""
     
@@ -53,14 +59,21 @@ def save_resumes_to_db(resumes):
             raw_text = r["text"]
             info = r["info"]            
             attachment_id = r.get("attachment_id")
+            sender_email = parse_email_address(r.get("sender_email", ""))
             logger.info(f'NAV----> the info extracted {info}')
+
+            info_email = (info.get("email") or "").strip().lower()
+            if not info_email and sender_email:
+                logger.info(f'NAV----> using sender email fallback: {sender_email}')
+                info_email = sender_email
+                info["email"] = sender_email
+
             vector = embedding_model.embed_query(raw_text)
-            logger.info(f'NAV----> the email {info.get("email")}...')
-            # Check for existing candidate by email/phone to avoid duplicates
+
             existing_candidate = None
-            if info.get("email"):
+            if info_email:
                 existing_candidate = db.query(Candidate).filter(
-                    Candidate.email_address == info.get("email")
+                    Candidate.email_address == info_email
                 ).first()
             if not existing_candidate and info.get("phone_number"):
                 existing_candidate = db.query(Candidate).filter(
@@ -69,11 +82,16 @@ def save_resumes_to_db(resumes):
 
             if existing_candidate:
                 candidate = existing_candidate
+                if not candidate.email_address and sender_email:
+                    candidate.email_address = sender_email
+                    candidate.email_from_sender = True
+                    db.add(candidate)
                 logger.info(f'Using existing candidate: {candidate.candidate_id}')
             else:
                 candidate = Candidate(
                     name=info.get("name", ""),
-                    email_address=info.get("email", ""),
+                    email_address=info_email or sender_email or "",
+                    email_from_sender=bool(sender_email and not info_email),
                     phone_number=info.get("phone_number", ""),
                     location=info.get("location", ""),
                     total_experience=normalize_experience(info.get("total_experience")),
@@ -486,15 +504,17 @@ def process_resumes(email_id: UUID) -> dict:
         Attachment.email_id == email_obj.email_id,
         Attachment.is_resume == True
     ).all()
-
+    logger.info("NAV----> the attachments fetched successfully")
     results = []
 
     for att in attachments:
         file_path = f"attachments/{att.file_name}"
         if file_path.endswith(".pdf"):
             text = extract_text_from_pdf(file_path)
+            logger.info(f"NAV----> the text extracted from pdf {text[:100]}...")
         elif file_path.endswith(".docx"):
             text = extract_text_from_docx(file_path)
+            logger.info(f"NAV----> the text extracted from docx {text[:100]}...")
         else:
             continue
 
@@ -507,9 +527,10 @@ def process_resumes(email_id: UUID) -> dict:
             results.append({
                 "info": info,
                 "text": text,
-                "attachment_id": att.attachment_id
+                "attachment_id": att.attachment_id,
+                "sender_email": parse_email_address(email_obj.sender)
             })
-
+        logger.info("NAV----> the info extracted successfully")
     if results:
         # save_to_faiss(results)
         logger.info(f"NACV----> This result section executed {results}")
