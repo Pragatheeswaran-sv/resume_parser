@@ -133,23 +133,23 @@ def candidate_datails(page, sort_by, sort_type):
         
         elif sort_by == 'name':
             if sort_type == 'desc':
-                return sort_by_name(db, sort_type, candidate_education, candidate_skills, candidate_work_exp, per_page,offset)
-            return sort_by_name(db, sort_type, candidate_education, candidate_skills, candidate_work_exp, per_page,offset)
+                return sort_by_name(db, sort_type, candidate_education, candidate_skills, candidate_work_exp, per_page,offset, total_count)
+            return sort_by_name(db, sort_type, candidate_education, candidate_skills, candidate_work_exp, per_page,offset, total_count)
         
         elif sort_by == 'experience':
             if sort_type == 'desc':
-                return sort_by_experience(db, sort_type, candidate_education, candidate_skills, candidate_work_exp, per_page,offset)
-            return sort_by_experience(db, sort_type, candidate_education, candidate_skills, candidate_work_exp, per_page,offset)
+                return sort_by_experience(db, sort_type, candidate_education, candidate_skills, candidate_work_exp, per_page,offset, total_count)
+            return sort_by_experience(db, sort_type, candidate_education, candidate_skills, candidate_work_exp, per_page,offset, total_count)
         
         elif sort_by == 'year':
             if sort_type == 'desc':
-                return sort_by_year(db, sort_type, candidate_skills, candidate_work_exp, per_page,offset)
-            return sort_by_year(db, sort_type, candidate_skills, candidate_work_exp, per_page,offset)
+                return sort_by_year(db, sort_type, candidate_skills, candidate_work_exp, per_page,offset, total_count)
+            return sort_by_year(db, sort_type, candidate_skills, candidate_work_exp, per_page,offset, total_count)
 
         elif sort_by == 'percentage':
             if sort_type == 'desc':
-                return sort_by_percentage(db, sort_type, candidate_education, candidate_skills, candidate_work_exp, per_page,offset)
-            return sort_by_percentage(db, sort_type, candidate_education, candidate_skills, candidate_work_exp, per_page,offset)
+                return sort_by_percentage(db, sort_type, candidate_education, candidate_skills, candidate_work_exp, per_page,offset, total_count)
+            return sort_by_percentage(db, sort_type, candidate_education, candidate_skills, candidate_work_exp, per_page,offset, total_count)
         
         else:
             return JSONResponse(
@@ -173,7 +173,7 @@ def candidate_datails(page, sort_by, sort_type):
         db.close()
 
 
-def sort_by_name(db, sort_type, candidate_education, candidate_skills, candidate_work_exp, per_page,offset):
+def sort_by_name(db, sort_type, candidate_education, candidate_skills, candidate_work_exp, per_page,offset, total_count):
     if sort_type == 'desc':
         data = (
             db.query(
@@ -203,6 +203,9 @@ def sort_by_name(db, sort_type, candidate_education, candidate_skills, candidate
             return valid
         
         candidate_names_desc = [row.candidate_info for row in data]
+        total ={}
+        total['total_record'] = total_count
+        candidate_names_desc.append(total)
         return candidate_names_desc
     
     data = (
@@ -231,12 +234,14 @@ def sort_by_name(db, sort_type, candidate_education, candidate_skills, candidate
     valid = validate_data(data)
     if valid != None:
         return valid
-    
     candidate_names_asc = [row.candidate_info for row in data]
+    total ={}
+    total['total_record'] = total_count
+    candidate_names_asc.append(total)
     return candidate_names_asc
 
 
-def sort_by_experience(db, sort_type, candidate_education, candidate_skills, candidate_work_exp, per_page,offset):
+def sort_by_experience(db, sort_type, candidate_education, candidate_skills, candidate_work_exp, per_page,offset, total_count):
     if sort_type == 'desc':
         data = (
             db.query(
@@ -264,8 +269,11 @@ def sort_by_experience(db, sort_type, candidate_education, candidate_skills, can
         valid = validate_data(data)
         if valid != None:
             return valid
-
+        
         candidate_experience_desc = [row.candidate_info for row in data]
+        total ={}
+        total['total_record'] = total_count
+        candidate_experience_desc.append(total)
         return candidate_experience_desc
     
     data = (
@@ -294,11 +302,14 @@ def sort_by_experience(db, sort_type, candidate_education, candidate_skills, can
     valid = validate_data(data)
     if valid != None:
         return valid
-
+    
     candidate_experience_asc = [row.candidate_info for row in data]
+    total ={}
+    total['total_record'] = total_count
+    candidate_experience_asc.append(total)
     return candidate_experience_asc
 
-def sort_by_year(db, sort_type, candidate_skills, candidate_work_exp, per_page,offset):
+def sort_by_year(db, sort_type, candidate_skills, candidate_work_exp, per_page,offset, total_count):
     if sort_type == 'desc':
 
         passout_year_dec = (
@@ -354,6 +365,9 @@ def sort_by_year(db, sort_type, candidate_skills, candidate_work_exp, per_page,o
             return valid
         
         candidate_passout_year_dec = [row.candidate_info for row in data]
+        total ={}
+        total['total_record'] = total_count
+        candidate_passout_year_dec.append(total)
         return candidate_passout_year_dec
     
     passout_year_asc = (
@@ -409,9 +423,12 @@ def sort_by_year(db, sort_type, candidate_skills, candidate_work_exp, per_page,o
         return valid
     
     candidate_passout_year_asc = [row.candidate_info for row in data]
+    total ={}
+    total['total_record'] = total_count
+    candidate_passout_year_asc.append(total)
     return candidate_passout_year_asc
 
-def sort_by_percentage(db, sort_type, candidate_education, candidate_skills, candidate_work_exp, per_page,offset):
+def sort_by_percentage(db, sort_type, candidate_education, candidate_skills, candidate_work_exp, per_page,offset, total_count):
     if sort_type == 'desc':
 
         percentage_sort_desc = (
@@ -454,6 +471,9 @@ def sort_by_percentage(db, sort_type, candidate_education, candidate_skills, can
             return valid
 
         candidate_percentage_sort_desc = [row.candidate_info for row in data]
+        total ={}
+        total['total_record'] = total_count
+        candidate_percentage_sort_desc.append(total)
         return candidate_percentage_sort_desc     
 
     percentage_sort_asc = (
@@ -496,6 +516,9 @@ def sort_by_percentage(db, sort_type, candidate_education, candidate_skills, can
         return valid
     
     candidate_percentage_sort_asc = [row.candidate_info for row in data]
+    total ={}
+    total['total_record'] = total_count
+    candidate_percentage_sort_asc.append(total)
     return candidate_percentage_sort_asc
 
 def validate_data(data):

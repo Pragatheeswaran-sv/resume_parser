@@ -50,7 +50,7 @@ class CandidateEducation(Base):
     is_active = Column(Boolean, default = True)
 
 
-    canditate = relationship("Candidate")
+    candidate = relationship("Candidate")
     education = relationship("Education")
 
 

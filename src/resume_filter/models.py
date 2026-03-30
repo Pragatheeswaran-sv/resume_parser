@@ -27,4 +27,4 @@ class Resume(Base):
     is_active = Column(Boolean, default = True)
     
     attachment = relationship("Attachment")
-    canditate = relationship("Candidate")
+    candidate = relationship("Candidate")

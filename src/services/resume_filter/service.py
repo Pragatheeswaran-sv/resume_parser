@@ -81,6 +81,7 @@ def save_resumes_to_db(resumes):
                 )
                 db.add(candidate)
                 db.flush()
+                logger.info("NAV----> candidate added to db")
             
             # Add skills
             skills_list = info.get("skills", [])
@@ -101,7 +102,7 @@ def save_resumes_to_db(resumes):
                             )
                             db.add(skill)
                             db.flush()
-                        
+                            logger.info("NAV----> new skills added to db")
                         # Check if already linked
                         existing_link = db.query(CandidateSkills).filter(
                             CandidateSkills.candidate_id == candidate.candidate_id,
@@ -115,7 +116,7 @@ def save_resumes_to_db(resumes):
                                 created_by="resume_parser"
                             )
                             db.add(candidate_skill)
-            
+                            logger.info("NAV----> candidate skills added to db")
             # Add education from new structure (objects with qualification, institution, percentage, passout_year)
             education_list = info.get("education", [])
             logger.info(f'NAV----> the education {education_list}...')
@@ -140,6 +141,7 @@ def save_resumes_to_db(resumes):
                                 )
                                 db.add(education_type)
                                 db.flush()
+                                logger.info("NAV----> new education added to db")
                             
                             # Parse passout_year to integer
                             try:
@@ -169,6 +171,7 @@ def save_resumes_to_db(resumes):
                                     created_by="resume_parser"
                                 )
                                 db.add(candidate_edu)
+                                logger.info("NAV----> candidate education added to db")
             
             # Add work experience from new structure (objects with company_name, role, start_date, end_date)
             work_experience_list = info.get("work_experience", [])
@@ -195,6 +198,7 @@ def save_resumes_to_db(resumes):
                                 )
                                 db.add(company)
                                 db.flush()
+                                logger.info("NAV----> new company added to db")
                             
                             # Get or create role
                             role = db.query(Role).filter(
@@ -208,7 +212,7 @@ def save_resumes_to_db(resumes):
                                 )
                                 db.add(role)
                                 db.flush()
-                            
+                                logger.info("NAV----> new role added to db")
                             # Parse dates (YYYY-MM or YYYY format)
                             start_dt = None
                             end_dt = None
@@ -248,6 +252,7 @@ def save_resumes_to_db(resumes):
                                 created_by="resume_parser"
                             )
                             db.add(work_exp)
+                            logger.info("NAV----> candidate experience added to db")
             
             # Create Resume record linking to candidate and attachment
             resume_record = Resume(
