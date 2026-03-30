@@ -23,9 +23,9 @@ router = APIRouter(
 )
 
 @router.post("/filter_resumes")
-def filter_resumes(filters: dict)-> List[Dict[str, Any]]:
+def filter_resumes(filters: dict, page: int = 1, page_size: int = 20)-> List[Dict[str, Any]]:
     """
-    Filter or search resumes stored in the database.
+    Filter or search resumes stored in the database with pagination support.
 
     This endpoint supports two types of search:
 
@@ -37,13 +37,19 @@ def filter_resumes(filters: dict)-> List[Dict[str, Any]]:
     2. **Structured Filter Search**
        - If `query` is NOT provided.
        - Filters resumes based on fields such as:
+         - skills (UUID list)
+         - education (UUID list)
+         - roles (UUID list)
+         - min_experience / max_experience
+         - passout_start_year / passout_end_year
+         - percentage
+         - companies
          - name
          - file_name
-         - experience_min
-         - experience_max
-         - skills
-         - companies
-         - education
+
+    Query Parameters:
+        - page (int, default=1): Page number for pagination
+        - page_size (int, default=20): Number of records per page
 
     Request Body Examples:
 
@@ -58,28 +64,61 @@ def filter_resumes(filters: dict)-> List[Dict[str, Any]]:
     **Structured Filter Search**
     ```json
     {
-        "name": "John",
-        "experience_min": 3,
-        "skills": ["Python", "FastAPI"],
-        "companies": ["Infosys"],
-        "education": ["B.Tech"]
+        "skills": ["uuid", "uuid"],
+        "education": ["uuid"],
+        "roles": ["uuid"],
+        "min_experience": "3",
+        "max_experience": "5",
+        "passout_start_year": "2020",
+        "passout_end_year": "2023",
+        "percentage": "80",
+        "sort_by": "total_experience",
+        "sort_order": "desc"
     }
     ```
 
     Returns:
-        list[dict]: List of matching resumes.
+        list[dict]: List of matching candidate resumes with pagination info.
 
     Example Response:
     ```json
     [
         {
-            "id": 1,
-            "file_name": "john_resume.pdf",
+            "candidate_id": "uuid",
             "name": "John Doe",
+            "email": "john@example.com",
+            "phone_number": "1234567890",
+            "location": "New York",
             "total_experience": 5,
-            "skills": ["Python", "FastAPI", "PostgreSQL"],
-            "companies": ["Infosys"],
-            "education": ["B.Tech Computer Science"]
+            "education": [
+                {
+                    "education_id": "uuid",
+                    "education": "B.Tech",
+                    "institution": "MIT",
+                    "percentage": 8.5,
+                    "year_of_passed": 2020
+                }
+            ],
+            "skills": [
+                {
+                    "skill_id": "uuid",
+                    "skill": "Python"
+                }
+            ],
+            "work_experience": [
+                {
+                    "role_id": "uuid",
+                    "role": "Senior Developer",
+                    "company_name": "TechCorp",
+                    "company_location": "New York",
+                    "start_date": "2020-01-15",
+                    "end_date": null,
+                    "is_present": true
+                }
+            ]
+        },
+        {
+            "total_record": 150
         }
     ]
     ```
@@ -87,40 +126,27 @@ def filter_resumes(filters: dict)-> List[Dict[str, Any]]:
     try:
         logger.info("this section executed")
         rows = []
-        if 'query' in filters :
+        if 'query' in filters and filters.get("query"):
             query = filters.get("query")
-            if not query:
-                raise HTTPException(status_code=400, detail="Query cannot be empty")
             top_k = filters.get("limit", 1)
             rows = semantic_search_resumes(query, top_k)
         else:
-            filters = ResumeFilterRequest()
-            filters = filters.model_dump()
-            logger.info(f"this if section executed{filters}")
-            rows = search_resumes(filters)
+            # Accept the standard filter model with IDs and range filters.
+            try:
+                parsed_filters = ResumeFilterRequest(**filters).model_dump()
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Invalid filter payload: {e}")
+
+            # Add pagination parameters
+            parsed_filters["page"] = page
+            parsed_filters["page_size"] = page_size
+
+            logger.info(f"this if section executed {parsed_filters}")
+            rows = search_resumes(parsed_filters)
             logger.info(f'Rows----> {rows}')
         logger.info(f"NAV---> the source {rows}")
-        result = [
-            {
-                "id": r.id,
-                "file_name": r.file_name,
-                "name": r.name,
-                "total_experience": float(r.total_experience),
-                "skills": r.skills,
-                "companies": r.companies,
-                "education": r.education,
-            }
-            for r in rows
-        ]
 
-        return JSONResponse(
-            status_code=status.HTTP_200_OK,
-            content={
-                "status": "success",
-                "count": len(result),
-                "data": result
-            }
-        )
+        return rows
 
     except Exception as e:
         logger.error(f"ERROR in filter_resumes: {str(e)}")
@@ -144,11 +170,11 @@ def semantic_search(body: dict):
 
     return [
         {
-            "id": r.id,
-            "name": r.name,
-            "file_name": r.file_name,
-            "experience": float(r.total_experience),
-            "skills": r.skills
+            "id": r.get("resume_id", ""),
+            "name": r.get("name"),
+            "file_name": r.get("file_name"),
+            "experience": r.get("total_experience", 0.0),
+            "skills": r.get("skills", [])
         }
         for r in results
     ]
