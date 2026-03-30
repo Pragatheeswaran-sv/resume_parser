@@ -511,8 +511,10 @@ def process_resumes(email_id: UUID) -> dict:
         file_path = f"attachments/{att.file_name}"
         if file_path.endswith(".pdf"):
             text = extract_text_from_pdf(file_path)
+            logger.info(f"NAV----> the text extracted from pdf {text[:100]}...")
         elif file_path.endswith(".docx"):
             text = extract_text_from_docx(file_path)
+            logger.info(f"NAV----> the text extracted from docx {text[:100]}...")
         else:
             continue
 
@@ -528,7 +530,7 @@ def process_resumes(email_id: UUID) -> dict:
                 "attachment_id": att.attachment_id,
                 "sender_email": parse_email_address(email_obj.sender)
             })
-
+        logger.info("NAV----> the info extracted successfully")
     if results:
         # save_to_faiss(results)
         logger.info(f"NACV----> This result section executed {results}")
