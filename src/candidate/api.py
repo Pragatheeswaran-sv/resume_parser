@@ -1,5 +1,3 @@
-import os
-import json
 import logging
 from dotenv import load_dotenv
 from fastapi import APIRouter
@@ -9,6 +7,7 @@ from typing import List, Dict, Any
 from src.celery.celery_app import celery
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import JSONResponse
+
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -22,8 +21,8 @@ router = APIRouter(
 	},
 )
 
-@router.get('/candidate_info/')
-def candidate_info(page):
+@router.get('/candidates')
+def candidate_info(page, sort_by, sort_type):
     """
         Get Candidate Details
 
@@ -45,7 +44,7 @@ def candidate_info(page):
             HTTPException: If candidate data retrieval fails.
     """
     try:
-        return candidate_datails(page)
+        return candidate_datails(page, sort_by, sort_type)
     except Exception as e:
         logger.error(f"ERROR in candidate: {str(e)}")
 
@@ -57,3 +56,19 @@ def candidate_info(page):
                 "error": str(e)
             }
         )
+
+# @router.get('/sort')
+# def sort_candidate(page, sort_by, sort_type):
+#     try:
+#         return sort(page, sort_by, sort_type)
+#     except Exception as e:
+#         logger.error(f"ERROR in candidate: {str(e)}")
+
+#         raise HTTPException(
+#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             detail={
+#                 "status": "error",
+#                 "message": "Failed to get candidate information",
+#                 "error": str(e)
+#             }
+#         )

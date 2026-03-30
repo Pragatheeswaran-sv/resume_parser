@@ -1,25 +1,23 @@
-import os
-import re
-import json
 import logging
+from fastapi.responses import JSONResponse
 import ollama
 from dotenv import load_dotenv
 from db.connection import SessionLocal
-from src.resume_filter.models import Resume
-from sqlalchemy import func, select, and_, cast, String, text
-from sqlalchemy.dialects.postgresql import JSON
+from sqlalchemy import func, cast
+from sqlalchemy.dialects.postgresql import JSON, aggregate_order_by
 from src.candidate.models import Candidate, CandidateSkills, Skill, CandidateEducation, Education, Role, WorkExperience, Company
 
 load_dotenv()
 logger = logging.getLogger(__name__)
-db = SessionLocal()
 
-def candidate_datails(page):
+def candidate_datails(page, sort_by, sort_type):
     try:
+        db = SessionLocal()
         details = []
 
         per_page = 10
         offset = (int(page) - 1) * per_page
+        print(offset)
 
         candidate_education = (
             db.query(
@@ -39,6 +37,7 @@ def candidate_datails(page):
             .group_by(CandidateEducation.candidate_id)
             .subquery()
         )
+
 
         candidate_skills = (
             db.query(
@@ -77,7 +76,105 @@ def candidate_datails(page):
             .group_by(WorkExperience.candidate_id)
             .subquery()
         )
-       
+
+        total_count = (
+            db.query(func.count(Candidate.candidate_id))
+            .filter(Candidate.is_active == True)
+            .scalar()
+        )
+
+        if total_count < offset:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "status": False,
+                    "message": "Invalid page number"
+                }
+            )
+        
+        if sort_by == "None" and sort_type == "None":
+            data = (
+                db.query(
+                    func.json_build_object(
+                        "candidate_id", Candidate.candidate_id,
+                        "name", Candidate.name,
+                        "email", Candidate.email_address,
+                        "phone_number", Candidate.phone_number,
+                        "location", Candidate.location,
+                        "total_experience", Candidate.total_experience,
+                        "education", func.coalesce(candidate_education.c.education, cast('[]', JSON)),
+                        "skills", func.coalesce(candidate_skills.c.skills, cast('[]', JSON)),
+                        "work_experience", func.coalesce(candidate_work_exp.c.work_experience, cast('[]', JSON))
+                    ).label("candidate_info")
+                )
+                .select_from(Candidate)
+                .outerjoin(candidate_education, Candidate.candidate_id == candidate_education.c.candidate_id)
+                .outerjoin(candidate_skills, Candidate.candidate_id == candidate_skills.c.candidate_id)
+                .outerjoin(candidate_work_exp, Candidate.candidate_id == candidate_work_exp.c.candidate_id)
+                .filter(Candidate.is_active == True)
+                .limit(per_page).offset(offset)
+            )
+
+            valid = validate_data(data)
+            if valid != None:
+                return valid        
+            
+            for info in data:
+                detail_dict = {}
+                for key in info.candidate_info:
+                    detail_dict[key] = info.candidate_info[key]
+                details.append(detail_dict)
+
+            total ={}
+            total['total_record'] = total_count
+            details.append(total)
+
+            return details
+        
+        elif sort_by == 'name':
+            if sort_type == 'desc':
+                return sort_by_name(db, sort_type, candidate_education, candidate_skills, candidate_work_exp, per_page,offset)
+            return sort_by_name(db, sort_type, candidate_education, candidate_skills, candidate_work_exp, per_page,offset)
+        
+        elif sort_by == 'experience':
+            if sort_type == 'desc':
+                return sort_by_experience(db, sort_type, candidate_education, candidate_skills, candidate_work_exp, per_page,offset)
+            return sort_by_experience(db, sort_type, candidate_education, candidate_skills, candidate_work_exp, per_page,offset)
+        
+        elif sort_by == 'year':
+            if sort_type == 'desc':
+                return sort_by_year(db, sort_type, candidate_skills, candidate_work_exp, per_page,offset)
+            return sort_by_year(db, sort_type, candidate_skills, candidate_work_exp, per_page,offset)
+
+        elif sort_by == 'percentage':
+            if sort_type == 'desc':
+                return sort_by_percentage(db, sort_type, candidate_education, candidate_skills, candidate_work_exp, per_page,offset)
+            return sort_by_percentage(db, sort_type, candidate_education, candidate_skills, candidate_work_exp, per_page,offset)
+        
+        else:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "status": False,
+                    "message": "Invalid sorting operation"
+                }
+            )
+        
+    except Exception as e:
+        logger.info(f"[ERROR] in candidate fetch: {e}")
+        return JSONResponse(
+                status_code=404,
+                content={
+                    "status": False,
+                    "message": str(e)
+                }
+            )
+    finally:
+        db.close()
+
+
+def sort_by_name(db, sort_type, candidate_education, candidate_skills, candidate_work_exp, per_page,offset):
+    if sort_type == 'desc':
         data = (
             db.query(
                 func.json_build_object(
@@ -97,30 +194,317 @@ def candidate_datails(page):
             .outerjoin(candidate_skills, Candidate.candidate_id == candidate_skills.c.candidate_id)
             .outerjoin(candidate_work_exp, Candidate.candidate_id == candidate_work_exp.c.candidate_id)
             .filter(Candidate.is_active == True)
+            .order_by(Candidate.name.desc())
             .limit(per_page).offset(offset)
         )
 
-        total_count = (
-            db.query(func.count(Candidate.candidate_id))
+        valid = validate_data(data)
+        if valid != None:
+            return valid
+        
+        candidate_names_desc = [row.candidate_info for row in data]
+        return candidate_names_desc
+    
+    data = (
+            db.query(
+                func.json_build_object(
+                    "candidate_id", Candidate.candidate_id,
+                    "name", Candidate.name,
+                    "email", Candidate.email_address,
+                    "phone_number", Candidate.phone_number,
+                    "location", Candidate.location,
+                    "total_experience", Candidate.total_experience,
+                    "education", func.coalesce(candidate_education.c.education, cast('[]', JSON)),
+                    "skills", func.coalesce(candidate_skills.c.skills, cast('[]', JSON)),
+                    "work_experience", func.coalesce(candidate_work_exp.c.work_experience, cast('[]', JSON))
+                ).label("candidate_info")
+            )
+            .select_from(Candidate)
+            .outerjoin(candidate_education, Candidate.candidate_id == candidate_education.c.candidate_id)
+            .outerjoin(candidate_skills, Candidate.candidate_id == candidate_skills.c.candidate_id)
+            .outerjoin(candidate_work_exp, Candidate.candidate_id == candidate_work_exp.c.candidate_id)
             .filter(Candidate.is_active == True)
-            .scalar()
+            .order_by(Candidate.name.asc())
+            .limit(per_page).offset(offset)
+        )
+    
+    valid = validate_data(data)
+    if valid != None:
+        return valid
+    
+    candidate_names_asc = [row.candidate_info for row in data]
+    return candidate_names_asc
+
+
+def sort_by_experience(db, sort_type, candidate_education, candidate_skills, candidate_work_exp, per_page,offset):
+    if sort_type == 'desc':
+        data = (
+            db.query(
+                func.json_build_object(
+                    "candidate_id", Candidate.candidate_id,
+                    "name", Candidate.name,
+                    "email", Candidate.email_address,
+                    "phone_number", Candidate.phone_number,
+                    "location", Candidate.location,
+                    "total_experience", Candidate.total_experience,
+                    "education", func.coalesce(candidate_education.c.education, cast('[]', JSON)),
+                    "skills", func.coalesce(candidate_skills.c.skills, cast('[]', JSON)),
+                    "work_experience", func.coalesce(candidate_work_exp.c.work_experience, cast('[]', JSON))
+                ).label("candidate_info")
+            )
+            .select_from(Candidate)
+            .outerjoin(candidate_education, Candidate.candidate_id == candidate_education.c.candidate_id)
+            .outerjoin(candidate_skills, Candidate.candidate_id == candidate_skills.c.candidate_id)
+            .outerjoin(candidate_work_exp, Candidate.candidate_id == candidate_work_exp.c.candidate_id)
+            .filter(Candidate.is_active == True)
+            .order_by(Candidate.total_experience.desc())
+            .limit(per_page).offset(offset)
         )
 
-        if not data:
-            return {"message": "Candidates not found"}
+        valid = validate_data(data)
+        if valid != None:
+            return valid
+
+        candidate_experience_desc = [row.candidate_info for row in data]
+        return candidate_experience_desc
+    
+    data = (
+            db.query(
+                func.json_build_object(
+                    "candidate_id", Candidate.candidate_id,
+                    "name", Candidate.name,
+                    "email", Candidate.email_address,
+                    "phone_number", Candidate.phone_number,
+                    "location", Candidate.location,
+                    "total_experience", Candidate.total_experience,
+                    "education", func.coalesce(candidate_education.c.education, cast('[]', JSON)),
+                    "skills", func.coalesce(candidate_skills.c.skills, cast('[]', JSON)),
+                    "work_experience", func.coalesce(candidate_work_exp.c.work_experience, cast('[]', JSON))
+                ).label("candidate_info")
+            )
+            .select_from(Candidate)
+            .outerjoin(candidate_education, Candidate.candidate_id == candidate_education.c.candidate_id)
+            .outerjoin(candidate_skills, Candidate.candidate_id == candidate_skills.c.candidate_id)
+            .outerjoin(candidate_work_exp, Candidate.candidate_id == candidate_work_exp.c.candidate_id)
+            .filter(Candidate.is_active == True)
+            .order_by(Candidate.total_experience.asc())
+            .limit(per_page).offset(offset)
+        )
+    
+    valid = validate_data(data)
+    if valid != None:
+        return valid
+
+    candidate_experience_asc = [row.candidate_info for row in data]
+    return candidate_experience_asc
+
+def sort_by_year(db, sort_type, candidate_skills, candidate_work_exp, per_page,offset):
+    if sort_type == 'desc':
+
+        passout_year_dec = (
+            db.query(
+                CandidateEducation.candidate_id.label("candidate_id"),
+                func.max(CandidateEducation.year_of_passed).label("latest_year"),
+                func.json_agg(
+                    aggregate_order_by(
+                        func.json_build_object(
+                            "education_id", Education.education_id,
+                            "education", Education.education,
+                            "institution", CandidateEducation.institution,
+                            "percentage", CandidateEducation.percentage,
+                            "year_of_passed", CandidateEducation.year_of_passed
+                        ),
+                        CandidateEducation.year_of_passed.desc()
+                    )
+                ).label("education")
+            )
+            .join(Education, CandidateEducation.education_id == Education.education_id)
+            .filter(~func.lower(Education.education).in_(["sslc", "hse"]))
+            .group_by(CandidateEducation.candidate_id)
+            .subquery()
+        )
+
+        data = (
+            db.query(
+                func.json_build_object(
+                    "candidate_id", Candidate.candidate_id,
+                    "name", Candidate.name,
+                    "email", Candidate.email_address,
+                    "phone_number", Candidate.phone_number,
+                    "location", Candidate.location,
+                    "total_experience", Candidate.total_experience,
+                    "education", func.coalesce(passout_year_dec.c.education, cast('[]', JSON)),
+                    "skills", func.coalesce(candidate_skills.c.skills, cast('[]', JSON)),
+                    "work_experience", func.coalesce(candidate_work_exp.c.work_experience, cast('[]', JSON))
+                ).label("candidate_info")
+            )
+            .select_from(Candidate)
+            .outerjoin(passout_year_dec, Candidate.candidate_id == passout_year_dec.c.candidate_id)
+            .outerjoin(candidate_skills, Candidate.candidate_id == candidate_skills.c.candidate_id)
+            .outerjoin(candidate_work_exp, Candidate.candidate_id == candidate_work_exp.c.candidate_id)
+            .filter(Candidate.is_active == True)
+            .order_by(passout_year_dec.c.latest_year.desc())
+            .limit(per_page)
+            .offset(offset)
+            .all()
+        )
+
+        valid = validate_data(data)
+        if valid != None:
+            return valid
         
-        
-        for info in data:
-            detail_dict = {}
-            for key in info.candidate_info:
-                detail_dict[key] = info.candidate_info[key]
-            details.append(detail_dict)
+        candidate_passout_year_dec = [row.candidate_info for row in data]
+        return candidate_passout_year_dec
+    
+    passout_year_asc = (
+            db.query(
+                CandidateEducation.candidate_id.label("candidate_id"),
+                func.min(CandidateEducation.year_of_passed).label("latest_year"),
+                func.json_agg(
+                    aggregate_order_by(
+                        func.json_build_object(
+                            "education_id", Education.education_id,
+                            "education", Education.education,
+                            "institution", CandidateEducation.institution,
+                            "percentage", CandidateEducation.percentage,
+                            "year_of_passed", CandidateEducation.year_of_passed
+                        ),
+                        CandidateEducation.year_of_passed.asc()
+                    )
+                ).label("education")
+            )
+            .join(Education, CandidateEducation.education_id == Education.education_id)
+            .filter(~func.lower(Education.education).in_(["sslc", "hse"]))
+            .group_by(CandidateEducation.candidate_id)
+            .subquery()
+        )
 
-        total ={}
-        total['total_record'] = total_count
-        details.append(total)
+    data = (
+        db.query(
+            func.json_build_object(
+                "candidate_id", Candidate.candidate_id,
+                "name", Candidate.name,
+                "email", Candidate.email_address,
+                "phone_number", Candidate.phone_number,
+                "location", Candidate.location,
+                "total_experience", Candidate.total_experience,
+                "education", func.coalesce(passout_year_asc.c.education, cast('[]', JSON)),
+                "skills", func.coalesce(candidate_skills.c.skills, cast('[]', JSON)),
+                "work_experience", func.coalesce(candidate_work_exp.c.work_experience, cast('[]', JSON))
+            ).label("candidate_info")
+        )
+        .select_from(Candidate)
+        .outerjoin(passout_year_asc, Candidate.candidate_id == passout_year_asc.c.candidate_id)
+        .outerjoin(candidate_skills, Candidate.candidate_id == candidate_skills.c.candidate_id)
+        .outerjoin(candidate_work_exp, Candidate.candidate_id == candidate_work_exp.c.candidate_id)
+        .filter(Candidate.is_active == True)
+        .order_by(passout_year_asc.c.latest_year.asc())
+        .limit(per_page)
+        .offset(offset)
+        .all()
+    )
 
-        return details
+    valid = validate_data(data)
+    if valid != None:
+        return valid
+    
+    candidate_passout_year_asc = [row.candidate_info for row in data]
+    return candidate_passout_year_asc
 
-    except Exception as e:
-        logger.info(f"[ERROR] in candidate fetch: {e}")
+def sort_by_percentage(db, sort_type, candidate_education, candidate_skills, candidate_work_exp, per_page,offset):
+    if sort_type == 'desc':
+
+        percentage_sort_desc = (
+            db.query(
+                CandidateEducation.candidate_id.label("candidate_id"),
+                func.max(CandidateEducation.percentage).label("highest_percentage")
+            )
+            .group_by(CandidateEducation.candidate_id)
+            .subquery()
+        )
+
+        data = (
+            db.query(
+                func.json_build_object(
+                    "candidate_id", Candidate.candidate_id,
+                    "name", Candidate.name,
+                    "email", Candidate.email_address,
+                    "phone_number", Candidate.phone_number,
+                    "location", Candidate.location,
+                    "total_experience", Candidate.total_experience,
+                    "education", func.coalesce(candidate_education.c.education, cast('[]', JSON)),
+                    "skills", func.coalesce(candidate_skills.c.skills, cast('[]', JSON)),
+                    "work_experience", func.coalesce(candidate_work_exp.c.work_experience, cast('[]', JSON))
+                ).label("candidate_info")
+            )
+            .select_from(Candidate)
+            .outerjoin(candidate_education, Candidate.candidate_id == candidate_education.c.candidate_id)
+            .outerjoin(candidate_skills, Candidate.candidate_id == candidate_skills.c.candidate_id)
+            .outerjoin(candidate_work_exp, Candidate.candidate_id == candidate_work_exp.c.candidate_id)
+            .outerjoin(percentage_sort_desc, Candidate.candidate_id == percentage_sort_desc.c.candidate_id)
+            .filter(Candidate.is_active == True)
+            .order_by(percentage_sort_desc.c.highest_percentage.desc())
+            .limit(per_page)
+            .offset(offset)
+            .all()
+        )
+
+        valid = validate_data(data)
+        if valid != None:
+            return valid
+
+        candidate_percentage_sort_desc = [row.candidate_info for row in data]
+        return candidate_percentage_sort_desc     
+
+    percentage_sort_asc = (
+            db.query(
+                CandidateEducation.candidate_id.label("candidate_id"),
+                func.min(CandidateEducation.percentage).label("highest_percentage")
+            )
+            .group_by(CandidateEducation.candidate_id)
+            .subquery()
+        )
+
+    data = (
+        db.query(
+            func.json_build_object(
+                "candidate_id", Candidate.candidate_id,
+                "name", Candidate.name,
+                "email", Candidate.email_address,
+                "phone_number", Candidate.phone_number,
+                "location", Candidate.location,
+                "total_experience", Candidate.total_experience,
+                "education", func.coalesce(candidate_education.c.education, cast('[]', JSON)),
+                "skills", func.coalesce(candidate_skills.c.skills, cast('[]', JSON)),
+                "work_experience", func.coalesce(candidate_work_exp.c.work_experience, cast('[]', JSON))
+            ).label("candidate_info")
+        )
+        .select_from(Candidate)
+        .outerjoin(candidate_education, Candidate.candidate_id == candidate_education.c.candidate_id)
+        .outerjoin(candidate_skills, Candidate.candidate_id == candidate_skills.c.candidate_id)
+        .outerjoin(candidate_work_exp, Candidate.candidate_id == candidate_work_exp.c.candidate_id)
+        .outerjoin(percentage_sort_asc, Candidate.candidate_id == percentage_sort_asc.c.candidate_id)
+        .filter(Candidate.is_active == True)
+        .order_by(percentage_sort_asc.c.highest_percentage.asc())
+        .limit(per_page)
+        .offset(offset)
+        .all()
+    )
+
+    valid = validate_data(data)
+    if valid != None:
+        return valid
+    
+    candidate_percentage_sort_asc = [row.candidate_info for row in data]
+    return candidate_percentage_sort_asc
+
+def validate_data(data):
+    if not data:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "status": False,
+                "message": "No data found"
+            }
+        )
+    return None
