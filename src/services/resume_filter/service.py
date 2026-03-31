@@ -549,8 +549,8 @@ def search_resumes(filters: dict):
     db = SessionLocal()
     try:
         candidate_alias = aliased(Candidate)
-        query = select(Resume).join(candidate_alias, Resume.canditate, isouter=True).options(
-            joinedload(Resume.canditate)
+        query = select(Resume).join(candidate_alias, Resume.candidate, isouter=True).options(
+            joinedload(Resume.candidate)
         )
         conditions = []
 
@@ -670,7 +670,7 @@ def search_resumes(filters: dict):
 
         results = []
         for r in orm_resumes:
-            candidate = r.canditate
+            candidate = r.candidate
             if candidate:
                 candidate_id = str(candidate.candidate_id)
                 name = candidate.name
