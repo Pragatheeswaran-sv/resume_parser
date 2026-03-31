@@ -549,22 +549,35 @@ def search_resumes(filters: dict):
     db = SessionLocal()
     try:
         candidate_alias = aliased(Candidate)
-        query = select(Resume).join(candidate_alias, Resume.candidate, isouter=True).options(
-            joinedload(Resume.candidate)
-        )
+        query = select(Resume).join(
+            candidate_alias, Resume.candidate, isouter=True
+        ).options(joinedload(Resume.candidate))
         conditions = []
 
         name = filters.get("name")
         if name:
-            conditions.append(candidate_alias.name.ilike(f"%{name}%"))
+            name = str(name).strip()
+            if name:
+                logger.debug("[search_resumes] Applying name filter: '%s'", name)
+                conditions.append(candidate_alias.name.ilike(f"%{name}%"))
 
         exp_min = filters.get("min_experience") if filters.get("min_experience") is not None else filters.get("experience_min")
         if exp_min is not None and exp_min != "":
-            conditions.append(Candidate.total_experience >= float(exp_min))
+            try:
+                exp_min_val = float(exp_min)
+                logger.debug("[search_resumes] Applying min_experience filter: %s", exp_min_val)
+                conditions.append(candidate_alias.total_experience >= exp_min_val)
+            except (ValueError, TypeError):
+                logger.warning("[search_resumes] Invalid min_experience value: '%s', skipping", exp_min)
 
-        exp_max = filters.get("max_experience") if filters.get("max_experience") is not None else filters.get("experience_max")
+        exp_max = filters.get("max_experience")
         if exp_max is not None and exp_max != "":
-            conditions.append(Candidate.total_experience <= float(exp_max))
+            try:
+                exp_max_val = float(exp_max)
+                logger.debug("[search_resumes] Applying max_experience filter: %s", exp_max_val)
+                conditions.append(candidate_alias.total_experience <= exp_max_val)
+            except (ValueError, TypeError):
+                logger.warning("[search_resumes] Invalid max_experience value: '%s', skipping", exp_max)
 
         # Skill filter: UUID list or name substrings
         skills = filters.get("skills")
