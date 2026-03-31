@@ -129,6 +129,7 @@ def filter_resumes(filters: dict, page: int = 1, page_size: int = 20)-> List[Dic
         if 'query' in filters and filters.get("query"):
             query = filters.get("query")
             top_k = filters.get("limit", 1)
+            print('prag=>', top_k)
             rows = semantic_search_resumes(query, top_k)
         else:
             # Accept the standard filter model with IDs and range filters.

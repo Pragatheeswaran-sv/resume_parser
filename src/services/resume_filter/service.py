@@ -4,6 +4,8 @@ import json
 import logging
 from uuid import UUID
 import datetime as dt
+
+from fastapi.responses import JSONResponse
 import ollama
 from dotenv import load_dotenv
 from email.utils import parseaddr
@@ -14,7 +16,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from db.connection import SessionLocal
 from src.resume_filter.models import Resume
-from sqlalchemy import select, and_, cast, String, text, func
+from sqlalchemy import JSON, select, and_, cast, String, text, func
 from sqlalchemy.orm import aliased, joinedload
 from src.email_reader.models import EmailLogs, Attachment
 from src.candidate.models import (
@@ -746,7 +748,7 @@ def semantic_search_resumes(query: str, top_k: int = 5):
     db = SessionLocal()
     try:
         query_embedding = get_query_embedding(query)
-        # Use PostgreSQL vector similarity search via vector operator <=>
+
         sql = text("""
             SELECT 
                 r.resume_id,
@@ -762,14 +764,134 @@ def semantic_search_resumes(query: str, top_k: int = 5):
         """)
 
         results = db.execute(
-            sql, 
+            sql,
             {
                 "query_embedding": query_embedding,
                 "top_k": top_k
             }
         ).fetchall()
 
-        return results
+        semantic_results = [
+            {
+                "resume_id": row.resume_id,
+                "candidate_id": row.candidate_id,
+                # "similarity_distance": row.similarity_distance
+            }
+            for row in results
+        ]
+
+        candidate_ids = [item["candidate_id"] for item in semantic_results]
+
+        if not candidate_ids:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "status": False,
+                    "message": "data not found"
+                }
+            )
+
+        candidate_education = (
+            db.query(
+                CandidateEducation.candidate_id.label("candidate_id"),
+                func.json_agg(
+                    func.json_build_object(
+                        "education_id", Education.education_id,
+                        "education", Education.education,
+                        "institution", CandidateEducation.institution,
+                        "percentage", CandidateEducation.percentage,
+                        "year_of_passed", CandidateEducation.year_of_passed
+                    )
+                ).label("education")
+            )
+            .select_from(CandidateEducation)
+            .join(Education, CandidateEducation.education_id == Education.education_id)
+            .filter(CandidateEducation.candidate_id.in_(candidate_ids))
+            .group_by(CandidateEducation.candidate_id)
+            .subquery()
+        )
+
+        candidate_skills = (
+            db.query(
+                CandidateSkills.candidate_id.label("candidate_id"),
+                func.json_agg(
+                    func.json_build_object(
+                        "skill_id", Skill.skill_id,
+                        "skill", Skill.skill
+                    )
+                ).label("skills")
+            )
+            .select_from(CandidateSkills)
+            .join(Skill, CandidateSkills.skill_id == Skill.skill_id)
+            .filter(CandidateSkills.candidate_id.in_(candidate_ids))
+            .group_by(CandidateSkills.candidate_id)
+            .subquery()
+        )
+
+        candidate_work_exp = (
+            db.query(
+                WorkExperience.candidate_id.label("candidate_id"),
+                func.json_agg(
+                    func.json_build_object(
+                        "role_id", Role.role_id,
+                        "role", Role.role,
+                        "company_name", Company.company_name,
+                        "company_location", Company.company_location,
+                        "start_date", WorkExperience.start_date,
+                        "end_date", WorkExperience.end_date,
+                        "is_present", WorkExperience.is_active
+                    )
+                ).label("work_experience")
+            )
+            .select_from(WorkExperience)
+            .join(Role, WorkExperience.role_id == Role.role_id)
+            .join(Company, WorkExperience.company_id == Company.company_id)
+            .filter(WorkExperience.candidate_id.in_(candidate_ids))
+            .group_by(WorkExperience.candidate_id)
+            .subquery()
+        )
+
+        total_count = (
+                    db.query(func.count(Candidate.candidate_id))
+                    .filter(Candidate.is_active == True, Candidate.candidate_id.in_(candidate_ids))
+                    .scalar()
+                )
+
+        candidates = (
+            db.query(
+                func.json_build_object(
+                    "candidate_id", Candidate.candidate_id,
+                    "name", Candidate.name,
+                    "email", Candidate.email_address,
+                    "phone_number", Candidate.phone_number,
+                    "location", Candidate.location,
+                    "total_experience", Candidate.total_experience,
+                    "education", func.coalesce(candidate_education.c.education, cast('[]', JSON)),
+                    "skills", func.coalesce(candidate_skills.c.skills, cast('[]', JSON)),
+                    "work_experience", func.coalesce(candidate_work_exp.c.work_experience, cast('[]', JSON))
+                ).label("candidate_info")
+            )
+            .select_from(Candidate)
+            .outerjoin(candidate_education, Candidate.candidate_id == candidate_education.c.candidate_id)
+            .outerjoin(candidate_skills, Candidate.candidate_id == candidate_skills.c.candidate_id)
+            .outerjoin(candidate_work_exp, Candidate.candidate_id == candidate_work_exp.c.candidate_id)
+            .filter(
+                Candidate.is_active == True,
+                Candidate.candidate_id.in_(candidate_ids)
+            )
+            .all()
+        )
+
+        details = []
+        for row in candidates:
+            details.append(dict(row.candidate_info))
+
+        total ={}
+        total['total_record'] = total_count
+        details.append(total)
+
+        return details
+
     finally:
         db.close()
 
