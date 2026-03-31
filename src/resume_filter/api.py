@@ -1,14 +1,14 @@
-import os
-import json
+import time
 import logging
 from dotenv import load_dotenv
-from fastapi import APIRouter
-from src.services.resume_filter.service import process_resumes, search_resumes, semantic_search_resumes, get_master_data
-from src.resume_filter.schemas import ResumeFilterRequest
-from typing import List, Dict, Any
-from src.celery.celery_app import celery
-from fastapi import APIRouter, HTTPException, status
+from pydantic import ValidationError
+from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import JSONResponse
+from typing import List, Dict, Any
+from src.services.resume_filter.service import (
+    search_resumes, semantic_search_resumes, get_master_data
+)
+from src.resume_filter.schemas import ResumeFilterRequest, SemanticSearchRequest
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -23,7 +23,11 @@ router = APIRouter(
 )
 
 @router.post("/filter_resumes")
-def filter_resumes(filters: dict, page: int = 1, page_size: int = 20)-> List[Dict[str, Any]]:
+def filter_resumes(
+    filters: dict,
+    page: int = Query(default=1, ge=1, description="Page number (must be >= 1)"),
+    page_size: int = Query(default=20, ge=1, le=100, description="Results per page (1-100)")
+) -> List[Dict[str, Any]]:
     """
     Filter or search resumes stored in the database with pagination support.
 
@@ -123,34 +127,98 @@ def filter_resumes(filters: dict, page: int = 1, page_size: int = 20)-> List[Dic
     ]
     ```
     """
+    start_time = time.time()
+    logger.info(
+        "[filter_resumes] Request received | page=%s, page_size=%s, payload_keys=%s",
+        page, page_size, list(filters.keys()) if filters else "empty"
+    )
+
+    if not filters or not isinstance(filters, dict):
+        logger.warning("[filter_resumes] Empty or invalid request body received")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Request body must be a non-empty JSON object"
+        )
+
     try:
-        logger.info("this section executed")
         rows = []
-        if 'query' in filters and filters.get("query"):
-            query = filters.get("query")
-            top_k = filters.get("limit", 1)
-            rows = semantic_search_resumes(query, top_k)
+        is_semantic = "query" in filters and filters.get("query")
+
+        if is_semantic:
+            logger.info("[filter_resumes] Semantic search mode detected")
+            try:
+                semantic_req = SemanticSearchRequest(
+                    query=filters["query"],
+                    top_k=filters.get("limit", filters.get("top_k", 5))
+                )
+            except ValidationError as ve:
+                logger.warning(
+                    "[filter_resumes] Semantic search validation failed: %s", ve.errors()
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "status": "error",
+                        "message": "Invalid semantic search parameters",
+                        "errors": ve.errors()
+                    }
+                )
+
+            logger.info(
+                "[filter_resumes] Executing semantic search | query='%s', top_k=%s",
+                semantic_req.query[:50], semantic_req.top_k
+            )
+            rows = semantic_search_resumes(semantic_req.query, semantic_req.top_k)
+            logger.info(
+                "[filter_resumes] Semantic search returned %s results",
+                len(rows) if rows else 0
+            )
         else:
-            # Accept the standard filter model with IDs and range filters.
+            logger.info("[filter_resumes] Structured filter mode detected")
             try:
                 parsed_filters = ResumeFilterRequest(**filters).model_dump()
-            except Exception as e:
-                raise HTTPException(status_code=400, detail=f"Invalid filter payload: {e}")
+            except ValidationError as ve:
+                logger.warning(
+                    "[filter_resumes] Filter validation failed: %s", ve.errors()
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "status": "error",
+                        "message": "Invalid filter parameters",
+                        "errors": ve.errors()
+                    }
+                )
 
-            # Add pagination parameters
             parsed_filters["page"] = page
             parsed_filters["page_size"] = page_size
 
-            logger.info(f"this if section executed {parsed_filters}")
-            rows = search_resumes(parsed_filters)
-            logger.info(f'Rows----> {rows}')
-        logger.info(f"NAV---> the source {rows}")
+            active_filters = {
+                k: v for k, v in parsed_filters.items()
+                if v is not None and k not in ("action_type", "page", "page_size")
+            }
+            logger.info(
+                "[filter_resumes] Validated filters | active_filters=%s, page=%s, page_size=%s",
+                active_filters, page, page_size
+            )
 
+            rows = search_resumes(parsed_filters)
+            result_count = len(rows) - 1 if rows else 0
+            logger.info("[filter_resumes] Structured search returned %s results", result_count)
+
+        elapsed = round(time.time() - start_time, 3)
+        logger.info("[filter_resumes] Request completed in %ss", elapsed)
         return rows
 
-    except Exception as e:
-        logger.error(f"ERROR in filter_resumes: {str(e)}")
+    except HTTPException:
+        raise
 
+    except Exception as e:
+        elapsed = round(time.time() - start_time, 3)
+        logger.error(
+            "[filter_resumes] Unexpected error after %ss: %s", elapsed, str(e),
+            exc_info=True
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
