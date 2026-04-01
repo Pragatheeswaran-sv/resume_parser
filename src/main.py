@@ -1,6 +1,8 @@
 import os
 os.environ["OLLAMA_HOST"] = "http://host.docker.internal:11434"
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 from dotenv import load_dotenv
 import logging
 from db.connection import engine, Base
@@ -33,6 +35,35 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    logger.warning("Request validation error: %s", exc.errors())
+    return JSONResponse(
+        status_code=422,
+        content={
+            "status": "error",
+            "message": "Request validation failed",
+            "errors": [
+                {
+                    "field": ".".join(str(loc) for loc in err.get("loc", [])),
+                    "message": err.get("msg", ""),
+                    "type": err.get("type", ""),
+                }
+                for err in exc.errors()
+            ],
+        },
+    )
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error("Unhandled exception on %s %s: %s", request.method, request.url.path, str(exc), exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"status": "error", "message": "Internal server error"},
+    )
+
+
 @app.on_event("startup")
 def startup():
     """Initialize database and pgvector extension on application startup."""
@@ -44,6 +75,6 @@ def startup():
     logger.info("Database & pgvector ready")
 
 @app.get("/health")
-def health_check()-> dict:
+def health_check() -> dict:
     """Simple health check endpoint."""
     return {"message": "Resume tracker application running successful"}
