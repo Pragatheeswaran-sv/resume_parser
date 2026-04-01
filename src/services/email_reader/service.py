@@ -216,7 +216,7 @@ def  fetch_emails() -> dict:
         logger.info(f"Processed email: {subject}")
         # celery_task = resume_track(email_obj.email_id)
         logger.info("NAV----> the celery work started")
-        celery_task = resume_track.delay(email_obj.email_id)
+        celery_task = resume_track.delay(str(email_obj.email_id))
         logger.info(f"NAV----> celery task completed")
         logger.info(f"NAV----> celery task completed {celery_task.id}")
 

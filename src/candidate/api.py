@@ -1,13 +1,8 @@
 import logging
 from dotenv import load_dotenv
-from fastapi import APIRouter
-from src.services.candidate.service import candidate_datails
-# from src.resume_filter.schemas import ResumeFilterRequest
-from typing import List, Dict, Any
-from src.celery.celery_app import celery
 from fastapi import APIRouter, HTTPException, status
-from fastapi.responses import JSONResponse
-
+from typing import List, Dict, Any
+from src.services.candidate.service import candidate_datails, CandidateServiceError
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -21,8 +16,12 @@ router = APIRouter(
 	},
 )
 
-@router.get('/candidates')
-def candidate_info(page, sort_by, sort_type):
+@router.get("/candidates")
+def candidate_info(
+    page: str = "1",
+    sort_by: str = "None",
+    sort_type: str = "None",
+) -> List[Dict[str, Any]]:
     """
         Get Candidate Details
 
@@ -45,30 +44,18 @@ def candidate_info(page, sort_by, sort_type):
     """
     try:
         return candidate_datails(page, sort_by, sort_type)
+    except CandidateServiceError as e:
+        logger.warning("Candidate service error: %s", e.message)
+        raise HTTPException(
+            status_code=e.status_code,
+            detail={"status": "error", "message": e.message},
+        )
     except Exception as e:
-        logger.error(f"ERROR in candidate: {str(e)}")
-
+        logger.error("Unexpected error in candidate_info: %s", str(e), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
                 "status": "error",
                 "message": "Failed to get candidate information",
-                "error": str(e)
-            }
+            },
         )
-
-# @router.get('/sort')
-# def sort_candidate(page, sort_by, sort_type):
-#     try:
-#         return sort(page, sort_by, sort_type)
-#     except Exception as e:
-#         logger.error(f"ERROR in candidate: {str(e)}")
-
-#         raise HTTPException(
-#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-#             detail={
-#                 "status": "error",
-#                 "message": "Failed to get candidate information",
-#                 "error": str(e)
-#             }
-#         )

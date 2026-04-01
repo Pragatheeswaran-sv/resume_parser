@@ -1,6 +1,6 @@
 from uuid import UUID
-from pydantic import BaseModel, field_validator, model_validator
-from typing import List, Optional
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from typing import Any, Dict, List, Optional
 
 
 ALLOWED_SORT_FIELDS = {"name", "total_experience", "created_at", "updated_at"}
@@ -210,3 +210,73 @@ class SemanticSearchRequest(BaseModel):
         if val > 50:
             raise ValueError("top_k cannot exceed 50")
         return val
+
+
+# ---------------------------------------------------------------------------
+# Response schemas
+# ---------------------------------------------------------------------------
+
+class EducationResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    education_id: str
+    education: str
+    institution: Optional[str] = None
+    percentage: Optional[float] = None
+    year_of_passed: Optional[int] = None
+
+
+class SkillResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    skill_id: str
+    skill: str
+
+
+class WorkExperienceResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    role_id: str
+    role: str
+    company_name: str
+    company_location: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    is_present: Optional[bool] = None
+
+
+class CandidateResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    candidate_id: str
+    name: Optional[str] = None
+    email: Optional[str] = None
+    phone_number: Optional[str] = None
+    location: Optional[str] = None
+    total_experience: Optional[int] = None
+    education: List[EducationResponse] = []
+    skills: List[SkillResponse] = []
+    work_experience: List[WorkExperienceResponse] = []
+
+
+class MasterDataItem(BaseModel):
+    id: str
+    name: str
+
+
+class MasterDataResponse(BaseModel):
+    status: str
+    data: Dict[str, List[MasterDataItem]]
+
+
+class ErrorResponse(BaseModel):
+    status: str = "error"
+    message: str
+
+
+class SemanticSearchResultItem(BaseModel):
+    id: str
+    name: Optional[str] = None
+    file_name: Optional[str] = None
+    experience: Optional[float] = 0.0
+    skills: List[Any] = []

@@ -1,12 +1,9 @@
-import os
-import json
 import logging
 from dotenv import load_dotenv
-from fastapi import APIRouter
-from typing import List, Dict, Any
-from src.services.email_reader.service import fetch_emails
 from fastapi import APIRouter, HTTPException, status
-from fastapi.responses import JSONResponse
+from typing import Dict, Any
+from src.services.email_reader.service import fetch_emails
+from src.utils.response import serialize_response
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -20,35 +17,21 @@ router = APIRouter(
 	},
 )
 
-# @router.post("/fetch_email")
-# def fetch_email():
-#     """Fetch new emails and process attachments."""
-    
-#     response = fetch_emails()
-#     return response
-
 
 @router.post("/fetch_email", status_code=status.HTTP_200_OK)
-def fetch_email():
+def fetch_email() -> Dict[str, Any]:
     """Fetch new emails and process attachments."""
-    
+
     try:
         data = fetch_emails()
-
-        return JSONResponse(
-            status_code=status.HTTP_200_OK,
-            content={
-                "status": "success",
-                "data": data
-            }
-        )
+        return {"status": "success", "data": serialize_response(data)}
 
     except Exception as e:
+        logger.error("Failed to process emails: %s", str(e), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
                 "status": "error",
                 "message": "Failed to process emails",
-                "error": str(e)
-            }
+            },
         )

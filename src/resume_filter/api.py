@@ -9,6 +9,7 @@ from src.services.resume_filter.service import (
     search_resumes, semantic_search_resumes, get_master_data
 )
 from src.resume_filter.schemas import ResumeFilterRequest, SemanticSearchRequest
+from src.utils.response import serialize_response
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -160,7 +161,10 @@ def filter_resumes(
                     detail={
                         "status": "error",
                         "message": "Invalid semantic search parameters",
-                        "errors": ve.errors()
+                        "errors": [
+                            {"field": ".".join(str(loc) for loc in err.get("loc", [])), "message": err.get("msg", "")}
+                            for err in ve.errors()
+                        ],
                     }
                 )
 
@@ -168,7 +172,7 @@ def filter_resumes(
                 "[filter_resumes] Executing semantic search | query='%s', top_k=%s",
                 semantic_req.query[:50], semantic_req.top_k
             )
-            rows = semantic_search_resumes(semantic_req.query, semantic_req.top_k)
+            rows = semantic_search_resumes(semantic_req.query, semantic_req.top_k or 5)
             logger.info(
                 "[filter_resumes] Semantic search returned %s results",
                 len(rows) if rows else 0
@@ -186,7 +190,10 @@ def filter_resumes(
                     detail={
                         "status": "error",
                         "message": "Invalid filter parameters",
-                        "errors": ve.errors()
+                        "errors": [
+                            {"field": ".".join(str(loc) for loc in err.get("loc", [])), "message": err.get("msg", "")}
+                            for err in ve.errors()
+                        ],
                     }
                 )
 
@@ -208,7 +215,7 @@ def filter_resumes(
 
         elapsed = round(time.time() - start_time, 3)
         logger.info("[filter_resumes] Request completed in %ss", elapsed)
-        return rows
+        return serialize_response(rows)
 
     except HTTPException:
         raise
@@ -224,31 +231,29 @@ def filter_resumes(
             detail={
                 "status": "error",
                 "message": "Failed to filter resumes",
-                "error": str(e)
             }
         )
 
 @router.post("/semantic_search")
-def semantic_search(body: dict):
+def semantic_search(body: dict) -> List[Dict[str, Any]]:
     query = body.get("query")
     if not query:
         raise HTTPException(status_code=400, detail="Query is required")
-    top_k = body.get("top_k", 1)
-    results = semantic_search_resumes(query, top_k)
+    top_k = int(body.get("top_k", 1) or 1)
 
-    return [
-        {
-            "id": r.get("resume_id", ""),
-            "name": r.get("name"),
-            "file_name": r.get("file_name"),
-            "experience": r.get("total_experience", 0.0),
-            "skills": r.get("skills", [])
-        }
-        for r in results
-    ]
+    try:
+        results = semantic_search_resumes(query, top_k)
+    except Exception as e:
+        logger.error("[semantic_search] Error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"status": "error", "message": "Semantic search failed"},
+        )
 
-@router.get("/show_filter")
-def show_filter():
+    return results
+
+@router.get("/filter_options")
+def show_filter() -> Dict[str, Any]:
     """
     Fetch master data for filters: Roles, Education, Skills.
     
@@ -277,20 +282,13 @@ def show_filter():
     """
     try:
         data = get_master_data()
-        return JSONResponse(
-            status_code=status.HTTP_200_OK,
-            content={
-                "status": "success",
-                "data": data
-            }
-        )
+        return {"status": "success", "data": data}
     except Exception as e:
-        logger.error(f"ERROR in show_filter: {str(e)}")
+        logger.error("ERROR in show_filter: %s", str(e), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
                 "status": "error",
                 "message": "Failed to fetch master data",
-                "error": str(e)
             }
         )
