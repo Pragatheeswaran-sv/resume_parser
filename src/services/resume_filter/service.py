@@ -872,7 +872,7 @@ def semantic_search_resumes(query: str, top_k: int = 5):
                 "query_embedding": query_embedding,
                 "top_k": top_k
             }
-        ).fetchall()
+        ).mappings().all()
 
         logger.info("[semantic_search] Returned %d results", len(results))
         semantic_results = [
