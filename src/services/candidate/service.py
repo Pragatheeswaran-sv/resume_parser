@@ -285,3 +285,5 @@ def _sort_by_percentage(db, sort_type, candidate_education, candidate_skills, ca
     )
     _validate_data(data)
     return _extract_results(data, total_count)
+
+
