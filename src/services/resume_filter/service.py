@@ -870,10 +870,20 @@ def semantic_search_resumes(query: str, top_k: int = 5):
                 "query_embedding": query_embedding,
                 "top_k": top_k
             }
-        ).fetchall()
+        ).mappings().all()
 
         logger.info("[semantic_search] Returned %d results", len(results))
-        return results
+        return [
+            {
+                "resume_id": str(row["resume_id"]),
+                "candidate_id": str(row["candidate_id"]),
+                "name": row["name"],
+                "email_address": row["email_address"],
+                "total_experience": row["total_experience"],
+                "similarity_distance": float(row["similarity_distance"]),
+            }
+            for row in results
+        ]
     except Exception as e:
         logger.error("[semantic_search] Error during vector search: %s", str(e), exc_info=True)
         raise
