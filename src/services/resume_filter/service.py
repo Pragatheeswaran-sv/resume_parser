@@ -329,6 +329,51 @@ def extract_text_from_docx(path):
         logger.info(f"[ERROR] DOCX read failed: {path} -> {e}")
     return text
 
+def is_resume(text: str) -> bool:
+    """Classify whether a document is a resume/CV using the local LLM."""
+
+    prompt = """
+        You are a strict classifier.
+
+        Return ONLY JSON:
+        {"is_resume": true} or {"is_resume": false}
+
+        Rules:
+        - Return TRUE only if this is clearly a complete resume/CV
+        - A resume MUST contain at least 2 of these sections:
+        Skills, Experience, Education, Projects
+
+        - Return FALSE if:
+        - It is incomplete
+        - It is random text
+        - It is invoice, email, report, or any other document
+        - It looks like partial resume content
+
+        - If unsure → return FALSE
+        """
+
+    try:
+        response = ollama.chat(
+            model="llama3",
+            messages=[
+                {"role": "system", "content": "You only return JSON"},
+                {"role": "user", "content": prompt + "\n\nDocument:\n" + text[:2000]}
+            ]
+        )
+
+        content = response["message"]["content"].strip()
+        start = content.find("{")
+        end = content.rfind("}") + 1
+        data = json.loads(content[start:end])
+        logger.info(f"is_resume classification result: {data}")
+
+        return data.get("is_resume", False)
+
+    except Exception as e:
+        logger.error("Resume detection failed: %s", e)
+        return False
+
+
 def extract_basic_info(resume_text):
     """Use local Ollama LLM to extract structured info from resume text."""
 
@@ -485,16 +530,16 @@ def extract_basic_info(resume_text):
 
 def process_resumes(email_id: UUID) -> dict:
     """
-    This function processes resumes from email attachments. It performs the following    steps:
-        1. Fetches the email and its attachments using the provided message_id. It looks for attachments marked as resumes in the database.
-        2. For each resume attachment, it extracts text content (supports PDF and DOCX formats).
-        3. Uses a local Ollama LLM (llama3) to extract structured information such as name, experience, skills, companies, and education.
-        4. Generates vector embeddings for the resume text using the HuggingFace model `all-MiniLM-L6-v2`.
-        5. Stores the extracted resume data in the PostgreSQL database, linking it to the email.
-        6. Saves vector embeddings in a FAISS vector database for semantic search.
+    Classify and process resume attachments for a given email.
+
+    Steps:
+        1. Fetch all attachments for the email.
+        2. Extract text and classify each attachment as resume or not (LLM).
+        3. For confirmed resumes, extract structured info (name, skills, etc.).
+        4. Store resume data in PostgreSQL and vector embeddings in FAISS.
     """
-    
-    logger.info("NAV----> the process resume function called")
+
+    logger.info("process_resumes called for email_id=%s", email_id)
     db = SessionLocal()
     email_obj = db.query(EmailLogs).filter(
         EmailLogs.email_id == email_id
@@ -502,25 +547,32 @@ def process_resumes(email_id: UUID) -> dict:
 
     if not email_obj:
         return {"message": "Email not found"}
-    attachments = db.query(Attachment).filter(
-        Attachment.email_id == email_obj.email_id,
-        Attachment.is_resume == True
-    ).all()
-    logger.info("NAV----> the attachments fetched successfully")
-    results = []
 
-    for att in attachments:
+    all_attachments = db.query(Attachment).filter(
+        Attachment.email_id == email_obj.email_id
+    ).all()
+    logger.info("Fetched %d attachments for classification", len(all_attachments))
+
+    results = []
+    for att in all_attachments:
         file_path = f"attachments/{att.file_name}"
         if file_path.endswith(".pdf"):
             text = extract_text_from_pdf(file_path)
-            logger.info(f"NAV----> the text extracted from pdf {text[:100]}...")
         elif file_path.endswith(".docx"):
             text = extract_text_from_docx(file_path)
-            logger.info(f"NAV----> the text extracted from docx {text[:100]}...")
         else:
             continue
 
         if not text.strip():
+            logger.info("Empty document, skipping: %s", att.file_name)
+            continue
+
+        resume_flag = is_resume(text)
+        att.is_resume = resume_flag
+        db.commit()
+        logger.info("Classified %s — is_resume=%s", att.file_name, resume_flag)
+
+        if not resume_flag:
             continue
 
         info = extract_basic_info(text)
@@ -532,10 +584,10 @@ def process_resumes(email_id: UUID) -> dict:
                 "attachment_id": att.attachment_id,
                 "sender_email": parse_email_address(email_obj.sender)
             })
-        logger.info("NAV----> the info extracted successfully")
+        logger.info("Extracted info for %s", att.file_name)
+
     if results:
-        # save_to_faiss(results)
-        logger.info(f"NACV----> This result section executed {results}")
+        logger.info("Saving %d resume(s) to DB", len(results))
         save_resumes_to_db(results)
 
     db.close()

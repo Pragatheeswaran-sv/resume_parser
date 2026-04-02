@@ -8,10 +8,6 @@ import uuid
 import logging
 from dotenv import load_dotenv
 from src.services.background_task.tasks import resume_track
-from pypdf import PdfReader
-from docx import Document
-import ollama
-import json
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -56,83 +52,6 @@ def save_attachment(part, message_id):
         f.write(part.get_payload(decode=True))
 
     return unique_name, path
-
-def is_resume(text: str) -> bool:
-    logger.info("NAV----> process started")
-    # prompt = """
-    #     You are a document classifier.
-
-    #     Your task:
-    #     Determine if the given document text belongs to a RESUME / CV.
-
-    #     Return ONLY JSON.
-
-    #     Format:
-    #     {
-    #     "is_resume": true
-    #     }
-
-    #     Rules:
-    #     - Resume usually contains skills, experience, education, projects, etc.
-    #     - If it is invoice, bill, report, offer letter, or random text → return false
-    #     """
-    prompt = """
-        You are a strict classifier.
-
-        Return ONLY JSON:
-        {"is_resume": true} or {"is_resume": false}
-
-        Rules:
-        - Return TRUE only if this is clearly a complete resume/CV
-        - A resume MUST contain at least 2 of these sections:
-        Skills, Experience, Education, Projects
-
-        - Return FALSE if:
-        - It is incomplete
-        - It is random text
-        - It is invoice, email, report, or any other document
-        - It looks like partial resume content
-
-        - If unsure → return FALSE
-        """
-
-    try:
-        logger.info('nav----> the is resume block started ')
-        response = ollama.chat(
-            model="llama3",
-            messages=[
-                {"role": "system", "content": "You only return JSON"},
-                {"role": "user", "content": prompt + "\n\nDocument:\n" + text[:2000]}
-            ]
-        )
-
-        content = response["message"]["content"].strip()
-        start = content.find("{")
-        end = content.rfind("}") + 1
-        data = json.loads(content[start:end])
-        logger.info(f"NAV----> the resume content data {data} ")
-
-        return data.get("is_resume", False)
-
-    except Exception as e:
-        print("Resume detection failed:", e)
-        return False
-    
-def extract_attachment_text(path):
-    """Extract text from PDF or DOCX attachment."""
-
-    if path.endswith(".pdf"):
-        text = ""
-        reader = PdfReader(path)
-        for page in reader.pages:
-            text += page.extract_text() or ""
-        return text
-
-    if path.endswith(".docx"):
-        doc = Document(path)
-        return "\n".join(p.text for p in doc.paragraphs)
-
-    return ""
 
 def  fetch_emails() -> dict:
     """
@@ -198,17 +117,10 @@ def  fetch_emails() -> dict:
         db.refresh(email_obj)
         for part in msg.walk():
             if part.get_content_disposition() == "attachment":
-                filename, path = save_attachment(part, message_id)
-                text = extract_attachment_text(path)
-                if not text.strip():
-                    logger.info("Empty document:", filename)
-                    continue
-                resume_flag = is_resume(text)
-                logger.info(f"NAV----> the resume flag {resume_flag} for the file {filename}")
+                filename, path = save_attachment(part, uid)
                 attachment = Attachment(
                     email_id=email_obj.email_id,
                     file_name=filename,
-                    is_resume = resume_flag
                 )
                 db.add(attachment)
                 db.commit()
