@@ -1003,6 +1003,191 @@ def semantic_search_resumes(query: str, top_k: int = 5):
         db.close()
         logger.debug("[semantic_search] Database session closed")
 
+def extract_filters_from_query(query: str) -> dict:
+    """Use Ollama LLM to convert a natural-language hiring query into a structured filter payload."""
+
+    OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+    prompt = """
+You are a hiring-query parser.
+
+Given a recruiter's natural-language search query, extract structured filter criteria.
+
+Return ONLY valid JSON matching this schema (omit keys whose value would be null or empty):
+
+{
+    "skills": ["skill1", "skill2"],
+    "education": ["qualification1"],
+    "roles": ["role1"],
+    "companies": ["company1"],
+    "min_experience": <number or null>,
+    "max_experience": <number or null>,
+    "name": "<candidate name or null>"
+}
+
+RULES:
+1. skills, education, roles, companies must be arrays of SHORT strings (e.g. "Python", "B.Tech").
+2. Experience: "5+ years" → min_experience=5. "3-5 years" → min_experience=3, max_experience=5.
+   "10 years" → min_experience=10, max_experience=10.
+3. Only include fields explicitly mentioned in the query.
+4. Do NOT guess or infer values not present in the query.
+5. Return ONLY JSON – no markdown, no explanation, no extra text.
+"""
+    try:
+        response = ollama.chat(
+            model="llama3",
+            messages=[
+                {"role": "system", "content": "You output only JSON."},
+                {"role": "user", "content": prompt + "\n\nQuery:\n" + query[:1000]},
+            ],
+        )
+        content = response["message"]["content"].strip()
+        logger.info("[extract_filters_from_query] Raw LLM response: %s", content[:500])
+
+        start = content.find("{")
+        end = content.rfind("}") + 1
+        if start == -1 or end == 0:
+            logger.warning("[extract_filters_from_query] No JSON object found in LLM output")
+            return {}
+
+        parsed = json.loads(content[start:end])
+        if not isinstance(parsed, dict):
+            return {}
+
+        allowed_keys = {"skills", "education", "roles", "companies", "min_experience", "max_experience", "name"}
+        return {k: v for k, v in parsed.items() if k in allowed_keys and v is not None}
+
+    except Exception as e:
+        logger.error("[extract_filters_from_query] LLM extraction failed: %s", str(e), exc_info=True)
+        return {}
+
+
+def resolve_dynamic_filters(dynamic_filters: dict) -> dict:
+    """Convert human-readable names in dynamic filters to UUID-based values
+    compatible with ``ResumeFilterRequest`` / ``search_resumes``.
+    """
+
+    if not dynamic_filters or not isinstance(dynamic_filters, dict):
+        return {}
+
+    db = SessionLocal()
+    resolved: dict = {}
+    try:
+        skill_names = dynamic_filters.get("skills")
+        if skill_names and isinstance(skill_names, list):
+            skill_ids = []
+            for name in skill_names:
+                if not name or not isinstance(name, str):
+                    continue
+                match = db.query(Skill).filter(Skill.skill.ilike(name.strip())).first()
+                if match:
+                    skill_ids.append(str(match.skill_id))
+                else:
+                    logger.debug("[resolve_dynamic_filters] No skill match for '%s'", name)
+            if skill_ids:
+                resolved["skills"] = skill_ids
+
+        edu_names = dynamic_filters.get("education")
+        if edu_names and isinstance(edu_names, list):
+            edu_ids = []
+            for name in edu_names:
+                if not name or not isinstance(name, str):
+                    continue
+                match = db.query(Education).filter(Education.education.ilike(name.strip())).first()
+                if match:
+                    edu_ids.append(str(match.education_id))
+                else:
+                    logger.debug("[resolve_dynamic_filters] No education match for '%s'", name)
+            if edu_ids:
+                resolved["education"] = edu_ids
+
+        role_names = dynamic_filters.get("roles")
+        if role_names and isinstance(role_names, list):
+            role_ids = []
+            for name in role_names:
+                if not name or not isinstance(name, str):
+                    continue
+                match = db.query(Role).filter(Role.role.ilike(name.strip())).first()
+                if match:
+                    role_ids.append(str(match.role_id))
+                else:
+                    logger.debug("[resolve_dynamic_filters] No role match for '%s'", name)
+            if role_ids:
+                resolved["roles"] = role_ids
+
+        companies = dynamic_filters.get("companies")
+        if companies and isinstance(companies, list):
+            resolved["companies"] = [c.strip() for c in companies if isinstance(c, str) and c.strip()]
+
+        for field in ("min_experience", "max_experience"):
+            val = dynamic_filters.get(field)
+            if val is not None:
+                if isinstance(val, str):
+                    import re as _re
+                    m = _re.search(r"(\d+(?:\.\d+)?)", val)
+                    if m:
+                        resolved[field] = float(m.group(1))
+                else:
+                    try:
+                        resolved[field] = float(val)
+                    except (ValueError, TypeError):
+                        pass
+
+        name_val = dynamic_filters.get("name")
+        if name_val and isinstance(name_val, str) and name_val.strip():
+            resolved["name"] = name_val.strip()
+
+        logger.info("[resolve_dynamic_filters] Resolved: %s", resolved)
+        return resolved
+
+    except Exception as e:
+        logger.error("[resolve_dynamic_filters] Error: %s", str(e), exc_info=True)
+        return {}
+    finally:
+        db.close()
+
+
+def merge_filters(standard: dict, dynamic: dict) -> dict:
+    """Merge standard (UI-driven) filters with resolved dynamic (LLM-driven) filters.
+
+    Merging strategy:
+    - List fields (skills, education, roles, companies): union with deduplication.
+    - Scalar/range fields: standard wins when present; otherwise use dynamic.
+    - Pagination and sorting fields always come from standard only.
+    """
+
+    if not dynamic:
+        return dict(standard) if standard else {}
+    if not standard:
+        return dict(dynamic)
+
+    merged = dict(standard)
+    list_fields = ("skills", "education", "roles", "companies")
+    pagination_fields = {"page", "page_size", "sort_by", "sort_order", "action_type"}
+
+    for key in list_fields:
+        std_vals = standard.get(key) or []
+        dyn_vals = dynamic.get(key) or []
+        if not isinstance(std_vals, list):
+            std_vals = []
+        if not isinstance(dyn_vals, list):
+            dyn_vals = []
+        combined = list(dict.fromkeys(std_vals + dyn_vals))
+        if combined:
+            merged[key] = combined
+
+    scalar_fields = ("min_experience", "max_experience", "name", "percentage",
+                     "passout_start_year", "passout_end_year", "file_name")
+    for key in scalar_fields:
+        if merged.get(key) is None and dynamic.get(key) is not None:
+            merged[key] = dynamic[key]
+
+    for key in pagination_fields:
+        if key in dynamic and key not in merged:
+            pass
+
+    return merged
+
+
 def get_master_data():
     """Fetch active data from master tables: Roles, Education, Skills."""
     

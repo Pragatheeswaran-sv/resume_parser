@@ -6,9 +6,12 @@ from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 from typing import List, Dict, Any
 from src.services.resume_filter.service import (
-    search_resumes, semantic_search_resumes, get_master_data
+    search_resumes, semantic_search_resumes, get_master_data,
+    extract_filters_from_query, resolve_dynamic_filters, merge_filters,
 )
-from src.resume_filter.schemas import ResumeFilterRequest, SemanticSearchRequest
+from src.resume_filter.schemas import (
+    ResumeFilterRequest, SemanticSearchRequest, DynamicFilterRequest, DynamicFilterResponse,
+)
 from src.utils.response import serialize_response
 
 load_dotenv()
@@ -22,6 +25,61 @@ router = APIRouter(
 		500: {"description": "Internal Server Error"},
 	},
 )
+
+@router.post("/generate_dynamic_filters")
+def generate_dynamic_filters(body: dict) -> Dict[str, Any]:
+    """Generate structured filter payload from a natural-language recruiter query.
+
+    The frontend should persist the returned ``dynamic_filters`` in
+    localStorage and send them alongside standard UI filters on every
+    subsequent request to ``/filter_resumes``.
+    """
+    start_time = time.time()
+    logger.info("[generate_dynamic_filters] Request received | body_keys=%s", list(body.keys()) if body else "empty")
+
+    query = (body or {}).get("query", "")
+    if not query or not isinstance(query, str) or not query.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"status": "error", "message": "A non-empty 'query' string is required"},
+        )
+
+    try:
+        req = DynamicFilterRequest(query=query)
+    except ValidationError as ve:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "status": "error",
+                "message": "Invalid request",
+                "errors": [
+                    {"field": ".".join(str(loc) for loc in err.get("loc", [])), "message": err.get("msg", "")}
+                    for err in ve.errors()
+                ],
+            },
+        )
+
+    try:
+        raw_filters = extract_filters_from_query(req.query)
+        logger.info("[generate_dynamic_filters] LLM extracted: %s", raw_filters)
+
+        try:
+            validated = DynamicFilterResponse(**raw_filters).model_dump(exclude_none=True)
+        except ValidationError:
+            validated = raw_filters
+
+        elapsed = round(time.time() - start_time, 3)
+        logger.info("[generate_dynamic_filters] Completed in %ss", elapsed)
+        return {"status": "success", "data": validated}
+
+    except Exception as e:
+        elapsed = round(time.time() - start_time, 3)
+        logger.error("[generate_dynamic_filters] Error after %ss: %s", elapsed, str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"status": "error", "message": "Failed to generate dynamic filters"},
+        )
+
 
 @router.post("/filter_resumes")
 def filter_resumes(
@@ -143,7 +201,9 @@ def filter_resumes(
 
     try:
         rows = []
+
         is_semantic = "query" in filters and filters.get("query")
+        is_combined = "filters" in filters or "dynamic_filters" in filters
 
         if is_semantic:
             logger.info("[filter_resumes] Semantic search mode detected")
@@ -177,6 +237,49 @@ def filter_resumes(
                 "[filter_resumes] Semantic search returned %s results",
                 len(rows) if rows else 0
             )
+
+        elif is_combined:
+            logger.info("[filter_resumes] Combined filter mode detected (standard + dynamic)")
+            standard_raw = filters.get("filters") or {}
+            dynamic_raw = filters.get("dynamic_filters") or {}
+
+            resolved_dynamic = resolve_dynamic_filters(dynamic_raw) if dynamic_raw else {}
+            logger.info("[filter_resumes] Resolved dynamic filters: %s", resolved_dynamic)
+
+            merged = merge_filters(standard_raw, resolved_dynamic)
+
+            try:
+                parsed_filters = ResumeFilterRequest(**merged).model_dump()
+            except ValidationError as ve:
+                logger.warning("[filter_resumes] Merged filter validation failed: %s", ve.errors())
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "status": "error",
+                        "message": "Invalid filter parameters",
+                        "errors": [
+                            {"field": ".".join(str(loc) for loc in err.get("loc", [])), "message": err.get("msg", "")}
+                            for err in ve.errors()
+                        ],
+                    },
+                )
+
+            parsed_filters["page"] = page
+            parsed_filters["page_size"] = page_size
+
+            active_filters = {
+                k: v for k, v in parsed_filters.items()
+                if v is not None and k not in ("action_type", "page", "page_size")
+            }
+            logger.info(
+                "[filter_resumes] Merged active_filters=%s, page=%s, page_size=%s",
+                active_filters, page, page_size,
+            )
+
+            rows = search_resumes(parsed_filters)
+            result_count = len(rows) - 1 if rows else 0
+            logger.info("[filter_resumes] Combined search returned %s results", result_count)
+
         else:
             logger.info("[filter_resumes] Structured filter mode detected")
             try:

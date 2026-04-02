@@ -1,3 +1,4 @@
+import re
 from uuid import UUID
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 from typing import Any, Dict, List, Optional
@@ -280,3 +281,79 @@ class SemanticSearchResultItem(BaseModel):
     file_name: Optional[str] = None
     experience: Optional[float] = 0.0
     skills: List[Any] = []
+
+
+# ---------------------------------------------------------------------------
+# Dynamic filter schemas
+# ---------------------------------------------------------------------------
+
+class DynamicFilterRequest(BaseModel):
+    """Request body for LLM-powered filter generation from natural language."""
+    query: str
+
+    @field_validator("query", mode="before")
+    @classmethod
+    def validate_query(cls, v):
+        if not v or not isinstance(v, str) or not v.strip():
+            raise ValueError("query must be a non-empty string")
+        cleaned = v.strip()
+        if len(cleaned) > 1000:
+            raise ValueError("query must not exceed 1000 characters")
+        return cleaned
+
+
+class DynamicFilterResponse(BaseModel):
+    """Structured filter payload returned by the LLM.
+
+    Fields use human-readable names (not UUIDs) so the frontend can
+    display them directly and persist them in localStorage.
+    """
+    skills: Optional[List[str]] = None
+    education: Optional[List[str]] = None
+    roles: Optional[List[str]] = None
+    companies: Optional[List[str]] = None
+    min_experience: Optional[float] = None
+    max_experience: Optional[float] = None
+    name: Optional[str] = None
+
+    @field_validator("min_experience", "max_experience", mode="before")
+    @classmethod
+    def coerce_experience(cls, v, info):
+        if v is None or v == "":
+            return None
+        if isinstance(v, str):
+            match = re.search(r"(\d+(?:\.\d+)?)", v)
+            if match:
+                return float(match.group(1))
+            return None
+        try:
+            return float(v)
+        except (ValueError, TypeError):
+            return None
+
+
+class CombinedFilterPayload(BaseModel):
+    """Top-level request body accepted by ``POST /filter_resumes``.
+
+    *   ``filters`` – standard dropdown/UI-driven filters (UUIDs for
+        skills, education, roles).
+    *   ``dynamic_filters`` – LLM-generated filters (human-readable
+        names). The backend resolves names to UUIDs before querying.
+    """
+    filters: Optional[Dict[str, Any]] = None
+    dynamic_filters: Optional[Dict[str, Any]] = None
+
+    @model_validator(mode="after")
+    def at_least_one(self):
+        f = self.filters or {}
+        d = self.dynamic_filters or {}
+        has_filters = any(
+            v for k, v in f.items()
+            if k not in ("action_type", "page", "page_size", "sort_by", "sort_order")
+        )
+        has_dynamic = bool(d)
+        if not has_filters and not has_dynamic:
+            raise ValueError(
+                "At least one of 'filters' or 'dynamic_filters' must contain filter criteria"
+            )
+        return self
