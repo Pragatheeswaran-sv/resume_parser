@@ -10,6 +10,7 @@ from sqlalchemy import text
 from src.resume_filter.api import router as resume_router
 from src.email_reader.api import router as email_router
 from src.candidate.api import router as candidate_route
+from src.admin.api import router as admin_route 
 from fastapi.middleware.cors import CORSMiddleware
  
 
@@ -26,6 +27,7 @@ app = FastAPI()
 app.include_router(resume_router)
 app.include_router(email_router)
 app.include_router(candidate_route)
+app.include_router(admin_route)
 
 app.add_middleware(
     CORSMiddleware,
