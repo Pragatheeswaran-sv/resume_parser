@@ -290,9 +290,11 @@ def save_resumes_to_db(resumes):
             logger.error(f"Error saving resume: {e}")
             db.rollback()
             continue
-    
-    db.commit()
-    db.close()
+
+    try:
+        db.commit()
+    finally:
+        db.close()
 
 def save_to_faiss(resumes, save_path=VECTORDB_PATH):
     splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
@@ -541,61 +543,62 @@ def process_resumes(email_id: UUID) -> dict:
 
     logger.info("process_resumes called for email_id=%s", email_id)
     db = SessionLocal()
-    email_obj = db.query(EmailLogs).filter(
-        EmailLogs.email_id == email_id
-    ).first()
+    try:
+        email_obj = db.query(EmailLogs).filter(
+            EmailLogs.email_id == email_id
+        ).first()
 
-    if not email_obj:
-        return {"message": "Email not found"}
+        if not email_obj:
+            return {"message": "Email not found"}
 
-    all_attachments = db.query(Attachment).filter(
-        Attachment.email_id == email_obj.email_id
-    ).all()
-    logger.info("Fetched %d attachments for classification", len(all_attachments))
+        all_attachments = db.query(Attachment).filter(
+            Attachment.email_id == email_obj.email_id
+        ).all()
+        logger.info("Fetched %d attachments for classification", len(all_attachments))
 
-    results = []
-    for att in all_attachments:
-        file_path = f"attachments/{att.file_name}"
-        if file_path.endswith(".pdf"):
-            text = extract_text_from_pdf(file_path)
-        elif file_path.endswith(".docx"):
-            text = extract_text_from_docx(file_path)
-        else:
-            continue
+        results = []
+        for att in all_attachments:
+            file_path = f"attachments/{att.file_name}"
+            if file_path.endswith(".pdf"):
+                text = extract_text_from_pdf(file_path)
+            elif file_path.endswith(".docx"):
+                text = extract_text_from_docx(file_path)
+            else:
+                continue
 
-        if not text.strip():
-            logger.info("Empty document, skipping: %s", att.file_name)
-            continue
+            if not text.strip():
+                logger.info("Empty document, skipping: %s", att.file_name)
+                continue
 
-        resume_flag = is_resume(text)
-        att.is_resume = resume_flag
-        db.commit()
-        logger.info("Classified %s — is_resume=%s", att.file_name, resume_flag)
+            resume_flag = is_resume(text)
+            att.is_resume = resume_flag
+            db.commit()
+            logger.info("Classified %s — is_resume=%s", att.file_name, resume_flag)
 
-        if not resume_flag:
-            continue
+            if not resume_flag:
+                continue
 
-        info = extract_basic_info(text)
-        if info:
-            info["file_name"] = att.file_name
-            results.append({
-                "info": info,
-                "text": text,
-                "attachment_id": att.attachment_id,
-                "sender_email": parse_email_address(email_obj.sender)
-            })
-        logger.info("Extracted info for %s", att.file_name)
+            info = extract_basic_info(text)
+            if info:
+                info["file_name"] = att.file_name
+                results.append({
+                    "info": info,
+                    "text": text,
+                    "attachment_id": att.attachment_id,
+                    "sender_email": parse_email_address(email_obj.sender)
+                })
+            logger.info("Extracted info for %s", att.file_name)
 
-    if results:
-        logger.info("Saving %d resume(s) to DB", len(results))
-        save_resumes_to_db(results)
+        if results:
+            logger.info("Saving %d resume(s) to DB", len(results))
+            save_resumes_to_db(results)
 
-    db.close()
-
-    return {
-        "message_id": str(email_id),
-        "processed_files": len(results)
-    }
+        return {
+            "message_id": str(email_id),
+            "processed_files": len(results)
+        }
+    finally:
+        db.close()
 
 def search_resumes(filters: dict):
     """Search candidates based on dynamic filters using aggregation subqueries."""

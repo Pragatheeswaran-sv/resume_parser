@@ -54,7 +54,7 @@ def save_attachment(part, uid):
 
     return unique_name, path
 
-def  fetch_emails() -> dict:
+def fetch_emails() -> dict:
     """
     Fetch new emails from IMAP inbox and process them.
 
@@ -68,75 +68,85 @@ def  fetch_emails() -> dict:
     """
 
     db = SessionLocal()
-    mail = imaplib.IMAP4_SSL(IMAP_SERVER)
-    mail.login(EMAIL_ACCOUNT, PASSWORD)
-    mail.select("INBOX")
-    state = db.query(EmailVersion).first()
-    if not state:
+    mail = None
+    try:
+        mail = imaplib.IMAP4_SSL(IMAP_SERVER)
+        mail.login(EMAIL_ACCOUNT, PASSWORD)
+        mail.select("INBOX")
+        state = db.query(EmailVersion).first()
+        if not state:
+            status, data = mail.uid("search", None, "ALL")
+            uids = data[0].split()
+            if not uids:
+                return {"message": "Mailbox empty"}
+
+            latest_uid = int(uids[-1])
+            state = EmailVersion(
+                mailbox="INBOX",
+                last_uid=latest_uid
+            )
+            db.add(state)
+            db.commit()
+
+            return {"message": f"Initialized last_uid = {latest_uid}"}
+        last_uid = state.last_uid
         status, data = mail.uid("search", None, "ALL")
-        uids = data[0].split()
-        if not uids:
-            return {"message": "Mailbox empty"}
+        all_uids = data[0].split()
+        new_uids = [int(uid) for uid in all_uids if int(uid) > last_uid]
+        if not new_uids:
+            return {"message": "No new emails"}
 
-        latest_uid = int(uids[-1])
-        state = EmailVersion(
-            mailbox="INBOX",
-            last_uid=latest_uid
-        )
-        db.add(state)
+        max_uid = last_uid
+        for uid in new_uids:
+            existing = db.query(EmailLogs).filter(EmailLogs.uid == uid).first()
+            if existing:
+                continue
+            result, msg_data = mail.uid("fetch", str(uid), "(RFC822)")
+            raw_email = msg_data[0][1]
+            msg = email.message_from_bytes(raw_email)
+            message_id = msg.get("Message-ID")
+            subject = msg.get("Subject")
+            sender_header = msg.get("From")
+            sender_address = parseaddr(sender_header or "")[1] or sender_header
+
+            email_obj = EmailLogs(
+                message_id=message_id,
+                uid=uid,
+                subject=subject,
+                sender=sender_address
+            )
+            db.add(email_obj)
+            db.commit()
+            db.refresh(email_obj)
+            for part in msg.walk():
+                if part.get_content_disposition() == "attachment":
+                    filename, path = save_attachment(part, uid)
+                    attachment = Attachment(
+                        email_id=email_obj.email_id,
+                        file_name=filename,
+                    )
+                    db.add(attachment)
+                    db.commit()
+            max_uid = max(max_uid, uid)
+            logger.info(f"Processed email: {subject}")
+            logger.info("NAV----> the celery work started")
+            celery_task = resume_track.delay(str(email_obj.email_id))
+            logger.info(f"NAV----> celery task completed {celery_task.id}")
+
+        state.last_uid = max_uid
         db.commit()
 
-        return {"message": f"Initialized last_uid = {latest_uid}"}
-    last_uid = state.last_uid
-    status, data = mail.uid("search", None, "ALL")
-    all_uids = data[0].split()
-    new_uids = [int(uid) for uid in all_uids if int(uid) > last_uid]
-    if not new_uids:
-        return {"message": "No new emails"}
-
-    max_uid = last_uid
-    for uid in new_uids:
-        existing = db.query(EmailLogs).filter(EmailLogs.uid == uid).first()
-        if existing:
-            continue
-        result, msg_data = mail.uid("fetch", str(uid), "(RFC822)")
-        raw_email = msg_data[0][1]
-        msg = email.message_from_bytes(raw_email)
-        message_id = msg.get("Message-ID")
-        subject = msg.get("Subject")
-        sender_header = msg.get("From")
-        sender_address = parseaddr(sender_header or "")[1] or sender_header
-
-        email_obj = EmailLogs(
-            message_id=message_id,
-            uid=uid,
-            subject=subject,
-            sender=sender_address
-        )
-        db.add(email_obj)
-        db.commit()
-        db.refresh(email_obj)
-        for part in msg.walk():
-            if part.get_content_disposition() == "attachment":
-                filename, path = save_attachment(part, uid)
-                attachment = Attachment(
-                    email_id=email_obj.email_id,
-                    file_name=filename,
-                )
-                db.add(attachment)
-                db.commit()
-        max_uid = max(max_uid, uid)
-        logger.info(f"Processed email: {subject}")
-        # celery_task = resume_track(email_obj.email_id)
-        logger.info("NAV----> the celery work started")
-        celery_task = resume_track.delay(str(email_obj.email_id))
-        logger.info(f"NAV----> celery task completed")
-        logger.info(f"NAV----> celery task completed {celery_task.id}")
-
-    state.last_uid = max_uid
-    db.commit()
-    
-    return {
-        "message": "Emails processed",
-        "last_uid": max_uid,
-    }
+        return {
+            "message": "Emails processed",
+            "last_uid": max_uid,
+        }
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+        if mail:
+            try:
+                mail.logout()
+            except Exception:
+                pass
