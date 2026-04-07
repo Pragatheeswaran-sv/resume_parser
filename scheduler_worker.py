@@ -15,10 +15,11 @@ logging.basicConfig(
 logger = logging.getLogger("scheduler")
 
 DEFAULT_INTERVAL_MINUTES = 15
+_DEFAULTS = {"is_paused": False, "interval_minutes": DEFAULT_INTERVAL_MINUTES}
 
 
 def _load_config():
-    """Read the active ExtractionConfig row; return defaults when absent."""
+    """Read the active ExtractionConfig row; return defaults when absent or on DB error."""
     session = SessionLocal()
     try:
         cfg = (
@@ -28,7 +29,14 @@ def _load_config():
         )
         if cfg:
             return {"is_paused": cfg.is_paused, "interval_minutes": cfg.interval_minutes}
-        return {"is_paused": False, "interval_minutes": DEFAULT_INTERVAL_MINUTES}
+        return dict(_DEFAULTS)
+    except Exception:
+        logger.warning(
+            "Could not read extraction_config (table may not exist yet) — using defaults",
+            exc_info=True,
+        )
+        session.rollback()
+        return dict(_DEFAULTS)
     finally:
         session.close()
 
