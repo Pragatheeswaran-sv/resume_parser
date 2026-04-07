@@ -73,10 +73,10 @@ def save_resumes_to_db(resumes):
             vector = embedding_model.embed_query(raw_text)
 
             existing_candidate = None
-            if info_email:
-                existing_candidate = db.query(Candidate).filter(
-                    Candidate.email_address == info_email
-                ).first()
+            # if info_email:
+            #     existing_candidate = db.query(Candidate).filter(
+            #         Candidate.email_address == info_email
+            #     ).first()
             if not existing_candidate and info.get("phone_number"):
                 existing_candidate = db.query(Candidate).filter(
                     Candidate.phone_number == info.get("phone_number")
