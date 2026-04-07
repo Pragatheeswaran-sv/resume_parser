@@ -1,6 +1,9 @@
 services:
   api:
-    build: .
+    build:
+      context: .
+      dockerfile: dockerfile
+    image: resume-tracker:latest
     container_name: fastapi_api
     ports:
       - "8000:8000"
@@ -16,12 +19,13 @@ services:
     command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir src
 
   worker:
-    build: .
+    image: resume-tracker:latest
     container_name: celery_worker
     environment:
       - PYTHONPATH=/app
     command: celery -A src.celery.celery_app.celery worker --loglevel=info --pool=solo
     depends_on:
+      - api
       - redis
       - db
     env_file:
@@ -32,12 +36,13 @@ services:
       - "host.docker.internal:host-gateway"
 
   scheduler:
-    build: .
+    image: resume-tracker:latest
     container_name: apscheduler_scheduler
     environment:
       - PYTHONPATH=/app
     command: python scheduler_worker.py
     depends_on:
+      - api
       - redis
       - db
     env_file:
