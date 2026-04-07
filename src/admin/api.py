@@ -1,12 +1,14 @@
 import logging
-from typing import Dict, Any
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from src.admin.dependencies import get_current_admin
 from src.admin.schema import (
+    AdminCreate,
     AdminLoginRequest,
+    AuthorizedUserCreate,
+    AuthorizedUserUpdate,
     BlockToggleRequest,
     ExtractionConfigUpdate,
     ExtractionToggleRequest,
@@ -50,9 +52,14 @@ router = APIRouter(
 
 
 @router.post("/create_admin")
-def create_admin(payload: Dict[str, Any]):
+def create_admin(payload: AdminCreate):
+    """Register a new administrator account.
+
+    Accepts a validated ``AdminCreate`` body with email, password, and
+    optional name.  Returns the newly created admin's ID.
+    """
     try:
-        return new_admin(payload)
+        return new_admin(payload.model_dump())
     except ValueError as e:
         logger.warning("[create_admin] Error: %s", str(e), exc_info=True)
         raise HTTPException(
@@ -95,6 +102,7 @@ def sso_login(body: SSOLoginRequest):
 
 @router.get("/list_auth_mail")
 def get_auth_mails():
+    """List all active authorized email accounts."""
     try:
         return list_mail()
     except ValueError as e:
@@ -106,9 +114,14 @@ def get_auth_mails():
 
 
 @router.post("/create_auth_mail")
-def new_auth_mail(payload: Dict[str, Any]):
+def new_auth_mail(payload: AuthorizedUserCreate):
+    """Register a new authorized email account for IMAP extraction.
+
+    Accepts a validated ``AuthorizedUserCreate`` body with email,
+    optional IMAP password, and connection metadata.
+    """
     try:
-        return new_auth(payload)
+        return new_auth(payload.model_dump())
     except ValueError as e:
         logger.warning("[create_auth_mail] Error: %s", str(e), exc_info=True)
         raise HTTPException(
@@ -119,6 +132,16 @@ def new_auth_mail(payload: Dict[str, Any]):
 
 @router.patch("/delete_auth_mail/")
 def delete_auth(auth_mail_id: str):
+    """Soft-delete an authorized email account by marking it inactive.
+
+    Args:
+        auth_mail_id: UUID of the auth mail record to deactivate.
+    """
+    if not auth_mail_id or not auth_mail_id.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"status": "error", "message": "auth_mail_id is required"},
+        )
     try:
         return delete_auth_mail(auth_mail_id)
     except ValueError as e:
@@ -130,9 +153,20 @@ def delete_auth(auth_mail_id: str):
 
 
 @router.patch("/update_auth_mail/")
-def update_auth(auth_mail_id: str, payload: Dict[str, Any]):
+def update_auth(auth_mail_id: str, payload: AuthorizedUserUpdate):
+    """Update fields on an existing authorized email account.
+
+    Args:
+        auth_mail_id: UUID of the auth mail record to update.
+        payload: Validated partial update body.
+    """
+    if not auth_mail_id or not auth_mail_id.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"status": "error", "message": "auth_mail_id is required"},
+        )
     try:
-        return update_auth_mail(auth_mail_id, payload)
+        return update_auth_mail(auth_mail_id, payload.model_dump(exclude_unset=True))
     except ValueError as e:
         logger.warning("[update_auth_mail] Error: %s", str(e), exc_info=True)
         raise HTTPException(
@@ -268,7 +302,11 @@ def trigger_single(
     auth_mail_id: str,
     _admin=Depends(get_current_admin),
 ):
-    """Manually trigger extraction for a specific email account."""
+    """Manually trigger extraction for a specific email account.
+
+    Args:
+        auth_mail_id: UUID of the email account to extract.
+    """
     try:
         return trigger_extraction(auth_mail_id=auth_mail_id)
     except ValueError as e:

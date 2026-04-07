@@ -1,3 +1,10 @@
+"""Admin service layer.
+
+Business logic for administrator accounts, authorized email management,
+and global extraction configuration.  Every public function uses its own
+database session and raises ``ValueError`` on validation failures so the
+API layer can translate them into appropriate HTTP responses.
+"""
 
 from typing import Any, Dict, List, Optional
 import logging
@@ -15,6 +22,18 @@ logger = logging.getLogger(__name__)
 
 
 def admin_check(email: str, password: str) -> Dict[str, Any]:
+    """Authenticate an admin by email and password, returning a JWT on success.
+
+    Args:
+        email: Admin email address.
+        password: Plain-text password to verify.
+
+    Returns:
+        Dict containing an access token and admin profile info.
+
+    Raises:
+        ValueError: If credentials are missing or invalid.
+    """
     session = SessionLocal()
     try:
         if not email or not password:
@@ -55,7 +74,17 @@ def admin_check(email: str, password: str) -> Dict[str, Any]:
 
 def sso_user_login(email: str) -> Dict[str, Any]:
     """Issue a JWT for an SSO-authenticated user after verifying they exist
-    in ``auth_mail`` and are not blocked."""
+    in ``auth_mail`` and are not blocked.
+
+    Args:
+        email: Verified email from the SSO provider.
+
+    Returns:
+        Dict containing an access token and user profile info.
+
+    Raises:
+        ValueError: If the email is empty, not approved, or the account is blocked.
+    """
     session = SessionLocal()
     try:
         if not email:
@@ -98,7 +127,18 @@ def sso_user_login(email: str) -> Dict[str, Any]:
         session.close()
 
 
-def new_admin(payload):
+def new_admin(payload: dict) -> Dict[str, Any]:
+    """Create a new administrator account.
+
+    Args:
+        payload: Dictionary with ``email``, ``password``, and optional ``name``.
+
+    Returns:
+        Dict with the newly created admin's ID and name.
+
+    Raises:
+        ValueError: If required fields are missing or the email is already taken.
+    """
     session = SessionLocal()
     try:
         email = payload.get("email")
@@ -138,7 +178,15 @@ def new_admin(payload):
         session.close()
 
 
-def list_mail():
+def list_mail() -> Dict[str, Any]:
+    """Return all active authorized email accounts.
+
+    Returns:
+        Dict with a list of auth mail summaries.
+
+    Raises:
+        ValueError: If no active auth mails exist.
+    """
     session = SessionLocal()
     try:
         auth_mails = session.query(AuthMail).filter(AuthMail.is_active == True).all()
@@ -165,7 +213,19 @@ def list_mail():
         session.close()
 
 
-def new_auth(payload):
+def new_auth(payload: dict) -> Dict[str, Any]:
+    """Register a new authorized email account for IMAP extraction.
+
+    Args:
+        payload: Dictionary with ``email``, optional ``imap_password``,
+            and ``connect_with`` metadata.
+
+    Returns:
+        Dict with the newly created auth mail's ID and details.
+
+    Raises:
+        ValueError: If email is missing or already registered.
+    """
     session = SessionLocal()
     try:
         email_address = payload.get("email")
@@ -204,9 +264,23 @@ def new_auth(payload):
         session.close()
 
 
-def delete_auth_mail(auth_mail_id: str):
+def delete_auth_mail(auth_mail_id: str) -> Dict[str, Any]:
+    """Soft-delete an authorized email account by setting ``is_active = False``.
+
+    Args:
+        auth_mail_id: UUID string of the auth mail to deactivate.
+
+    Returns:
+        Dict confirming deletion.
+
+    Raises:
+        ValueError: If the auth mail ID is not found.
+    """
     session = SessionLocal()
     try:
+        if not auth_mail_id or not auth_mail_id.strip():
+            raise ValueError("auth_mail_id is required")
+
         auth_mail = session.query(AuthMail).filter_by(auth_mail_id=auth_mail_id).first()
         if not auth_mail:
             raise ValueError("Auth mail not found")
@@ -226,9 +300,28 @@ def delete_auth_mail(auth_mail_id: str):
         session.close()
 
 
-def update_auth_mail(auth_mail_id: str, payload):
+def update_auth_mail(auth_mail_id: str, payload: dict) -> Dict[str, Any]:
+    """Update fields on an existing authorized email account.
+
+    Only non-``None`` values in *payload* are applied.  Raises if the
+    resulting email+password combination duplicates another record.
+
+    Args:
+        auth_mail_id: UUID string of the auth mail to update.
+        payload: Dictionary of fields to update (``email``, ``imap_password``,
+            ``connect_with``).
+
+    Returns:
+        Dict confirming the update.
+
+    Raises:
+        ValueError: If the record is not found or a duplicate is detected.
+    """
     session = SessionLocal()
     try:
+        if not auth_mail_id or not auth_mail_id.strip():
+            raise ValueError("auth_mail_id is required")
+
         auth_mail = session.query(AuthMail).filter_by(auth_mail_id=auth_mail_id).first()
         if not auth_mail:
             raise ValueError("Auth mail not found")
@@ -263,7 +356,11 @@ def update_auth_mail(auth_mail_id: str, payload):
 # ═══════════════════════════════════════════════════════════════════════════
 
 def list_email_accounts() -> Dict[str, Any]:
-    """Return every AuthMail row with extraction-status fields."""
+    """Return every AuthMail row with extraction-status fields.
+
+    Returns:
+        Dict containing a list of all email accounts and their status.
+    """
     session = SessionLocal()
     try:
         accounts = session.query(AuthMail).all()
@@ -292,6 +389,18 @@ def list_email_accounts() -> Dict[str, Any]:
 # ═══════════════════════════════════════════════════════════════════════════
 
 def toggle_extraction(auth_mail_id: str, enabled: bool) -> Dict[str, Any]:
+    """Enable or disable extraction for a specific email account.
+
+    Args:
+        auth_mail_id: UUID string of the target email account.
+        enabled: ``True`` to enable extraction, ``False`` to disable.
+
+    Returns:
+        Dict confirming the new extraction state.
+
+    Raises:
+        ValueError: If the account is not found.
+    """
     session = SessionLocal()
     try:
         account = session.query(AuthMail).filter_by(auth_mail_id=auth_mail_id).first()
@@ -312,6 +421,18 @@ def toggle_extraction(auth_mail_id: str, enabled: bool) -> Dict[str, Any]:
 
 
 def toggle_block(auth_mail_id: str, blocked: bool) -> Dict[str, Any]:
+    """Block or unblock a specific email account.
+
+    Args:
+        auth_mail_id: UUID string of the target email account.
+        blocked: ``True`` to block, ``False`` to unblock.
+
+    Returns:
+        Dict confirming the new blocked state.
+
+    Raises:
+        ValueError: If the account is not found.
+    """
     session = SessionLocal()
     try:
         account = session.query(AuthMail).filter_by(auth_mail_id=auth_mail_id).first()
@@ -336,6 +457,7 @@ def toggle_block(auth_mail_id: str, blocked: bool) -> Dict[str, Any]:
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _get_or_create_config(session) -> "ExtractionConfig":
+    """Fetch the active ExtractionConfig row, creating one with defaults if absent."""
     cfg = session.query(ExtractionConfig).filter(ExtractionConfig.is_active.is_(True)).first()
     if not cfg:
         cfg = ExtractionConfig(is_paused=False, interval_minutes=15)
@@ -346,6 +468,11 @@ def _get_or_create_config(session) -> "ExtractionConfig":
 
 
 def get_extraction_config() -> Dict[str, Any]:
+    """Retrieve the current global extraction schedule configuration.
+
+    Returns:
+        Dict with ``config_id``, ``is_paused``, and ``interval_minutes``.
+    """
     session = SessionLocal()
     try:
         cfg = _get_or_create_config(session)
@@ -366,6 +493,18 @@ def update_extraction_config(
     interval_minutes: Optional[int] = None,
     is_paused: Optional[bool] = None,
 ) -> Dict[str, Any]:
+    """Update the global extraction schedule configuration.
+
+    Args:
+        interval_minutes: New polling interval (must be >= 1 if provided).
+        is_paused: New paused state (if provided).
+
+    Returns:
+        Dict with the updated configuration values.
+
+    Raises:
+        ValueError: If *interval_minutes* is less than 1.
+    """
     session = SessionLocal()
     try:
         cfg = _get_or_create_config(session)
@@ -396,10 +535,12 @@ def update_extraction_config(
 
 
 def pause_extraction() -> Dict[str, Any]:
+    """Globally pause all extraction jobs."""
     return update_extraction_config(is_paused=True)
 
 
 def resume_extraction() -> Dict[str, Any]:
+    """Globally resume all extraction jobs."""
     return update_extraction_config(is_paused=False)
 
 
@@ -414,6 +555,16 @@ def trigger_extraction(auth_mail_id: Optional[str] = None) -> Dict[str, Any]:
     stamp its ``last_extraction_at``.  The actual work is delegated to the
     existing ``fetch_emails()`` pipeline (which currently operates on the
     globally-configured mailbox).
+
+    Args:
+        auth_mail_id: Optional UUID of a specific account to extract.
+
+    Returns:
+        Dict with extraction result data.
+
+    Raises:
+        ValueError: If the account is not found, blocked, or has extraction
+            disabled.
     """
     from src.services.email_reader.service import fetch_emails
 

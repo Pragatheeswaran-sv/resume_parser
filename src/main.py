@@ -24,7 +24,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-app = FastAPI()
+app = FastAPI(
+    title="Resume Tracker API",
+    description="API for tracking, filtering, and semantically searching candidate resumes.",
+    version="1.0.0",
+)
 app.include_router(resume_router)
 app.include_router(email_router)
 app.include_router(candidate_route)
@@ -41,6 +45,7 @@ app.add_middleware(
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Return a structured 422 response for Pydantic / FastAPI validation errors."""
     logger.warning("Request validation error: %s", exc.errors())
     return JSONResponse(
         status_code=422,
@@ -61,6 +66,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
+    """Catch-all handler that logs the full traceback and returns a safe 500 response."""
     logger.error("Unhandled exception on %s %s: %s", request.method, request.url.path, str(exc), exc_info=True)
     return JSONResponse(
         status_code=500,

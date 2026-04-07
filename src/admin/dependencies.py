@@ -1,3 +1,13 @@
+"""Authentication dependencies and access-control middleware.
+
+Provides FastAPI dependency callables (``get_current_admin``,
+``get_current_user``, ``get_current_admin_or_user``) that decode a
+Bearer JWT and verify the caller's identity against the database.
+
+``AllowedEmailMiddleware`` enforces that non-open, non-admin requests
+carry a valid JWT whose email exists in ``auth_mail``.
+"""
+
 import logging
 from typing import Optional
 
