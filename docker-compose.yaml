@@ -31,6 +31,23 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+  scheduler:
+    build: .
+    container_name: apscheduler_scheduler
+    environment:
+      - PYTHONPATH=/app
+    command: python scheduler_worker.py
+    depends_on:
+      - redis
+      - db
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
   redis:
     image: redis:7
     ports:

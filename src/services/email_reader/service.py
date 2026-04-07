@@ -27,25 +27,26 @@ IMAP_SERVER = os.getenv("IMAP_SERVER","imap.gmail.com")
 EMAIL_ACCOUNT = os.getenv("EMAIL_ACCOUNT","")
 PASSWORD = os.getenv("PASSWORD","")
 
-def save_attachment(part, message_id):
-    """Save email attachment to attachment directory and return its filename and path."""
+def save_attachment(part, uid):
+    """Save email attachment to attachment directory using a UUID derived from the IMAP UID."""
 
     if not os.path.exists(attachment_dir):
         os.makedirs(attachment_dir)
 
-    filename = part.get_filename()
-    if not filename:
-        ext = part.get_content_subtype() or "bin"
-        filename = f"{message_id}_{uuid.uuid4()}.{ext}"
+    original_name = part.get_filename()
+    if original_name:
+        _, ext = os.path.splitext(original_name)
+    else:
+        ext = f".{part.get_content_subtype() or 'bin'}"
 
-    # Keep the original filename, but avoid path traversal and collisions.
-    filename = os.path.basename(filename).strip().replace("/", "_").replace("\\", "_")
-    base_name, ext = os.path.splitext(filename)
-    unique_name = filename
+    derived_name = f"{uuid.uuid5(uuid.NAMESPACE_URL, str(uid))}{ext}"
+
     counter = 0
+    unique_name = derived_name
+    base, ext = os.path.splitext(derived_name)
     while os.path.exists(os.path.join(attachment_dir, unique_name)):
         counter += 1
-        unique_name = f"{base_name}_{counter}{ext}"
+        unique_name = f"{base}_{counter}{ext}"
 
     path = os.path.join(attachment_dir, unique_name)
     with open(path, "wb") as f:
