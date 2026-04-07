@@ -1,24 +1,31 @@
-FROM python:3.13-slim
+# ---- Stage 1: Build dependencies ----
+FROM python:3.13-slim AS builder
 
 WORKDIR /app
 
-RUN pip install poetry
+RUN pip install --no-cache-dir poetry
 
 RUN poetry config virtualenvs.create false
 
 COPY pyproject.toml poetry.lock* ./
 
-RUN poetry install --no-root --no-interaction --no-ansi
+# Install CPU-only PyTorch first to avoid pulling ~8GB of CUDA/NVIDIA libraries
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 
-RUN pip install --no-cache-dir langchain==1.2.10 faiss-cpu sentence-transformers
+RUN poetry install --no-root --no-interaction --no-ansi \
+    && pip cache purge \
+    && rm -rf /root/.cache /tmp/*
 
-# Copy src folder into /app
-# COPY src /app
+# ---- Stage 2: Final runtime image ----
+FROM python:3.13-slim
+
+WORKDIR /app
+
+COPY --from=builder /usr/local/lib/python3.13/site-packages /usr/local/lib/python3.13/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
 COPY . .
-
 
 EXPOSE 8000
 
-# Run FastAPI
-# CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
