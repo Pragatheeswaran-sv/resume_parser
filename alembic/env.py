@@ -8,6 +8,7 @@ from src.email_reader import models
 from src.resume_filter import models
 from src.candidate import models
 from src.admin import models
+from src.auth import models
 
 from alembic import context
 

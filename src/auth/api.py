@@ -11,6 +11,11 @@ from db.connection import SessionLocal
 from src.email_reader.models import EmailLogs
 from src.services.auth.gmail.service import gmail_login
 from src.services.auth.gmail.service import gmail_callback
+from src.services.auth.gmail.service import zoho_callback
+from src.services.auth.gmail.service import fetch_emails_gmail
+from src.services.auth.zoho.service import fetch_emails_zoho
+from src.auth.schemas import EmailRequest
+
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -30,7 +35,7 @@ CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 REDIRECT_URI = os.getenv("REDIRECT_URI")
 
-@router.get("oauth/login/gmail")
+@router.get("/oauth/login/gmail")
 def oauth_gmail_login():
     """Initiate OAuth flow by redirecting user to Google's auth page."""
     response = gmail_login()
@@ -43,8 +48,12 @@ def callback(code: str):
     response = gmail_callback(code)
     return response
     
-
-access_token = "a29.a0Aa7MYiptV9vzd0Cfkvcv6oStYEz_8KpCwoc_0_7ZlTsH1kFvQqaR4z4UegENvd-KvpmcCbFXb648seAbaLAmmOg0omrby7EpceZO182QeNamIOsVtAKPxKWKWuZf2q4f_SQwLR2W3HTxZepz2HnDUJk8sD_uqJ0vXPi-wdXfd-JcbN7F4rjtWnjYgZssWorQ_D6oYiUaCgYKAU4SARISFQHGX2MicByFpU8bMz12pJqA24YswA0206"
+@router.post("/emails")
+def fetch_emails_oauth(request: EmailRequest) -> dict:
+    logger.info(f"NAV----> Fetching emails for email_id: {request.email_id}")
+    # response = fetch_emails_gmail(email_id=request.email_id)
+    response = fetch_emails_zoho(email_id=request.email_id)
+    return response
 
 # @router.get("/emails")
 # def fetch_oauth_gmails() -> dict:
@@ -103,43 +112,45 @@ access_token = "a29.a0Aa7MYiptV9vzd0Cfkvcv6oStYEz_8KpCwoc_0_7ZlTsH1kFvQqaR4z4Ueg
 
 
 # @router.get("/emails")
-# def fetch_emails_oauth() -> dict:
-#     response = fetch_gmails()
+# def fetch_emails_oauth(email_id: str) -> dict:
+#     logger.info(f"NAV----> Fetching emails for email_id: {email_id}")
+#     response = fetch_emails_gmail(email_id = "")
 #     return response
-    
-
-
-
-
 
 
 
 #zoho testing#
 
-
 @router.get("/auth/zoho/callback")
-async def zoho_callback(request: Request):
-    code = request.query_params.get("code")
+def callback(code: str):
+    """Handle OAuth callback and exchange code for tokens."""
 
-    token_url = "https://accounts.zoho.in/oauth/v2/token"
+    response = zoho_callback(code)
+    return response
 
-    CLIENT_ID = os.getenv("ZOHO_CLIENT_ID")
-    CLIENT_SECRET = os.getenv("ZOHO_CLIENT_SECRET")
-    REDIRECT_URI = os.getenv("ZOHO_REDIRECT_URI")
-    data = {
-        "grant_type": "authorization_code",
-        "client_id": CLIENT_ID,
-        "client_secret": CLIENT_SECRET,
-        "redirect_uri": REDIRECT_URI,
-        "code": code
-    }
+# @router.get("/auth/zoho/callback")
+# async def zoho_callback(request: Request):
+#     code = request.query_params.get("code")
 
-    response = requests.post(token_url, data=data)
-    tokens = response.json()
+#     token_url = "https://accounts.zoho.in/oauth/v2/token"
 
-    logger.info(f"NAV----> Zoho tokens: {tokens}")
+#     CLIENT_ID = os.getenv("ZOHO_CLIENT_ID")
+#     CLIENT_SECRET = os.getenv("ZOHO_CLIENT_SECRET")
+#     REDIRECT_URI = os.getenv("ZOHO_REDIRECT_URI")
+#     data = {
+#         "grant_type": "authorization_code",
+#         "client_id": CLIENT_ID,
+#         "client_secret": CLIENT_SECRET,
+#         "redirect_uri": REDIRECT_URI,
+#         "code": code
+#     }
 
-    return {"message": "OAuth Success", "tokens": tokens}
+#     response = requests.post(token_url, data=data)
+#     tokens = response.json()
+
+#     logger.info(f"NAV----> Zoho tokens: {tokens}")
+
+#     return {"message": "OAuth Success", "tokens": tokens}
 
 
 
@@ -176,8 +187,7 @@ def get_account_and_emails(limit: int = 10):
     mails_url = f"{ZOHO_MAIL_BASE}/api/accounts/{account_id}/messages/view"
     mails_response = requests.get(
         mails_url,
-        headers=headers,
-        params={"limit": limit}
+        headers=headers
     )
 
     if mails_response.status_code != 200:
