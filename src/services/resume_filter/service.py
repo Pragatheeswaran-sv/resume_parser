@@ -5,6 +5,7 @@ import logging
 from uuid import UUID
 import datetime as dt
 
+# from django import db
 from fastapi.responses import JSONResponse
 import ollama
 from dotenv import load_dotenv
@@ -23,6 +24,11 @@ from src.candidate.models import (
 	Candidate, CandidateSkills, CandidateEducation, 
 	WorkExperience, Skill, Education, Company, Role
 )
+from src.services.admin.service import get_model
+from src.admin.models import Admin
+
+from openai import OpenAI
+from anthropic import Anthropic
 
 
 load_dotenv()
@@ -334,7 +340,7 @@ def extract_text_from_docx(path):
 def is_resume(text: str) -> bool:
     """Classify whether a document is a resume/CV using the local LLM."""
 
-    prompt = """
+    prompt = """ 
         You are a strict classifier.
 
         Return ONLY JSON:
@@ -355,25 +361,78 @@ def is_resume(text: str) -> bool:
         """
 
     try:
-        response = ollama.chat(
-            model="llama3",
-            messages=[
-                {"role": "system", "content": "You only return JSON"},
-                {"role": "user", "content": prompt + "\n\nDocument:\n" + text[:2000]}
-            ]
-        )
+        db = SessionLocal()
+        admin = db.query(Admin).first()
 
-        content = response["message"]["content"].strip()
-        start = content.find("{")
-        end = content.rfind("}") + 1
-        data = json.loads(content[start:end])
-        logger.info(f"is_resume classification result: {data}")
+        if not admin:   
+            logger.warning("No admin found, defaulting to ollama with latest model")
+            raise Exception("No admin found")
+        
+        admin_id = admin.admin_id
+        model_info = get_model(admin_id)
 
+        model = model_info.get("model_name", "ollama").lower()
+        version = model_info.get("model_version_name", "latest").lower()
+        api_key = model_info.get("apikey")
+        message = [
+                    {"role": "system", "content": "You only return JSON"},
+                    {"role": "user", "content": prompt + "\n\nDocument:\n" + text[:2000]}
+                ]
+
+        if model == "openai":
+            if not api_key:
+                raise Exception("OpenAI API key not found")
+
+            client = OpenAI(api_key=api_key)
+
+            response = client.chat.completions.create(
+                model = version,
+                messages = message
+            )
+            content = response.choices[0].message.content.strip()
+        elif model == "claude":
+            if not api_key:
+                raise Exception("Claude API key not found")
+
+            client = Anthropic(api_key=api_key)
+
+            response = client.messages.create(
+                model=version,
+                max_tokens=1000,
+                system="You only return JSON",
+                messages=[
+                    {"role": "user", "content": prompt + "\n\nDocument:\n" + text[:2000]}
+                ]
+            )
+            content = response.content[0].text.strip()
+        else:
+            response = ollama.chat(
+                model = "llama3",
+                messages = message
+            )
+            content = response["message"]["content"].strip()
+
+        try:
+            start = content.find("{")
+            end = content.rfind("}") + 1
+
+            if start == -1 or end == 0:
+                raise ValueError("No valid JSON object found in model response")
+
+            json_str = content[start:end]
+            data = json.loads(json_str)
+            logger.info(f"is_resume classification result: {data}")
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON returned by model: {content}")
+            raise ValueError("Model returned invalid JSON") from e
+        
         return data.get("is_resume", False)
 
     except Exception as e:
         logger.error("Resume detection failed: %s", e)
         return False
+    finally:
+        db.close()
 
 
 def extract_basic_info(resume_text):
