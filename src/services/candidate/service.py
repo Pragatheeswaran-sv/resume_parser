@@ -131,7 +131,7 @@ def candidate_datails(page, sort_by, sort_type) -> list[dict]:
     """
     db = SessionLocal()
     try:
-        per_page = 3
+        per_page = 10
         offset = (int(page) - 1) * per_page
 
         candidate_education, candidate_skills, candidate_work_exp = _build_subqueries(db)

@@ -24,7 +24,6 @@ def get_valid_zoho_access_token(email: str, db=SessionLocal()):
     logger.info(f"NAV----> Fetching Zoho access token for {email}")
     email = email.strip()
 
-    # 🔹 Get Zoho source
     source = db.query(OauthSource).filter(
         OauthSource.source_name == "zoho"
     ).first()
@@ -43,7 +42,6 @@ def get_valid_zoho_access_token(email: str, db=SessionLocal()):
 
     expires_at = cred.updated_at + timedelta(seconds=cred.expires_in)
 
-    # 🔁 Refresh if expired
     if datetime.utcnow() >= expires_at:
         logger.info(f"NAV----> Zoho token expired for {email}, refreshing...")
 
@@ -252,8 +250,23 @@ from email import policy
 
 CLIENT_ID = os.getenv("ZOHO_CLIENT_ID")
 CLIENT_SECRET = os.getenv("ZOHO_CLIENT_SECRET")
+REDIRECT_URI = os.getenv("ZOHO_REDIRECT_URI")
 ATTACHMENT_DIR = "attachments"
 BASE_URL = "https://mail.zoho.in/api"
+ZOHO_AUTH_URL = "https://accounts.zoho.in/oauth/v2/auth"
+
+
+def zoho_login():
+    try:
+        url = f"{ZOHO_AUTH_URL}?scope=ZohoMail.messages.ALL,ZohoMail.accounts.READ,ZohoMail.folders.READ&client_id={CLIENT_ID}&response_type=code&access_type=offline&prompt=consent&redirect_uri={REDIRECT_URI}"
+
+        return {
+                "status": "success",
+                "auth_url": url
+            }
+    except Exception as e:
+        logger.error(f"Error generating Zoho auth URL: {e}")
+        raise HTTPException(status_code=500, detail={"status": "error", "message": "Error generating Zoho auth URL"})
 
 def get_valid_zoho_token(email: str, db: SessionLocal()):
     logger.info(f"Fetching Zoho token for {email}")
@@ -369,17 +382,12 @@ def fetch_emails_zoho(email_id: str) -> dict:
     db = SessionLocal()
 
     try:
-        # ✅ Step 1: Token
         access_token = get_valid_zoho_token(email_id, db)
 
         headers = {
             "Authorization": f"Zoho-oauthtoken {access_token}"
         }
-
-        # ✅ Step 2: Account
         account_id = get_account_id(headers)
-
-        # ✅ Step 3: Inbox
         folders = get_folders(account_id, headers)
 
         inbox_id = None
@@ -390,16 +398,12 @@ def fetch_emails_zoho(email_id: str) -> dict:
 
         if not inbox_id:
             raise Exception("Inbox not found")
-
-        # ✅ Step 4: Messages
         messages = get_messages(account_id, inbox_id, headers)
 
         processed_count = 0
 
         for msg in messages:
             message_id = msg.get("messageId")
-
-            # 🔁 Duplicate check
             existing = db.query(EmailLogs).filter(
                 EmailLogs.message_id == message_id
             ).first()
@@ -409,8 +413,6 @@ def fetch_emails_zoho(email_id: str) -> dict:
 
             subject = msg.get("subject", "")
             sender = msg.get("fromAddress", "")
-
-            # ✅ Save email
             email_obj = EmailLogs(
                 message_id=message_id,
                 subject=subject,
@@ -419,14 +421,10 @@ def fetch_emails_zoho(email_id: str) -> dict:
             db.add(email_obj)
             db.commit()
             db.refresh(email_obj)
-
-            # ✅ Attachments
             attachments = get_attachments(account_id, inbox_id, message_id, headers)
 
             for att in attachments:
                 filename = att["attachmentName"]
-
-                # 🔥 SAME FILTER AS GMAIL
                 if not is_resume(filename):
                     logger.info(f"Skipping: {filename}")
                     continue
@@ -445,8 +443,6 @@ def fetch_emails_zoho(email_id: str) -> dict:
                 )
                 db.add(attachment)
                 db.commit()
-
-            # ✅ Celery trigger (same as Gmail)
             celery_task = resume_track.delay(str(email_obj.email_id))
 
             logger.info(f"Processed Zoho email: {subject}, task: {celery_task.id}")
@@ -454,6 +450,7 @@ def fetch_emails_zoho(email_id: str) -> dict:
             processed_count += 1
 
         return {
+            "status": "success",
             "message": "Zoho emails processed",
             "processed_count": processed_count
         }

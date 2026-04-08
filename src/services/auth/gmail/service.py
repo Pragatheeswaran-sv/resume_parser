@@ -19,11 +19,11 @@ import base64
 load_dotenv()
 logger = logging.getLogger(__name__)
 
-AUTH_URL = os.getenv("AUTH_URL")
-TOKEN_URL = os.getenv("TOKEN_URL")
-CLIENT_ID = os.getenv("CLIENT_ID")
-CLIENT_SECRET = os.getenv("CLIENT_SECRET")
-REDIRECT_URI = os.getenv("REDIRECT_URI")
+AUTH_URL = os.getenv("GMAIL_AUTH_URL")
+TOKEN_URL = os.getenv("GMAIL_TOKEN_URL")
+CLIENT_ID = os.getenv("GMAIL_CLIENT_ID")
+CLIENT_SECRET = os.getenv("GMAIL_CLIENT_SECRET")
+REDIRECT_URI = os.getenv("GMAIL_REDIRECT_URI")
 
 
 def gmail_login()-> Dict[str, Any]:
@@ -46,7 +46,7 @@ def gmail_login()-> Dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"Error generating auth URL: {e}")
-        raise HTTPException(status_code=500, detail="Error generating auth URL")
+        raise HTTPException(status_code=500, detail={"status": "error", "message": "Error generating auth URL"})
     
 # def gmail_callback(code: str) -> Dict[str, Any]:    
 #     logger.info(f"NAV----> Received auth code: {code}")
@@ -121,7 +121,7 @@ def gmail_callback(code: str, db = SessionLocal()) -> dict:
 
         if not email:
             logger.error(f"User info response invalid: {profile_data}")
-            raise HTTPException(status_code=400, detail="Unable to fetch user email")
+            raise HTTPException(status_code=400, detail={"status": "error", "message": "Unable to fetch user email"})
 
         logger.info(f"OAuth login success for email: {email}")
 
@@ -149,8 +149,6 @@ def gmail_callback(code: str, db = SessionLocal()) -> dict:
             db.add(source)
             db.commit()
             db.refresh(source)
-
-        # 🔹 Step 5: Store / Update Credentials
         existing_cred = db.query(OauthCredentials).filter(
             OauthCredentials.email == email,
             OauthCredentials.source_id == source.source_id
@@ -162,8 +160,6 @@ def gmail_callback(code: str, db = SessionLocal()) -> dict:
             logger.info(f"Updating existing credentials for {email}")
 
             existing_cred.access_token = access_token
-
-            # ⚠️ Refresh token may not always come
             if refresh_token:
                 existing_cred.refresh_token = refresh_token
 
@@ -194,17 +190,17 @@ def gmail_callback(code: str, db = SessionLocal()) -> dict:
     except requests.exceptions.HTTPError as http_err:
         logger.error(f"HTTP error during OAuth: {str(http_err)}")
         db.rollback()
-        raise HTTPException(status_code=500, detail="OAuth provider error")
+        raise HTTPException(status_code=500, detail={"status": "error", "message": "OAuth provider error"})
 
     except requests.exceptions.RequestException as req_err:
         logger.error(f"Request error: {str(req_err)}")
         db.rollback()
-        raise HTTPException(status_code=500, detail="Network error during OAuth")
+        raise HTTPException(status_code=500, detail={"status": "error", "message": "Network error during OAuth"})
 
     except Exception as db_err:
         logger.error(f"Database error: {str(db_err)}")
         db.rollback()
-        raise HTTPException(status_code=500, detail="Database error")
+        raise HTTPException(status_code=500, detail={"status": "error", "message": "Database error"})
 
     except HTTPException:
         db.rollback()
@@ -213,7 +209,7 @@ def gmail_callback(code: str, db = SessionLocal()) -> dict:
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}", exc_info=True)
         db.rollback()
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail={"status": "error", "message": "Internal server error"})
 
     finally:
         db.close()
@@ -230,11 +226,8 @@ def get_valid_access_token(email: str, db = SessionLocal()):
     if not cred:
         logger.error(f"No credentials found for {email}")
         raise Exception("OAuth credentials not found")
-
-    # 👉 Check expiry (assumes you store updated_at)
     expires_at = cred.updated_at + timedelta(seconds=cred.expires_in)
 
-    # 🔁 If expired → refresh
     if datetime.utcnow() >= expires_at:
         logger.info(f"NAV---->Access token expired for {email}, refreshing...")
         if not cred.refresh_token:
@@ -334,11 +327,8 @@ def fetch_emails_gmail(email_id: str) -> dict:
     db = SessionLocal()
     gmail_list_url = os.getenv("GMAIL_LIST_URL", "https://gmail.googleapis.com/gmail/v1/users/me/messages")
     try:
-        # 🔹 Step 1: Get valid token
         access_token = get_valid_access_token(email_id, db)
-
         headers = {"Authorization": f"Bearer {access_token}"}
-
         params = {
             # "q": "is:unread has:attachment",
             "q": "has:attachment",
@@ -350,24 +340,17 @@ def fetch_emails_gmail(email_id: str) -> dict:
 
         data = resp.json()
         messages = data.get("messages", [])
-
         if not messages:
             return {"message": "No new emails"}
-
         processed_count = 0
-
         for msg in messages:
             message_id = msg["id"]
-
-            # 🔹 Avoid duplicates
             existing = db.query(EmailLogs).filter(
                 EmailLogs.message_id == message_id
             ).first()
 
             if existing:
                 continue
-
-            # 🔹 Fetch full email
             msg_res = requests.get(
                 f"{gmail_list_url}/{message_id}",
                 headers=headers
@@ -387,7 +370,6 @@ def fetch_emails_gmail(email_id: str) -> dict:
                 if h["name"] == "From":
                     sender = h["value"]
 
-            # 🔹 Save email
             email_obj = EmailLogs(
                 message_id=message_id,
                 subject=subject,
@@ -396,18 +378,16 @@ def fetch_emails_gmail(email_id: str) -> dict:
             db.add(email_obj)
             db.commit()
             db.refresh(email_obj)
-
-            # 🔹 Process attachments
+            
             process_parts(payload, message_id, email_obj, access_token, db)
 
             # 🔹 Mark as read
-            requests.post(
-                f"{gmail_list_url}/{message_id}/modify",
-                headers=headers,
-                json={"removeLabelIds": ["UNREAD"]},
-            )
+            # requests.post(
+            #     f"{gmail_list_url}/{message_id}/modify",
+            #     headers=headers,
+            #     json={"removeLabelIds": ["UNREAD"]},
+            # )
 
-            # 🔹 Celery trigger
             celery_task = resume_track.delay(str(email_obj.email_id))
 
             logger.info(f"Processed email: {subject}, task: {celery_task.id}")
@@ -415,7 +395,8 @@ def fetch_emails_gmail(email_id: str) -> dict:
             processed_count += 1
 
         return {
-            "message": "Emails processed",
+            "status": "success",
+            "message": "Gmail emails processed",
             "processed_count": processed_count
         }
 
@@ -496,8 +477,6 @@ def fetch_emails_gmail(email_id: str) -> dict:
 def zoho_callback(code: str, db=SessionLocal()) -> dict:
     try:
         logger.info("Received Zoho auth code")
-
-        # 🔹 Step 1: Exchange code for tokens
         token_url = "https://accounts.zoho.in/oauth/v2/token"
 
         token_data = {
@@ -549,8 +528,6 @@ def zoho_callback(code: str, db=SessionLocal()) -> dict:
             raise HTTPException(status_code=400, detail="Unable to fetch user email")
 
         logger.info(f"Zoho OAuth success for email: {email}")
-
-        # 🔹 Step 3: Get or Create Zoho Source
         source = db.query(OauthSource).filter(
             OauthSource.source_name == "zoho"
         ).first()
@@ -565,7 +542,6 @@ def zoho_callback(code: str, db=SessionLocal()) -> dict:
             db.commit()
             db.refresh(source)
 
-        # 🔹 Step 4: Store / Update Credentials
         existing_cred = db.query(OauthCredentials).filter(
             OauthCredentials.email == email,
             OauthCredentials.source_id == source.source_id
@@ -575,8 +551,6 @@ def zoho_callback(code: str, db=SessionLocal()) -> dict:
             logger.info(f"Updating Zoho credentials for {email}")
 
             existing_cred.access_token = access_token
-
-            # ⚠️ Refresh token may not always come
             if refresh_token:
                 existing_cred.refresh_token = refresh_token
 
@@ -601,19 +575,18 @@ def zoho_callback(code: str, db=SessionLocal()) -> dict:
         return {
             "status": "success",
             "email": email,
-            "message": "Zoho OAuth connected successfully",
-            "code": code
+            "message": "Zoho OAuth connected successfully"
         }
 
     except requests.exceptions.HTTPError as http_err:
         logger.error(f"Zoho HTTP error: {str(http_err)}")
         db.rollback()
-        raise HTTPException(status_code=500, detail="Zoho OAuth provider error")
+        raise HTTPException(status_code=500, detail={"status": "error", "message": "Zoho OAuth provider error"})
 
     except requests.exceptions.RequestException as req_err:
         logger.error(f"Zoho request error: {str(req_err)}")
         db.rollback()
-        raise HTTPException(status_code=500, detail="Network error during Zoho OAuth")
+        raise HTTPException(status_code=500, detail={"status": "error", "message": "Network error during Zoho OAuth"})
 
     except HTTPException:
         db.rollback()
@@ -622,7 +595,7 @@ def zoho_callback(code: str, db=SessionLocal()) -> dict:
     except Exception as e:
         logger.error(f"Zoho unexpected error: {str(e)}", exc_info=True)
         db.rollback()
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail={"status": "error", "message": "Internal server error"})
 
     finally:
         db.close()
