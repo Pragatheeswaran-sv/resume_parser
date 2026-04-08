@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 
 from db.connection import SessionLocal
 from src.admin.models import ExtractionConfig
+from src.services.admin.service import is_within_extraction_window
 from src.services.email_reader.service import fetch_emails
 
 load_dotenv()
@@ -15,7 +16,14 @@ logging.basicConfig(
 logger = logging.getLogger("scheduler")
 
 DEFAULT_INTERVAL_MINUTES = 15
-_DEFAULTS = {"is_paused": False, "interval_minutes": DEFAULT_INTERVAL_MINUTES}
+_DEFAULTS = {
+    "is_paused": False,
+    "interval_minutes": DEFAULT_INTERVAL_MINUTES,
+    "window_enabled": False,
+    "window_start_time": None,
+    "window_end_time": None,
+    "window_timezone": "Asia/Kolkata",
+}
 
 
 def _load_config():
@@ -28,7 +36,14 @@ def _load_config():
             .first()
         )
         if cfg:
-            return {"is_paused": cfg.is_paused, "interval_minutes": cfg.interval_minutes}
+            return {
+                "is_paused": cfg.is_paused,
+                "interval_minutes": cfg.interval_minutes,
+                "window_enabled": cfg.window_enabled or False,
+                "window_start_time": cfg.window_start_time,
+                "window_end_time": cfg.window_end_time,
+                "window_timezone": cfg.window_timezone or "Asia/Kolkata",
+            }
         return dict(_DEFAULTS)
     except Exception:
         logger.warning(
@@ -44,11 +59,16 @@ def _load_config():
 def trigger_email_processing():
     """Fetch new emails and enqueue resume_track tasks via Celery.
 
-    Respects the global ``is_paused`` flag stored in ``extraction_config``.
+    Respects the global ``is_paused`` flag and time-window restriction
+    stored in ``extraction_config``.
     """
     config = _load_config()
     if config["is_paused"]:
         logger.info("Extraction is globally paused — skipping this cycle")
+        return
+
+    if not is_within_extraction_window(config):
+        logger.info("Skipping extraction: outside configured time window")
         return
 
     logger.info("Scheduler job triggered — checking for new emails")

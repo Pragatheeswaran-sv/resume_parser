@@ -77,11 +77,19 @@ class ExtractionConfigResponse(BaseModel):
     config_id: str
     is_paused: bool
     interval_minutes: int
+    window_enabled: bool
+    window_start_time: Optional[str] = None
+    window_end_time: Optional[str] = None
+    window_timezone: str
 
 
 class ExtractionConfigUpdate(BaseModel):
     interval_minutes: Optional[int] = None
     is_paused: Optional[bool] = None
+    window_enabled: Optional[bool] = None
+    window_start_time: Optional[str] = None
+    window_end_time: Optional[str] = None
+    window_timezone: Optional[str] = None
 
 
 # ── Generic response helpers ─────────────────────────────────────────────
