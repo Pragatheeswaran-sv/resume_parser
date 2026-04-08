@@ -96,3 +96,8 @@ class ExtractionConfig(Base):
     created_at = Column(DateTime(timezone=False), default=ist_now)
     updated_at = Column(DateTime(timezone=False), default=ist_now, onupdate=ist_now)
     is_active = Column(Boolean, default=True)
+
+    window_enabled = Column(Boolean, default=False)
+    window_start_time = Column(String(5), nullable=True)
+    window_end_time = Column(String(5), nullable=True)
+    window_timezone = Column(String(50), default="Asia/Kolkata")
