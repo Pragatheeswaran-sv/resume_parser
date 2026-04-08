@@ -19,6 +19,7 @@ from src.services.admin.service import (
     admin_check,
     delete_auth_mail,
     get_extraction_config,
+    is_within_extraction_window,
     list_email_accounts,
     list_mail,
     new_admin,
@@ -266,11 +267,15 @@ def update_config(
     body: ExtractionConfigUpdate,
     _admin=Depends(get_current_admin),
 ):
-    """Update extraction schedule (interval, pause flag)."""
+    """Update extraction schedule (interval, pause flag, time window)."""
     try:
         return update_extraction_config(
             interval_minutes=body.interval_minutes,
             is_paused=body.is_paused,
+            window_enabled=body.window_enabled,
+            window_start_time=body.window_start_time,
+            window_end_time=body.window_end_time,
+            window_timezone=body.window_timezone,
         )
     except ValueError as e:
         raise HTTPException(
@@ -305,10 +310,26 @@ def resume(_admin=Depends(get_current_admin)):
 
 @router.post("/admin/extraction/trigger")
 def trigger_all(
+    force: bool = False,
     _admin=Depends(get_current_admin),
 ):
-    """Manually trigger extraction for all accounts."""
+    """Manually trigger extraction for all accounts.
+
+    Args:
+        force: If True, bypass time-window restriction.
+    """
     try:
+        if not force and not is_within_extraction_window():
+            logger.info(
+                "Manual trigger blocked: outside configured time window (force=%s)",
+                force,
+            )
+            return {
+                "status": status.HTTP_200_OK,
+                "message": "Skipping extraction: outside configured time window",
+            }
+        if force:
+            logger.info("Manual trigger: force=true — bypassing time window check")
         return trigger_extraction()
     except ValueError as e:
         raise HTTPException(
@@ -320,14 +341,31 @@ def trigger_all(
 @router.post("/admin/extraction/trigger/{auth_mail_id}")
 def trigger_single(
     auth_mail_id: str,
+    force: bool = False,
     _admin=Depends(get_current_admin),
 ):
     """Manually trigger extraction for a specific email account.
 
     Args:
         auth_mail_id: UUID of the email account to extract.
+        force: If True, bypass time-window restriction.
     """
     try:
+        if not force and not is_within_extraction_window():
+            logger.info(
+                "Manual trigger for %s blocked: outside configured time window (force=%s)",
+                auth_mail_id,
+                force,
+            )
+            return {
+                "status": status.HTTP_200_OK,
+                "message": "Skipping extraction: outside configured time window",
+            }
+        if force:
+            logger.info(
+                "Manual trigger for %s: force=true — bypassing time window check",
+                auth_mail_id,
+            )
         return trigger_extraction(auth_mail_id=auth_mail_id)
     except ValueError as e:
         raise HTTPException(
