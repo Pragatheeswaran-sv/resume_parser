@@ -10,7 +10,8 @@ from sqlalchemy import text
 from src.resume_filter.api import router as resume_router
 from src.email_reader.api import router as email_router
 from src.candidate.api import router as candidate_route
-from src.admin.api import router as admin_route 
+from src.admin.api import router as admin_route
+from src.admin.dependencies import AllowedEmailMiddleware
 from fastapi.middleware.cors import CORSMiddleware
  
 
@@ -23,12 +24,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-app = FastAPI()
+app = FastAPI(
+    title="Resume Tracker API",
+    description="API for tracking, filtering, and semantically searching candidate resumes.",
+    version="1.0.0",
+)
 app.include_router(resume_router)
 app.include_router(email_router)
 app.include_router(candidate_route)
 app.include_router(admin_route)
 
+app.add_middleware(AllowedEmailMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "*"],
@@ -39,6 +45,7 @@ app.add_middleware(
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Return a structured 422 response for Pydantic / FastAPI validation errors."""
     logger.warning("Request validation error: %s", exc.errors())
     return JSONResponse(
         status_code=422,
@@ -59,6 +66,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
+    """Catch-all handler that logs the full traceback and returns a safe 500 response."""
     logger.error("Unhandled exception on %s %s: %s", request.method, request.url.path, str(exc), exc_info=True)
     return JSONResponse(
         status_code=500,

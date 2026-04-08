@@ -28,8 +28,11 @@ class AuthMail(Base):
 
     auth_mail_id = Column(UUID, primary_key= True, default= uuid.uuid4)
     email_address = Column(String(255), nullable=True)
-    password = Column(String(255), nullable=True)
+    imap_password = Column("password", String(255), nullable=True)
     connect_with = Column(JSON, nullable=True)
+    is_blocked = Column(Boolean, default=False)
+    extraction_enabled = Column(Boolean, default=True)
+    last_extraction_at = Column(DateTime(timezone=False), nullable=True)
     created_at = Column(DateTime(timezone=False), default=ist_now, nullable=False)
     updated_at = Column(DateTime(timezone=False), default=ist_now, onupdate=ist_now, nullable=False)
     created_by = Column(String, nullable = True)
@@ -83,4 +86,13 @@ class AiModelConfig(Base):
     admin = relationship("Admin")
 
 
-                                                                                                                                 
+class ExtractionConfig(Base):
+    """Singleton-style table: only one active row at a time."""
+    __tablename__ = "extraction_config"
+
+    config_id = Column(UUID, primary_key=True, default=uuid.uuid4)
+    is_paused = Column(Boolean, default=False)
+    interval_minutes = Column(Integer, default=15)
+    created_at = Column(DateTime(timezone=False), default=ist_now)
+    updated_at = Column(DateTime(timezone=False), default=ist_now, onupdate=ist_now)
+    is_active = Column(Boolean, default=True)
