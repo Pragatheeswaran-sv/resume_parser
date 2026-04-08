@@ -29,7 +29,7 @@ class AuthMail(Base):
     auth_mail_id = Column(UUID, primary_key= True, default= uuid.uuid4)
     email_address = Column(String(255), nullable=True)
     imap_password = Column("password", String(255), nullable=True)
-    connect_with = Column(JSON, nullable=True)
+    connect_with = Column(String(255), nullable=True, default= "")
     is_blocked = Column(Boolean, default=False)
     extraction_enabled = Column(Boolean, default=True)
     last_extraction_at = Column(DateTime(timezone=False), nullable=True)
