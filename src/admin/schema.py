@@ -44,7 +44,7 @@ class AdminLoginResponse(BaseModel):
 class AuthorizedUserCreate(BaseModel):
     email: str
     imap_password: Optional[str] = None
-    connect_with: dict
+    connect_with: str
 
 
 class AuthorizedUserUpdate(BaseModel):
@@ -60,7 +60,7 @@ class EmailAccountResponse(BaseModel):
     is_blocked: bool
     extraction_enabled: bool
     last_extraction_at: Optional[str] = None
-    connect_with: Optional[dict] = None
+    connect_with: Optional[str] = None
 
 
 class ExtractionToggleRequest(BaseModel):

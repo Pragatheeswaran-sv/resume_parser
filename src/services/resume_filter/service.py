@@ -83,31 +83,31 @@ def save_resumes_to_db(resumes):
             #     existing_candidate = db.query(Candidate).filter(
             #         Candidate.email_address == info_email
             #     ).first()
-            if not existing_candidate and info.get("phone_number"):
-                existing_candidate = db.query(Candidate).filter(
-                    Candidate.phone_number == info.get("phone_number")
-                ).first()
+            # if not existing_candidate and info.get("phone_number"):
+            #     existing_candidate = db.query(Candidate).filter(
+            #         Candidate.phone_number == info.get("phone_number")
+            #     ).first()
 
-            if existing_candidate:
-                candidate = existing_candidate
-                if not candidate.email_address and sender_email:
-                    candidate.email_address = sender_email
-                    candidate.email_from_sender = True
-                    db.add(candidate)
-                logger.info(f'Using existing candidate: {candidate.candidate_id}')
-            else:
-                candidate = Candidate(
-                    name=info.get("name", ""),
-                    email_address=info_email or sender_email or "",
-                    email_from_sender=bool(sender_email and not info_email),
-                    phone_number=info.get("phone_number", ""),
-                    location=info.get("location", ""),
-                    total_experience=normalize_experience(info.get("total_experience")),
-                    created_by="resume_parser"
-                )
-                db.add(candidate)
-                db.flush()
-                logger.info("NAV----> candidate added to db")
+            # if existing_candidate:
+            #     candidate = existing_candidate
+            #     if not candidate.email_address and sender_email:
+            #         candidate.email_address = sender_email
+            #         candidate.email_from_sender = True
+            #         db.add(candidate)
+            #     logger.info(f'Using existing candidate: {candidate.candidate_id}')
+            # else:
+            candidate = Candidate(
+                name=info.get("name", ""),
+                email_address=info_email or sender_email or "",
+                email_from_sender=bool(sender_email and not info_email),
+                phone_number=info.get("phone_number", ""),
+                location=info.get("location", ""),
+                total_experience=normalize_experience(info.get("total_experience")),
+                created_by="resume_parser"
+            )
+            db.add(candidate)
+            db.flush()
+            logger.info("NAV----> candidate added to db")
             
             # Add skills
             skills_list = info.get("skills", [])
@@ -362,7 +362,7 @@ def is_resume(text: str) -> bool:
 
     try:
         db = SessionLocal()
-        admin = db.query(Admin).first()
+        admin = db.query(Admin).filter(Admin.is_active == True).first()
 
         if not admin:   
             logger.warning("No admin found, defaulting to ollama with latest model")
@@ -390,6 +390,7 @@ def is_resume(text: str) -> bool:
                 messages = message
             )
             content = response.choices[0].message.content.strip()
+            logger.info(f"NAV----> the response from OpenAi {response}")
         elif model == "claude":
             if not api_key:
                 raise Exception("Claude API key not found")
@@ -405,11 +406,13 @@ def is_resume(text: str) -> bool:
                 ]
             )
             content = response.content[0].text.strip()
+            logger.info(f"NAV----> the response from Claude {response}")
         else:
             response = ollama.chat(
                 model = "llama3",
                 messages = message
             )
+            logger.info(f"NAV----> the response from Ollama {response}")
             content = response["message"]["content"].strip()
 
         try:
@@ -438,7 +441,7 @@ def is_resume(text: str) -> bool:
 def extract_basic_info(resume_text):
     """Use local Ollama LLM to extract structured info from resume text."""
 
-    logger.info("This section executed -----> ")
+    logger.info("This extract_basic_info executed -----> ")
     OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
     prompt = """
 		You are a highly accurate resume parser.
@@ -523,23 +526,76 @@ def extract_basic_info(resume_text):
 		- Strict JSON only
 		"""
     try:
-        response = ollama.chat(
-            model="llama3",
-            messages=[
-                {"role": "system", "content": "You output only JSON."},
-                {"role": "user", "content": prompt + "\n\nResume:\n" + resume_text[:4000]}
-            ]
-        )
-        logger.info(f'NAV----> before content')
-        content = response["message"]["content"].strip()
-        logger.info(f"NAv----> content {content}")
-        # clean JSON
-        start = content.find("{")
-        end = content.rfind("}") + 1
-        logger.info(f"NAV---> start {start}")
-        logger.info(f"NAV---> end {end}")
-        json_str = content[start:end]
-        return json.loads(json_str)
+        db = SessionLocal()
+        admin = db.query(Admin).filter(Admin.is_active == True).first()
+
+        if not admin:   
+            logger.warning("No admin found, defaulting to ollama with latest model")
+            raise Exception("No admin found")
+        
+        admin_id = admin.admin_id
+        model_info = get_model(admin_id)
+
+        model = model_info.get("model_name", "ollama").lower()
+        version = model_info.get("model_version_name", "latest").lower()
+        api_key = model_info.get("apikey")
+        
+        message = [
+                    {"role": "system", "content": "You only return JSON"},
+                    {"role": "user", "content": prompt + "\n\nDocument:\n" + resume_text[:2000]}
+                ]
+
+        if model == "openai":
+            if not api_key:
+                raise Exception("OpenAI API key not found")
+
+            client = OpenAI(api_key=api_key)
+
+            response = client.chat.completions.create(
+                model = version,
+                messages = message
+            )
+            content = response.choices[0].message.content.strip()
+            logger.info(f"NAV----> the response from OpenAi {response}")
+        elif model == "claude":
+            if not api_key:
+                raise Exception("Claude API key not found")
+
+            client = Anthropic(api_key=api_key)
+
+            response = client.messages.create(
+                model=version,
+                max_tokens=1000,
+                system="You only return JSON",
+                messages=[
+                    {"role": "user", "content": prompt + "\n\nDocument:\n" + resume_text[:2000]}
+                ]
+            )
+            content = response.content[0].text.strip()
+            logger.info(f"NAV----> the response from Claude {response}")
+        else:
+            response = ollama.chat(
+                model = "llama3",
+                messages = message
+            )
+            logger.info(f"NAV----> the response from Ollama {response}")
+            content = response["message"]["content"].strip()
+
+        try:
+            start = content.find("{")
+            end = content.rfind("}") + 1
+
+            if start == -1 or end == 0:
+                raise ValueError("No valid JSON object found in model response")
+
+            json_str = content[start:end]
+            data = json.loads(json_str)
+            logger.info(f"is_resume classification result: {data}")
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON returned by model: {content}")
+            raise ValueError("Model returned invalid JSON") from e
+       
+        return data
     
     except Exception as e:
         logger.info(f"[ERROR] LLM parse failed: {e}")
