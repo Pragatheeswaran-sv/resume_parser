@@ -8,10 +8,11 @@ API layer can translate them into appropriate HTTP responses.
 
 from typing import Any, Dict, List, Optional
 import logging
+import datetime
 
 import json
 
-
+from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from db.connection import SessionLocal
 from sqlalchemy import UUID, func, cast
@@ -461,6 +462,83 @@ def toggle_block(auth_mail_id: str, blocked: bool) -> Dict[str, Any]:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+#  Time-window evaluation
+# ═══════════════════════════════════════════════════════════════════════════
+
+def is_within_extraction_window(config: Optional[Dict[str, Any]] = None) -> bool:
+    """Check whether the current time falls within the configured extraction window.
+
+    When ``window_enabled`` is False (or *config* is None / missing the key),
+    execution is always allowed.  Supports cross-midnight windows such as
+    22:00 → 08:00.  The interval is **[start, end)** — inclusive of start,
+    exclusive of end.
+
+    Args:
+        config: Dict with window fields.  If None the active config is loaded
+                from the database automatically.
+
+    Returns:
+        True if execution is allowed, False otherwise.
+    """
+    if config is None:
+        session = SessionLocal()
+        try:
+            cfg = session.query(ExtractionConfig).filter(
+                ExtractionConfig.is_active.is_(True)
+            ).first()
+            if not cfg:
+                logger.info("No active extraction config found — window check passes")
+                return True
+            config = {
+                "window_enabled": cfg.window_enabled,
+                "window_start_time": cfg.window_start_time,
+                "window_end_time": cfg.window_end_time,
+                "window_timezone": cfg.window_timezone,
+            }
+        finally:
+            session.close()
+
+    if not config.get("window_enabled"):
+        logger.info("Time window is disabled — execution allowed")
+        return True
+
+    tz_name = config.get("window_timezone") or "Asia/Kolkata"
+    start_str = config.get("window_start_time")
+    end_str = config.get("window_end_time")
+
+    if not start_str or not end_str:
+        logger.warning(
+            "Time window enabled but start/end not configured — allowing execution"
+        )
+        return True
+
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        logger.error("Invalid timezone '%s' — allowing execution as fallback", tz_name)
+        return True
+
+    now = datetime.datetime.now(tz).time()
+    start_time = datetime.time.fromisoformat(start_str)
+    end_time = datetime.time.fromisoformat(end_str)
+
+    if start_time < end_time:
+        allowed = start_time <= now < end_time
+    else:
+        allowed = now >= start_time or now < end_time
+
+    logger.info(
+        "Time window check: now=%s, window=[%s, %s), timezone=%s, allowed=%s",
+        now.strftime("%H:%M:%S"),
+        start_str,
+        end_str,
+        tz_name,
+        allowed,
+    )
+    return allowed
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 #  4. Extraction config (global schedule / pause)
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -479,7 +557,8 @@ def get_extraction_config() -> Dict[str, Any]:
     """Retrieve the current global extraction schedule configuration.
 
     Returns:
-        Dict with ``config_id``, ``is_paused``, and ``interval_minutes``.
+        Dict with ``config_id``, ``is_paused``, ``interval_minutes``,
+        and time-window fields.
     """
     session = SessionLocal()
     try:
@@ -491,6 +570,10 @@ def get_extraction_config() -> Dict[str, Any]:
                 "config_id": str(cfg.config_id),
                 "is_paused": cfg.is_paused,
                 "interval_minutes": cfg.interval_minutes,
+                "window_enabled": cfg.window_enabled or False,
+                "window_start_time": cfg.window_start_time,
+                "window_end_time": cfg.window_end_time,
+                "window_timezone": cfg.window_timezone or "Asia/Kolkata",
             },
         }
     finally:
@@ -500,18 +583,26 @@ def get_extraction_config() -> Dict[str, Any]:
 def update_extraction_config(
     interval_minutes: Optional[int] = None,
     is_paused: Optional[bool] = None,
+    window_enabled: Optional[bool] = None,
+    window_start_time: Optional[str] = None,
+    window_end_time: Optional[str] = None,
+    window_timezone: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Update the global extraction schedule configuration.
 
     Args:
         interval_minutes: New polling interval (must be >= 1 if provided).
         is_paused: New paused state (if provided).
+        window_enabled: Enable or disable time-window restriction.
+        window_start_time: Window start in ``"HH:MM"`` format.
+        window_end_time: Window end in ``"HH:MM"`` format.
+        window_timezone: IANA timezone name (e.g. ``"Asia/Kolkata"``).
 
     Returns:
         Dict with the updated configuration values.
 
     Raises:
-        ValueError: If *interval_minutes* is less than 1.
+        ValueError: If *interval_minutes* is less than 1 or time format is invalid.
     """
     session = SessionLocal()
     try:
@@ -522,6 +613,19 @@ def update_extraction_config(
             cfg.interval_minutes = interval_minutes
         if is_paused is not None:
             cfg.is_paused = is_paused
+
+        if window_enabled is not None:
+            cfg.window_enabled = window_enabled
+        if window_start_time is not None:
+            datetime.time.fromisoformat(window_start_time)
+            cfg.window_start_time = window_start_time
+        if window_end_time is not None:
+            datetime.time.fromisoformat(window_end_time)
+            cfg.window_end_time = window_end_time
+        if window_timezone is not None:
+            ZoneInfo(window_timezone)
+            cfg.window_timezone = window_timezone
+
         session.commit()
         return {
             "status": status.HTTP_200_OK,
@@ -530,6 +634,10 @@ def update_extraction_config(
                 "config_id": str(cfg.config_id),
                 "is_paused": cfg.is_paused,
                 "interval_minutes": cfg.interval_minutes,
+                "window_enabled": cfg.window_enabled or False,
+                "window_start_time": cfg.window_start_time,
+                "window_end_time": cfg.window_end_time,
+                "window_timezone": cfg.window_timezone or "Asia/Kolkata",
             },
         }
     except ValueError:

@@ -13,6 +13,7 @@ from src.candidate.api import router as candidate_route
 from src.admin.api import router as admin_route
 from src.admin.dependencies import AllowedEmailMiddleware
 from fastapi.middleware.cors import CORSMiddleware
+from src.auth.api import router as auth_router
  
 
  
@@ -33,6 +34,7 @@ app.include_router(resume_router)
 app.include_router(email_router)
 app.include_router(candidate_route)
 app.include_router(admin_route)
+app.include_router(auth_router)
 
 app.add_middleware(AllowedEmailMiddleware)
 app.add_middleware(
