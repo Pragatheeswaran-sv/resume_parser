@@ -47,6 +47,12 @@ class AuthorizedUserCreate(BaseModel):
     connect_with: dict
 
 
+class AuthorizedUserUpdate(BaseModel):
+    email: Optional[str] = None
+    imap_password: Optional[str] = None
+    connect_with: Optional[dict] = None
+
+
 class EmailAccountResponse(BaseModel):
     auth_mail_id: str
     email_address: Optional[str] = None
