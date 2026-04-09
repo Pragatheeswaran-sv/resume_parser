@@ -11,7 +11,8 @@ from db.connection import SessionLocal
 from src.email_reader.models import EmailLogs
 from src.services.auth.gmail.service import gmail_login
 from src.services.auth.gmail.service import gmail_callback
-from src.services.auth.gmail.service import zoho_callback
+# from src.services.auth.gmail.service import zoho_callback
+from src.services.auth.zoho.service import zoho_callback
 from src.services.auth.gmail.service import fetch_emails_gmail
 from src.services.auth.zoho.service import fetch_emails_zoho
 from src.auth.schemas import EmailRequest, EmailFetchResponse, EmailFetchResult
