@@ -1,9 +1,8 @@
 from fastapi.responses import RedirectResponse
-from fastapi import Request
 import requests
 import logging
 from dotenv import load_dotenv
-from fastapi import APIRouter, HTTPException, status
+from fastapi import Request, APIRouter, HTTPException, status
 from typing import Dict, Any
 import os
 from urllib.parse import urlencode
@@ -266,7 +265,7 @@ def zoho_login():
             }
     except Exception as e:
         logger.error(f"Error generating Zoho auth URL: {e}")
-        raise HTTPException(status_code=500, detail={"status": "error", "message": "Error generating Zoho auth URL"})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail={"status": "error", "message": "Error generating Zoho auth URL"})
 
 def get_valid_zoho_token(email: str, db: SessionLocal()):
     logger.info(f"Fetching Zoho token for {email}")

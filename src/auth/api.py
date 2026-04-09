@@ -31,11 +31,11 @@ router = APIRouter(
 	},
 )
 
-GMAIL_AUTH_URL = os.getenv("GMAIL_AUTH_URL")
-GMAIL_TOKEN_URL = os.getenv("GMAIL_TOKEN_URL")
-GMAIL_CLIENT_ID = os.getenv("GMAIL_CLIENT_ID")
-GMAIL_CLIENT_SECRET = os.getenv("GMAIL_CLIENT_SECRET")
-GMAIL_REDIRECT_URI = os.getenv("GMAIL_REDIRECT_URI")
+# GMAIL_AUTH_URL = os.getenv("GMAIL_AUTH_URL")
+# GMAIL_TOKEN_URL = os.getenv("GMAIL_TOKEN_URL")
+# GMAIL_CLIENT_ID = os.getenv("GMAIL_CLIENT_ID")
+# GMAIL_CLIENT_SECRET = os.getenv("GMAIL_CLIENT_SECRET")
+# GMAIL_REDIRECT_URI = os.getenv("GMAIL_REDIRECT_URI")
 
 @router.get("/oauth/login/gmail")
 def oauth_gmail_login() -> dict:
@@ -91,118 +91,118 @@ def oauth_zoho_login() -> dict:
             detail={"status": "error", "message": str(e)},
         )
 
-@router.post("/emails")
-def fetch_emails_oauth(request: EmailRequest) -> dict:
-    logger.info(f"NAV----> Fetching emails for email_id: {request.email_id}")
-    response = fetch_emails_gmail(email_id=request.email_id)
-    # response = fetch_emails_zoho(email_id=request.email_id)
-    return response
-
 # @router.post("/emails")
-# def fetch_emails_oauth():
-#     """
-#     Fetch emails from all active users based on OAuth source (Gmail / Zoho).
+# def fetch_emails_oauth(request: EmailRequest) -> dict:
+#     logger.info(f"NAV----> Fetching emails for email_id: {request.email_id}")
+#     response = fetch_emails_gmail(email_id=request.email_id)
+#     # response = fetch_emails_zoho(email_id=request.email_id)
+#     return response
 
-#     This API performs the following steps:
+@router.post("/emails")
+def fetch_emails_oauth() -> EmailFetchResponse:
+    """
+    Fetch emails from all active users based on OAuth source (Gmail / Zoho).
 
-#     1. Retrieves all active email खात (accounts) from `AuthMail`
-#     2. For each email:
-#         - Finds corresponding OAuth credentials from `OauthCredentials`
-#         - Determines the email provider using `OauthSource`
-#     3. Based on the provider:
-#         - Calls Gmail service if source is `gmail`
-#         - Calls Zoho service if source is `zoho`
-#     4. Aggregates results for all processed emails
+    This API performs the following steps:
 
-#     ### Returns:
-#     - message: Status of the operation
-#     - results: List of processed emails with provider and status
+    1. Retrieves all active email खात (accounts) from `AuthMail`
+    2. For each email:
+        - Finds corresponding OAuth credentials from `OauthCredentials`
+        - Determines the email provider using `OauthSource`
+    3. Based on the provider:
+        - Calls Gmail service if source is `gmail`
+        - Calls Zoho service if source is `zoho`
+    4. Aggregates results for all processed emails
 
-#     ### Possible Errors:
-#     - 500: Internal server error
-#     """
+    ### Returns:
+    - message: Status of the operation
+    - results: List of processed emails with provider and status
 
-#     logger.info("NAV----> Fetching emails for all active users")
-#     db = SessionLocal()
+    ### Possible Errors:
+    - 500: Internal server error
+    """
 
-#     results = []
+    logger.info("NAV----> Fetching emails for all active users")
+    db = SessionLocal()
 
-#     try:
-#         # 1. Get all active email
-#         auth_mails = db.query(AuthMail).filter(
-#             AuthMail.is_active == True
-#         ).all()
-#         logger.info(f"NAV----> Found {len(auth_mails)} active email accounts")
+    results = []
 
-#         if not auth_mails:
-#             return EmailFetchResponse(
-#                 message="No active email accounts found",
-#                 results=[]
-#             )
+    try:
+        # 1. Get all active email
+        auth_mails = db.query(AuthMail).filter(
+            AuthMail.is_active == True
+        ).all()
+        logger.info(f"NAV----> Found {len(auth_mails)} active email accounts")
 
-#         for mail in auth_mails:
-#             email_id = (mail.email_address or "").strip()
+        if not auth_mails:
+            return EmailFetchResponse(
+                message="No active email accounts found",
+                results=[]
+            )
 
-#             if not email_id:
-#                 logger.warning("Empty email found, skipping...")
-#                 continue
+        for mail in auth_mails:
+            email_id = (mail.email_address or "").strip()
 
-#             logger.info(f"Processing email: {email_id}")
+            if not email_id:
+                logger.warning("Empty email found, skipping...")
+                continue
 
-#             # 2. Fetch OAuth credentials
-#             cred = db.query(OauthCredentials).filter(
-#                 OauthCredentials.email == email_id,
-#                 OauthCredentials.is_active == True
-#             ).first()
+            logger.info(f"Processing email: {email_id}")
 
-#             if not cred:
-#                 logger.warning(f"No OAuth credentials found for {email_id}")
-#                 continue
+            # 2. Fetch OAuth credentials
+            cred = db.query(OauthCredentials).filter(
+                OauthCredentials.email == email_id,
+                OauthCredentials.is_active == True
+            ).first()
 
-#             if not cred.source:
-#                 logger.warning(f"No source mapped for {email_id}")
-#                 continue
+            if not cred:
+                logger.warning(f"No OAuth credentials found for {email_id}")
+                continue
 
-#             # 3. Identify source
-#             source_name = cred.source.source_name.lower().strip()
+            if not cred.source:
+                logger.warning(f"No source mapped for {email_id}")
+                continue
 
-#             logger.info(f"Source detected: {source_name}")
+            # 3. Identify source
+            source_name = cred.source.source_name.lower().strip()
 
-#             # 4. Call respective service
-#             try:
-#                 if source_name == "gmail":
-#                     service_response = fetch_emails_gmail(email_id=email_id)
+            logger.info(f"Source detected: {source_name}")
 
-#                 elif source_name == "zoho":
-#                     service_response = fetch_emails_zoho(email_id=email_id)
+            # 4. Call respective service
+            try:
+                if source_name == "gmail":
+                    service_response = fetch_emails_gmail(email_id=email_id)
 
-#                 else:
-#                     logger.warning(f"Unsupported source: {source_name}")
-#                     continue
+                elif source_name == "zoho":
+                    service_response = fetch_emails_zoho(email_id=email_id)
 
-#                 status = "success"
+                else:
+                    logger.warning(f"Unsupported source: {source_name}")
+                    continue
 
-#             except Exception as service_error:
-#                 logger.error(f"Error processing {email_id}: {str(service_error)}")
-#                 status = f"failed: {str(service_error)}"
+                status = "success"
 
-#             results.append(
-#                 EmailFetchResult(
-#                     email=email_id,
-#                     source=source_name,
-#                     status=status
-#                 )
-#             )
+            except Exception as service_error:
+                logger.error(f"Error processing {email_id}: {str(service_error)}")
+                status = f"failed: {str(service_error)}"
 
-#         return EmailFetchResponse(
-#             message="Email fetching completed",
-#             results=results
-#         )
+            results.append(
+                EmailFetchResult(
+                    email=email_id,
+                    source=source_name,
+                    status=status
+                )
+            )
 
-#     except Exception as e:
-#         logger.error(f"Fatal error in fetch_emails_oauth: {str(e)}")
-#         raise HTTPException(
-#             status_code=status.HTTP_400_BAD_REQUEST,
-#             detail={"status": "error", "message": str(e)},
-#         )
+        return EmailFetchResponse(
+            message="Email fetching completed",
+            results=results
+        )
+
+    except Exception as e:
+        logger.error(f"Fatal error in fetch_emails_oauth: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"status": "error", "message": str(e)},
+        )
 

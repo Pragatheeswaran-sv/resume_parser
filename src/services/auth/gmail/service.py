@@ -1,9 +1,8 @@
 from fastapi.responses import RedirectResponse
-from fastapi import Request
 import requests
 import logging
 from dotenv import load_dotenv
-from fastapi import APIRouter, HTTPException, status
+from fastapi import Request, APIRouter, HTTPException, status
 from typing import Dict, Any
 import os
 from urllib.parse import urlencode
@@ -46,7 +45,7 @@ def gmail_login()-> Dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"Error generating auth URL: {e}")
-        raise HTTPException(status_code=500, detail={"status": "error", "message": "Error generating auth URL"})
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"status": "error", "message": "Error generating auth URL"})
     
 # def gmail_callback(code: str) -> Dict[str, Any]:    
 #     logger.info(f"NAV----> Received auth code: {code}")
@@ -88,7 +87,7 @@ def gmail_callback(code: str, db = SessionLocal()) -> dict:
         }
 
         token_res = requests.post(TOKEN_URL, data=token_data)
-        token_res.raise_for_status()  # 🚨 catches HTTP errors
+        token_res.raise_for_status()
 
         tokens = token_res.json()
 
@@ -98,7 +97,7 @@ def gmail_callback(code: str, db = SessionLocal()) -> dict:
 
         if not access_token:
             logger.error(f"Token response invalid: {tokens}")
-            raise HTTPException(status_code=400, detail="Failed to get access token")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Failed to get access token")
 
         # 🔹 Step 2: Get user email
         # userinfo_res = requests.get(
@@ -121,7 +120,7 @@ def gmail_callback(code: str, db = SessionLocal()) -> dict:
 
         if not email:
             logger.error(f"User info response invalid: {profile_data}")
-            raise HTTPException(status_code=400, detail={"status": "error", "message": "Unable to fetch user email"})
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"status": "error", "message": "Unable to fetch user email"})
 
         logger.info(f"OAuth login success for email: {email}")
 
@@ -190,17 +189,17 @@ def gmail_callback(code: str, db = SessionLocal()) -> dict:
     except requests.exceptions.HTTPError as http_err:
         logger.error(f"HTTP error during OAuth: {str(http_err)}")
         db.rollback()
-        raise HTTPException(status_code=500, detail={"status": "error", "message": "OAuth provider error"})
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"status": "error", "message": "OAuth provider error"})
 
     except requests.exceptions.RequestException as req_err:
         logger.error(f"Request error: {str(req_err)}")
         db.rollback()
-        raise HTTPException(status_code=500, detail={"status": "error", "message": "Network error during OAuth"})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail={"status": "error", "message": "Network error during OAuth"})
 
     except Exception as db_err:
         logger.error(f"Database error: {str(db_err)}")
         db.rollback()
-        raise HTTPException(status_code=500, detail={"status": "error", "message": "Database error"})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail={"status": "error", "message": "Database error"})
 
     except HTTPException:
         db.rollback()
@@ -209,7 +208,7 @@ def gmail_callback(code: str, db = SessionLocal()) -> dict:
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}", exc_info=True)
         db.rollback()
-        raise HTTPException(status_code=500, detail={"status": "error", "message": "Internal server error"})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail={"status": "error", "message": "Internal server error"})
 
     finally:
         db.close()
@@ -502,7 +501,7 @@ def zoho_callback(code: str, db=SessionLocal()) -> dict:
 
         if not access_token:
             logger.error(f"Zoho token response invalid: {tokens}")
-            raise HTTPException(status_code=400, detail="Failed to get access token")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"status": "error", "message": "Failed to get access token"})
 
         # 🔹 Step 2: Get user email
         # userinfo_res = requests.get(
@@ -525,7 +524,7 @@ def zoho_callback(code: str, db=SessionLocal()) -> dict:
 
         if not email:
             logger.error(f"Zoho user info invalid: {accounts_data}")
-            raise HTTPException(status_code=400, detail="Unable to fetch user email")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"status": "error", "message": "Unable to fetch user email"})
 
         logger.info(f"Zoho OAuth success for email: {email}")
         source = db.query(OauthSource).filter(
@@ -581,12 +580,12 @@ def zoho_callback(code: str, db=SessionLocal()) -> dict:
     except requests.exceptions.HTTPError as http_err:
         logger.error(f"Zoho HTTP error: {str(http_err)}")
         db.rollback()
-        raise HTTPException(status_code=500, detail={"status": "error", "message": "Zoho OAuth provider error"})
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"status": "error", "message": "Zoho OAuth provider error"})
 
     except requests.exceptions.RequestException as req_err:
         logger.error(f"Zoho request error: {str(req_err)}")
         db.rollback()
-        raise HTTPException(status_code=500, detail={"status": "error", "message": "Network error during Zoho OAuth"})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail={"status": "error", "message": "Network error during Zoho OAuth"})
 
     except HTTPException:
         db.rollback()
@@ -595,7 +594,7 @@ def zoho_callback(code: str, db=SessionLocal()) -> dict:
     except Exception as e:
         logger.error(f"Zoho unexpected error: {str(e)}", exc_info=True)
         db.rollback()
-        raise HTTPException(status_code=500, detail={"status": "error", "message": "Internal server error"})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail={"status": "error", "message": "Internal server error"})
 
     finally:
         db.close()

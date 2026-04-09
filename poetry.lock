@@ -1607,7 +1607,7 @@ librabbitmq = ["librabbitmq (>=2.0.0) ; python_version < \"3.11\""]
 mongodb = ["pymongo (==4.15.3)"]
 msgpack = ["msgpack (==1.1.2)"]
 pyro = ["pyro4 (==4.82)"]
-qpid = ["qpid-python (==1.36.0-1)", "qpid-tools (==1.36.0-1)"]
+qpid = ["qpid-python (==1.36.0.post1)", "qpid-tools (==1.36.0.post1)"]
 redis = ["redis (>=4.5.2,!=4.5.5,!=5.0.2,<6.5)"]
 slmq = ["softlayer_messaging (>=1.0.3)"]
 sqlalchemy = ["sqlalchemy (>=1.4.48,<2.1)"]
@@ -4916,9 +4916,9 @@ files = [
 ]
 
 [package.extras]
-cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and python_version < \"3.14\"", "cffi (>=2.0.0b) ; platform_python_implementation != \"PyPy\" and python_version >= \"3.14\""]
+cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and python_version < \"3.14\"", "cffi (>=2.0.0b0) ; platform_python_implementation != \"PyPy\" and python_version >= \"3.14\""]
 
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "28e648632c5af2f6e7256fe62dd77b1eff932bfeab1e8e32598565786bc90ea2"
+content-hash = "5c2bac1e1d7b5d3ba3f7cea231313c753bde66716ae5d30c490f55e3aaf5bc20"
