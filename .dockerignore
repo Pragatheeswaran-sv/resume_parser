@@ -1,0 +1,14 @@
+.git
+.gitignore
+.vscode
+.env
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+dist
+build
+attachments
+*.md
+docker-compose.yaml
+.dockerignore
