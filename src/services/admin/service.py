@@ -79,23 +79,48 @@ def admin_check(email: str, password: str) -> Dict[str, Any]:
         session.close()
 
 
-def sso_user_login(email: str) -> Dict[str, Any]:
+SUPPORTED_SSO_PROVIDERS = {"google", "zoho", "microsoft"}
+
+
+def sso_user_login(
+    email: str,
+    provider: Optional[str] = None,
+) -> Dict[str, Any]:
     """Issue a JWT for an SSO-authenticated user after verifying they exist
     in ``auth_mail`` and are not blocked.
 
+    The frontend is responsible for verifying the user's identity with the
+    SSO provider (Google / Zoho / Microsoft) before calling this function.
+    This function normalises the provider name, validates the user against
+    ``auth_mail``, and embeds SSO metadata into the JWT so downstream
+    services know the authentication origin.
+
     Args:
         email: Verified email from the SSO provider.
+        provider: Optional SSO provider identifier (e.g. ``"google"``,
+            ``"zoho"``, ``"microsoft"``).  Normalised to lowercase.
 
     Returns:
         Dict containing an access token and user profile info.
 
     Raises:
-        ValueError: If the email is empty, not approved, or the account is blocked.
+        ValueError: If the email is empty, the provider is unsupported,
+            the email is not approved, or the account is blocked.
     """
     session = SessionLocal()
     try:
-        if not email:
+        if not email or not email.strip():
             raise ValueError("Email must be provided")
+        email = email.strip().lower()
+
+        normalized_provider: Optional[str] = None
+        if provider:
+            normalized_provider = provider.strip().lower()
+            if normalized_provider not in SUPPORTED_SSO_PROVIDERS:
+                raise ValueError(
+                    f"Unsupported SSO provider: {provider}. "
+                    f"Supported providers: {', '.join(sorted(SUPPORTED_SSO_PROVIDERS))}"
+                )
 
         account = (
             session.query(AuthMail)
@@ -109,21 +134,29 @@ def sso_user_login(email: str) -> Dict[str, Any]:
         if not account:
             raise ValueError("Access denied: email not approved or account blocked")
 
-        token = create_access_token({
+        token_payload: Dict[str, Any] = {
             "sub": str(account.auth_mail_id),
             "email": account.email_address,
             "role": "user",
-        })
+        }
+        if normalized_provider:
+            token_payload["provider"] = normalized_provider
+
+        token = create_access_token(token_payload)
+
+        response_data: Dict[str, Any] = {
+            "access_token": token,
+            "token_type": "bearer",
+            "role": "user",
+            "email": account.email_address,
+        }
+        if normalized_provider:
+            response_data["provider"] = normalized_provider
 
         return {
             "status": status.HTTP_200_OK,
             "message": "User logged in successfully",
-            "data": {
-                "access_token": token,
-                "token_type": "bearer",
-                "role": "user",
-                "email": account.email_address,
-            },
+            "data": response_data,
         }
     except ValueError:
         raise

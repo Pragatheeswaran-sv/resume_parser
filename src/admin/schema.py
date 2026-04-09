@@ -1,5 +1,5 @@
-from pydantic import BaseModel
-from typing import Optional
+from pydantic import BaseModel, field_validator
+from typing import Literal, Optional
 
 
 # ── Auth / JWT ────────────────────────────────────────────────────────────
@@ -12,10 +12,20 @@ class AdminLoginRequest(BaseModel):
 class SSOLoginRequest(BaseModel):
     """Payload sent by the frontend after the user authenticates with the
     SSO provider.  The ``email`` field is the verified identity from the
-    SSO token; ``provider`` is optional metadata (e.g. "google", "azure").
+    SSO token; ``provider`` identifies the authentication origin.
+
+    Supported providers: ``"google"``, ``"zoho"``, ``"microsoft"``.
+    When omitted the login is treated as a generic SSO login.
     """
     email: str
-    provider: Optional[str] = None
+    provider: Optional[Literal["google", "zoho", "microsoft"]] = None
+
+    @field_validator("email")
+    @classmethod
+    def email_must_not_be_blank(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("Email must not be empty")
+        return v.strip().lower()
 
 
 class TokenResponse(BaseModel):
@@ -24,6 +34,7 @@ class TokenResponse(BaseModel):
     role: str
     name: Optional[str] = None
     email: str
+    provider: Optional[str] = None
 
 
 # ── Admin ────────────────────────────────────────────────────────────────

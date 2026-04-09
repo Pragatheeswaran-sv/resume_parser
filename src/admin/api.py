@@ -104,13 +104,13 @@ def sso_login(body: SSOLoginRequest):
     """Accept an SSO-verified email and return a JWT for the user.
 
     The frontend should verify the SSO token with the identity provider
-    first, then call this endpoint with the verified email.
+    (Google, Zoho, or Microsoft) first, then call this endpoint with the
+    verified email and optional provider name.
     """
     try:
-        return sso_user_login(body.email)
+        return sso_user_login(body.email, provider=body.provider)
     except ValueError as e:
         logger.warning("[sso_login] Error: %s", str(e), exc_info=True)
-        logger.warning("[admin_login] Error: %s", str(e), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"status": "error", "message": str(e)},
