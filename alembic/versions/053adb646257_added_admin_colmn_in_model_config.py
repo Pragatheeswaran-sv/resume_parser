@@ -1,7 +1,7 @@
 """added admin colmn in model_config
 
 Revision ID: 053adb646257
-Revises: aeda0174eb0c
+Revises: 90a59b8e24a3
 Create Date: 2026-04-07 08:04:00.746489
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = '053adb646257'
-down_revision: Union[str, Sequence[str], None] = 'aeda0174eb0c'
+down_revision: Union[str, Sequence[str], None] = '90a59b8e24a3'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

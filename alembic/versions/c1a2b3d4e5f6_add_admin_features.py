@@ -1,7 +1,7 @@
 """add admin features: extraction_config table, auth_mail extensions
 
 Revision ID: c1a2b3d4e5f6
-Revises: aeda0174eb0c
+Revises: ffa117ac816e
 Create Date: 2026-04-06 12:00:00.000000
 
 """
