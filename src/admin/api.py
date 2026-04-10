@@ -8,6 +8,7 @@ from src.admin.dependencies import get_current_admin
 from src.admin.schema import (
     AdminCreate,
     AdminLoginRequest,
+    AdminUpdate,
     AuthorizedUserCreate,
     AuthorizedUserUpdate,
     BlockToggleRequest,
@@ -25,11 +26,13 @@ from src.services.admin.service import (
     new_admin,
     new_auth,
     pause_extraction,
+    profile,
     resume_extraction,
     sso_user_login,
     toggle_block,
     toggle_extraction,
     trigger_extraction,
+    update_admin_profile,
     update_auth_mail,
     update_extraction_config,
     list_model,
@@ -85,6 +88,17 @@ def create_admin(payload: AdminCreate):
             detail={"status": "error", "message": str(e)},
         )
 
+@router.get("/admin_profile")
+def get_profile(admin_id):
+    """Fetch the profile of the currently authenticated admin."""
+    try:
+        return profile(admin_id)
+    except ValueError as e:
+        logger.warning("[get_profile] Error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"status": "error", "message": str(e)},
+        )
 
 @router.post("/admin/login")
 def admin_login(body: AdminLoginRequest):
@@ -98,6 +112,17 @@ def admin_login(body: AdminLoginRequest):
             detail={"status": "error", "message": str(e)},
         )
 
+@router.patch("/admin_update")
+def update_admin(admin_id: str, payload: AdminUpdate):
+    """Update an existing admin's profile."""
+    try:
+        return update_admin_profile(admin_id, payload.model_dump())
+    except ValueError as e:
+        logger.warning("[update_admin] Error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"status": "error", "message": str(e)},
+        )
 
 @router.post("/auth/sso/login")
 def sso_login(body: SSOLoginRequest):

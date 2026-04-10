@@ -8,6 +8,11 @@ class AdminLoginRequest(BaseModel):
     email: str
     password: str
 
+class AdminUpdate(BaseModel):
+    name: Optional[str] = None
+    phone_number: Optional[str] = None
+    old_password: Optional[str] = None
+    new_password: Optional[str] = None
 
 class SSOLoginRequest(BaseModel):
     """Payload sent by the frontend after the user authenticates with the

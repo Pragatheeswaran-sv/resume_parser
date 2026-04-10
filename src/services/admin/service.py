@@ -78,6 +78,81 @@ def admin_check(email: str, password: str) -> Dict[str, Any]:
     finally:
         session.close()
 
+def profile(admin_id):
+    db = SessionLocal()
+    try:
+        if not admin_id or not admin_id.strip():
+            raise ValueError("Admin ID must be provided")
+        
+        admin  = db.query(Admin).filter_by(admin_id = admin_id ).first()
+        if not admin:
+            raise ValueError("Admin not found")
+        return{
+            "status": status.HTTP_200_OK,
+            "message": "Admin profile retrieved successfully",
+            
+            "data" : {
+                'admin_name' : admin.name,
+                'admin_email' : admin.email_address,
+                'admin_phone_number' : admin.phone_number,
+            }
+        }
+    except ValueError:
+        raise
+    except Exception as e:
+        logger.warning("[admin_check] Error: %s", str(e), exc_info=True)
+        raise ValueError(str(e))
+    finally:
+        db.close()
+
+def update_admin_profile(admin_id, payload):
+    db = SessionLocal()
+    try:
+        if not admin_id or not admin_id.strip():
+            raise ValueError("Admin ID must be provided")
+        
+        admin  = db.query(Admin).filter_by(admin_id = admin_id ).first()
+        if not admin:
+            raise ValueError("Admin not found")
+        
+        name = payload.get("name") if payload.get("name") else admin.name
+        phone_number = payload.get("phone_number") if payload.get("phone_number") else admin.phone_number
+        old_password = payload.get("old_password")
+
+        if name == admin.name and phone_number == admin.phone_number and not payload.get("new_password"):
+            raise ValueError("No changes detected in the profile update")
+        
+        if not old_password or old_password.strip() == "":
+            raise ValueError("Old password is required to update profile")
+        new_password = payload.get("new_password") if payload.get("new_password") else None
+        is_password = verify_password(old_password, admin.password) if admin.password else False
+
+        if not is_password:
+            raise ValueError("Old password is incorrect")
+        
+        if new_password:
+            admin.password = hash_password(new_password)
+
+        admin.name = name
+        admin.phone_number = phone_number
+        db.commit()
+        return{
+            "status": status.HTTP_200_OK,
+            "message": "Admin profile updated successfully",
+            
+            "data" : {
+                'admin_name' : admin.name,
+                'admin_email' : admin.email_address,
+                'admin_phone_number' : admin.phone_number,
+            }
+        }
+    except ValueError:
+        raise
+    except Exception as e:
+        logger.warning("[update_admin_profile] Error: %s", str(e), exc_info=True)
+        raise ValueError(str(e))
+    finally:
+        db.close()
 
 SUPPORTED_SSO_PROVIDERS = {"google", "zoho", "microsoft"}
 

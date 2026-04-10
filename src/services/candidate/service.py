@@ -7,6 +7,7 @@ from src.candidate.models import (
     Candidate, CandidateSkills, Skill, CandidateEducation,
     Education, Role, WorkExperience, Company,
 )
+from src.resume_filter.models import Resume
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -102,6 +103,7 @@ def _base_candidate_query(db, edu_sq, skills_sq, work_sq):
                 "email", Candidate.email_address,
                 "phone_number", Candidate.phone_number,
                 "location", Candidate.location,
+                "matching_role", Resume.candidate_role,
                 "total_experience", Candidate.total_experience,
                 "education", func.coalesce(edu_sq.c.education, cast("[]", JSON)),
                 "skills", func.coalesce(skills_sq.c.skills, cast("[]", JSON)),
@@ -112,6 +114,7 @@ def _base_candidate_query(db, edu_sq, skills_sq, work_sq):
         .outerjoin(edu_sq, Candidate.candidate_id == edu_sq.c.candidate_id)
         .outerjoin(skills_sq, Candidate.candidate_id == skills_sq.c.candidate_id)
         .outerjoin(work_sq, Candidate.candidate_id == work_sq.c.candidate_id)
+        .outerjoin(Resume, Candidate.candidate_id == Resume.candidate_id)
         .filter(Candidate.is_active == True)
     )
 
