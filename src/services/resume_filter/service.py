@@ -71,6 +71,7 @@ def save_resumes_to_db(resumes):
             logger.info(f'NAV----> the info extracted {info}')
 
             info_email = (info.get("email") or "").strip().lower()
+            role = info.get("role", "").strip()
             if not info_email and sender_email:
                 logger.info(f'NAV----> using sender email fallback: {sender_email}')
                 info_email = sender_email
@@ -279,13 +280,13 @@ def save_resumes_to_db(resumes):
                             )
                             db.add(work_exp)
                             logger.info("NAV----> candidate experience added to db")
-            
+                                      
             # Create Resume record linking to candidate and attachment
             resume_record = Resume(
                 embedding=vector,
                 candidate_id=candidate.candidate_id,
                 attachment_id=attachment_id,
-                candidate_role=info.get("role", ""),
+                candidate_role= role,
                 created_by="resume_parser"
             )
             db.add(resume_record)
