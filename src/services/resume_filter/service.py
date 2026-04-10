@@ -17,7 +17,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from db.connection import SessionLocal
 from src.resume_filter.models import Resume
-from sqlalchemy import JSON, select, and_, cast, String, text, func
+from sqlalchemy import JSON, select, and_, cast, String, text, func, or_
 from sqlalchemy.orm import aliased, joinedload
 from src.email_reader.models import EmailLogs, Attachment
 from src.candidate.models import (
@@ -787,11 +787,17 @@ def search_resumes(filters: dict):
 
         conditions = [Candidate.is_active == True]
 
-        name = filters.get("name")
-        if name:
-            name = str(name).strip()
-            if name:
-                conditions.append(Candidate.name.ilike(f"%{name}%"))
+        name_list = filters.get("name")
+        if name_list:
+            name_conditions = []
+
+            for name in name_list:
+                name = str(name).strip()
+                if name:
+                    name_conditions.append(Candidate.name.ilike(f"%{name}%"))
+
+            if name_conditions:
+                conditions.append(or_(*name_conditions))
 
         exp_min = filters.get("min_experience")
         if exp_min is not None and exp_min != "":
