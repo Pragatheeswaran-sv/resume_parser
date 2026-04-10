@@ -58,15 +58,16 @@ class AdminLoginResponse(BaseModel):
 # ── AuthMail (connected email accounts) ─────────────────────────────────
 
 class AuthorizedUserCreate(BaseModel):
+    name: str
     email: str
-    imap_password: Optional[str] = None
-    connect_with: str
+    phone_number: str
 
 
 class AuthorizedUserUpdate(BaseModel):
     email: Optional[str] = None
     imap_password: Optional[str] = None
     connect_with: Optional[dict] = None
+    is_blocked : Optional[bool] = None
 
 
 class EmailAccountResponse(BaseModel):

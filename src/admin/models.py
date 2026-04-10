@@ -27,7 +27,9 @@ class AuthMail(Base):
     __tablename__ = "auth_mail"
 
     auth_mail_id = Column(UUID, primary_key= True, default= uuid.uuid4)
+    name = Column(String(255), nullable=True)
     email_address = Column(String(255), nullable=True)
+    phone_number = Column(String(20), nullable=True)
     imap_password = Column("password", String(255), nullable=True)
     connect_with = Column(String(255), nullable=True, default= "")
     is_blocked = Column(Boolean, default=False)

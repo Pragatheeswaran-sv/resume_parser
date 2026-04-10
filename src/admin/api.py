@@ -159,14 +159,14 @@ def get_auth_mails():
 
 
 @router.post("/create_auth_mail")
-def new_auth_mail(payload: AuthorizedUserCreate):
+def new_auth_mail(payload: AuthorizedUserCreate, admin_id):
     """Register a new authorized email account for IMAP extraction.
 
     Accepts a validated ``AuthorizedUserCreate`` body with email,
     optional IMAP password, and connection metadata.
     """
     try:
-        return new_auth(payload.model_dump())
+        return new_auth(payload.model_dump(), admin_id)
     except ValueError as e:
         logger.warning("[create_auth_mail] Error: %s", str(e), exc_info=True)
         logger.warning("[create_auth_mail] Error: %s", str(e), exc_info=True)
