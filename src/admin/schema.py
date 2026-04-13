@@ -33,12 +33,18 @@ class SSOLoginRequest(BaseModel):
         return v.strip().lower()
 
 
+class RefreshTokenRequest(BaseModel):
+    """Body for ``POST /api/auth/refresh`` and ``POST /api/auth/logout``."""
+    refresh_token: str
+
+
 class TokenResponse(BaseModel):
     access_token: str
+    refresh_token: Optional[str] = None
     token_type: str = "bearer"
     role: str
     name: Optional[str] = None
-    email: str
+    email: Optional[str] = None
     provider: Optional[str] = None
 
 
