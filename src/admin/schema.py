@@ -8,6 +8,11 @@ class AdminLoginRequest(BaseModel):
     email: str
     password: str
 
+class AdminUpdate(BaseModel):
+    name: Optional[str] = None
+    phone_number: Optional[str] = None
+    old_password: Optional[str] = None
+    new_password: Optional[str] = None
 
 class SSOLoginRequest(BaseModel):
     """Payload sent by the frontend after the user authenticates with the
@@ -53,15 +58,16 @@ class AdminLoginResponse(BaseModel):
 # ── AuthMail (connected email accounts) ─────────────────────────────────
 
 class AuthorizedUserCreate(BaseModel):
+    name: str
     email: str
-    imap_password: Optional[str] = None
-    connect_with: str
+    phone_number: str
 
 
 class AuthorizedUserUpdate(BaseModel):
     email: Optional[str] = None
     imap_password: Optional[str] = None
     connect_with: Optional[dict] = None
+    is_blocked : Optional[bool] = None
 
 
 class EmailAccountResponse(BaseModel):
