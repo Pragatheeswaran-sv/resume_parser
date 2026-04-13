@@ -1,5 +1,5 @@
-from pydantic import BaseModel
-from typing import Optional
+from pydantic import BaseModel, field_validator
+from typing import Literal, Optional
 
 
 # ── Auth / JWT ────────────────────────────────────────────────────────────
@@ -8,14 +8,29 @@ class AdminLoginRequest(BaseModel):
     email: str
     password: str
 
+class AdminUpdate(BaseModel):
+    name: Optional[str] = None
+    phone_number: Optional[str] = None
+    old_password: Optional[str] = None
+    new_password: Optional[str] = None
 
 class SSOLoginRequest(BaseModel):
     """Payload sent by the frontend after the user authenticates with the
     SSO provider.  The ``email`` field is the verified identity from the
-    SSO token; ``provider`` is optional metadata (e.g. "google", "azure").
+    SSO token; ``provider`` identifies the authentication origin.
+
+    Supported providers: ``"google"``, ``"zoho"``, ``"microsoft"``.
+    When omitted the login is treated as a generic SSO login.
     """
     email: str
-    provider: Optional[str] = None
+    provider: Optional[Literal["google", "zoho", "microsoft"]] = None
+
+    @field_validator("email")
+    @classmethod
+    def email_must_not_be_blank(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("Email must not be empty")
+        return v.strip().lower()
 
 
 class TokenResponse(BaseModel):
@@ -24,6 +39,7 @@ class TokenResponse(BaseModel):
     role: str
     name: Optional[str] = None
     email: str
+    provider: Optional[str] = None
 
 
 # ── Admin ────────────────────────────────────────────────────────────────
@@ -39,22 +55,23 @@ class AdminLoginResponse(BaseModel):
     email_address: str
 
 
-# ── AuthMail (connected email accounts) ─────────────────────────────────
+# ── Users (connected email accounts) ─────────────────────────────────
 
 class AuthorizedUserCreate(BaseModel):
+    name: str
     email: str
-    imap_password: Optional[str] = None
-    connect_with: str
+    phone_number: str
 
 
 class AuthorizedUserUpdate(BaseModel):
     email: Optional[str] = None
     imap_password: Optional[str] = None
     connect_with: Optional[dict] = None
+    is_blocked : Optional[bool] = None
 
 
 class EmailAccountResponse(BaseModel):
-    auth_mail_id: str
+    user_id: str
     email_address: Optional[str] = None
     is_active: bool
     is_blocked: bool

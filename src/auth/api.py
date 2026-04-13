@@ -18,7 +18,7 @@ from src.services.auth.zoho.service import fetch_emails_zoho
 from src.auth.schemas import EmailRequest, EmailFetchResponse, EmailFetchResult
 from src.services.auth.zoho.service import zoho_login
 from src.auth.models import OauthCredentials, OauthSource
-from src.admin.models import AuthMail
+from src.admin.models import Users
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -106,7 +106,7 @@ def fetch_emails_oauth() -> EmailFetchResponse:
 
     This API performs the following steps:
 
-    1. Retrieves all active email खात (accounts) from `AuthMail`
+    1. Retrieves all active email खात (accounts) from `Users`
     2. For each email:
         - Finds corresponding OAuth credentials from `OauthCredentials`
         - Determines the email provider using `OauthSource`
@@ -130,18 +130,18 @@ def fetch_emails_oauth() -> EmailFetchResponse:
 
     try:
         # 1. Get all active email
-        auth_mails = db.query(AuthMail).filter(
-            AuthMail.is_active == True
+        users = db.query(Users).filter(
+            Users.is_active == True
         ).all()
-        logger.info(f"NAV----> Found {len(auth_mails)} active email accounts")
+        logger.info(f"NAV----> Found {len(users)} active email accounts")
 
-        if not auth_mails:
+        if not users:
             return EmailFetchResponse(
                 message="No active email accounts found",
                 results=[]
             )
 
-        for mail in auth_mails:
+        for mail in users:
             email_id = (mail.email_address or "").strip()
 
             if not email_id:

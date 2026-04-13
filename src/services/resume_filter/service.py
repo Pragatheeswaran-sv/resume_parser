@@ -17,7 +17,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from db.connection import SessionLocal
 from src.resume_filter.models import Resume
-from sqlalchemy import JSON, select, and_, cast, String, text, func
+from sqlalchemy import JSON, select, and_, cast, String, text, func, or_
 from sqlalchemy.orm import aliased, joinedload
 from src.email_reader.models import EmailLogs, Attachment
 from src.candidate.models import (
@@ -71,6 +71,7 @@ def save_resumes_to_db(resumes):
             logger.info(f'NAV----> the info extracted {info}')
 
             info_email = (info.get("email") or "").strip().lower()
+            role = info.get("role", "").strip()
             if not info_email and sender_email:
                 logger.info(f'NAV----> using sender email fallback: {sender_email}')
                 info_email = sender_email
@@ -279,12 +280,13 @@ def save_resumes_to_db(resumes):
                             )
                             db.add(work_exp)
                             logger.info("NAV----> candidate experience added to db")
-            
+                                      
             # Create Resume record linking to candidate and attachment
             resume_record = Resume(
                 embedding=vector,
                 candidate_id=candidate.candidate_id,
                 attachment_id=attachment_id,
+                candidate_role= role,
                 created_by="resume_parser"
             )
             db.add(resume_record)
@@ -440,91 +442,100 @@ def is_resume(text: str) -> bool:
 
 def extract_basic_info(resume_text):
     """Use local Ollama LLM to extract structured info from resume text."""
-
+    logger.info('This process started=>>>>')
     logger.info("This extract_basic_info executed -----> ")
     OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
     prompt = """
-		You are a highly accurate resume parser.
-	
-		Extract structured candidate information from the given resume.
-	
-		Return ONLY valid JSON.
-		Do NOT add explanation.
-		Do NOT add any text before or after JSON.
-	
-		STRICT JSON FORMAT:
-	
-		{
-			"name": "",
-			"total_experience": 0,
-			"email": "",
-			"phone_number": "",
-			"location": "",
-			"skills": [],
-			"education": [
-				{
-					"qualification": "",
-					"institution": "",
-					"percentage": "",
-					"passout_year": ""
-				}
-			],
-			"work_experience": [
-				{
-					"company_name": "",
-					"role": "",
-					"start_date": "",
-					"end_date": ""
-				}
-			]
-		}
-	
-		STRICT RULES:
-	
-		1. ALWAYS return all keys. Do NOT skip any field.
-	
-		2. If any value is missing:
-		- Use "" for strings
-		- Use 0 for total_experience
-		- Use [] for arrays
-	
-		3. DO NOT return null.
-	
-		4. total_experience must be a NUMBER (years).
-	
-		5. skills must be SHORT keywords (e.g., "Python", "SQL", "Communication").
-		Do NOT return full sentences.
-	
-		6. DATE NORMALIZATION (VERY IMPORTANT):
-		- Convert all dates to format:
-			YYYY-MM (e.g., 2016-06)
-			OR YYYY (e.g., 2016)
-		- Examples:
-			"June 2016" → "2016-06"
-			"Feb 2017" → "2017-02"
-			"2018" → "2018"
-		- If only month/year given → convert to YYYY-MM
-		- If invalid text like "Year 11" → return ""
-	
-		7. passout_year must be ONLY a YEAR (YYYY).
-		- If not a valid year → return ""
-	
-		8. work_experience dates must ALWAYS follow YYYY-MM or YYYY.
-		- If end_date is "present" → return "Present"
-	
-		9. DO NOT include words like:
-		- "June", "Feb", "Year 11", "Currently"
-		Only return normalized values.
-	
-		10. Do NOT guess missing data.
-	
-		11. Ensure output is valid JSON (parsable).
-	
-		IMPORTANT:
-		- No extra text
-		- No trailing commas
-		- Strict JSON only
-		"""
+        You are a highly accurate resume parser.
+
+        Extract structured candidate information from the given resume.
+
+        Return ONLY valid JSON.
+        Do NOT add explanation.
+        Do NOT add any text before or after JSON.
+
+        STRICT JSON FORMAT:
+
+        {
+            "name": "",
+            "total_experience": 0,
+            "email": "",
+            "phone_number": "",
+            "location": "",
+            "role": "",
+            "skills": [],
+            "education": [
+                {
+                    "qualification": "",
+                    "institution": "",
+                    "percentage": "",
+                    "passout_year": ""
+                }
+            ],
+            "work_experience": [
+                {
+                    "company_name": "",
+                    "role": "",
+                    "start_date": "",
+                    "end_date": ""
+                }
+            ]
+        }
+
+        STRICT RULES:
+
+        1. ALWAYS return all keys. Do NOT skip any field.
+
+        2. If any value is missing:
+        - Use "" for strings
+        - Use 0 for total_experience
+        - Use [] for arrays
+
+        3. DO NOT return null.
+
+        4. total_experience must be a NUMBER (years).
+
+        5. skills must be SHORT keywords (e.g., "Python", "SQL", "Communication").
+        Do NOT return full sentences.
+
+        6. DATE NORMALIZATION (VERY IMPORTANT):
+        - Convert all dates to format:
+        YYYY-MM (e.g., 2016-06)
+        OR YYYY (e.g., 2016)
+        - Examples:
+        "June 2016" -> "2016-06"
+        "Feb 2017" -> "2017-02"
+        "2018" -> "2018"
+        - If only month/year given -> convert to YYYY-MM
+        - If invalid text like "Year 11" -> return ""
+
+        7. passout_year must be ONLY a YEAR (YYYY).
+        - If not a valid year -> return ""
+
+        8. work_experience dates must ALWAYS follow YYYY-MM or YYYY.
+        - If end_date is "present" -> return "Present"
+
+        9. DO NOT include words like:
+        - "June", "Feb", "Year 11", "Currently"
+        Only return normalized values.
+
+        10. Do NOT guess missing data except for top-level role inference from skills.
+
+        11. Ensure output is valid JSON (parsable).
+
+        12. Infer top-level "role" ONLY from technical skills; do not use summary, titles, company, projects, responsibilities, certifications, education, or any other content. Keep it short and professional; if unclear, return "".
+
+        13. Example mappings: Python/FastAPI/Django -> Python Developer, React/JS/HTML/CSS -> Frontend Developer, Node/Express/MongoDB -> Backend Developer, React+Node -> Full Stack Developer, Java/Spring -> Java Developer, Selenium/Testing -> QA Engineer, AWS/Docker/K8s/Jenkins -> DevOps Engineer, ML/NLP/TensorFlow -> Machine Learning Engineer, Power BI/Tableau/SQL -> Data Analyst, Python/Pandas/ETL -> Data Engineer, Kotlin/Java -> Android Developer, Swift/iOS -> iOS Developer, PHP/Laravel -> PHP Developer, C#/.NET -> .NET Developer.
+
+        14. work_experience.role must be extracted only if explicitly mentioned; otherwise return "".
+
+        IMPORTANT:
+        - Top-level "role" must be based ONLY on skills.
+        - Do NOT use any other information for top-level role inference.
+        - No extra text
+        - No trailing commas
+        - Strict JSON only
+        """
     try:
         db = SessionLocal()
         admin = db.query(Admin).filter(Admin.is_active == True).first()
@@ -787,11 +798,17 @@ def search_resumes(filters: dict):
 
         conditions = [Candidate.is_active == True]
 
-        name = filters.get("name")
-        if name:
-            name = str(name).strip()
-            if name:
-                conditions.append(Candidate.name.ilike(f"%{name}%"))
+        name_list = filters.get("name")
+        if name_list:
+            name_conditions = []
+
+            for name in name_list:
+                name = str(name).strip()
+                if name:
+                    name_conditions.append(Candidate.name.ilike(f"%{name}%"))
+
+            if name_conditions:
+                conditions.append(or_(*name_conditions))
 
         exp_min = filters.get("min_experience")
         if exp_min is not None and exp_min != "":

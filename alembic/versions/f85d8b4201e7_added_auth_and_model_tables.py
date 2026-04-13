@@ -43,8 +43,8 @@ def upgrade() -> None:
     sa.Column('is_active', sa.Boolean(), nullable=True),
     sa.PrimaryKeyConstraint('ai_model_id')
     )
-    op.create_table('auth_mail',
-    sa.Column('auth_mail_id', sa.UUID(), nullable=False),
+    op.create_table('users',
+    sa.Column('user_id', sa.UUID(), nullable=False),
     sa.Column('email_address', sa.String(length=255), nullable=True),
     sa.Column('connect_with', sa.JSON(), nullable=True),
     sa.Column('created_at', sa.DateTime(), nullable=True),
@@ -52,7 +52,7 @@ def upgrade() -> None:
     sa.Column('created_by', sa.String(), nullable=True),
     sa.Column('updated_by', sa.String(), nullable=True),
     sa.Column('is_active', sa.Boolean(), nullable=True),
-    sa.PrimaryKeyConstraint('auth_mail_id')
+    sa.PrimaryKeyConstraint('user_id')
     )
     op.create_table('ai_model_version',
     sa.Column('ai_model_version_id', sa.UUID(), nullable=False),
@@ -101,7 +101,7 @@ def downgrade() -> None:
                existing_server_default=sa.text('false'))
     op.drop_table('ai_model_configs')
     op.drop_table('ai_model_version')
-    op.drop_table('auth_mail')
+    op.drop_table('users')
     op.drop_table('ai_models')
     op.drop_table('admin')
     # ### end Alembic commands ###

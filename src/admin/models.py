@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import JSON, UUID, Column, ForeignKey, Integer, String, DateTime, Boolean, Text
+from sqlalchemy import JSON, UUID, Column, ForeignKey, Integer, String, DateTime, Boolean, Text, Time
 from sqlalchemy.orm import relationship
 from db.connection import Base
 import datetime
@@ -23,11 +23,13 @@ class Admin(Base):
     updated_by = Column(String, nullable = True)
     is_active = Column(Boolean, default = True)
 
-class AuthMail(Base):
-    __tablename__ = "auth_mail"
+class Users(Base):
+    __tablename__ = "users"
 
-    auth_mail_id = Column(UUID, primary_key= True, default= uuid.uuid4)
+    user_id = Column(UUID, primary_key= True, default= uuid.uuid4)
+    name = Column(String(255), nullable=True)
     email_address = Column(String(255), nullable=True)
+    phone_number = Column(String(20), nullable=True)
     imap_password = Column("password", String(255), nullable=True)
     connect_with = Column(String(255), nullable=True, default= "")
     is_blocked = Column(Boolean, default=False)
@@ -101,3 +103,6 @@ class ExtractionConfig(Base):
     window_start_time = Column(String(5), nullable=True)
     window_end_time = Column(String(5), nullable=True)
     window_timezone = Column(String(50), default="Asia/Kolkata")
+
+    schedule_type = Column(String(10), default="hourly")
+    weekday = Column(String(10), nullable=True)            

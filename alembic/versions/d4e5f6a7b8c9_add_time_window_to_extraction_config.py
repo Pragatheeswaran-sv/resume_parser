@@ -1,7 +1,7 @@
 """add time window columns to extraction_config
 
 Revision ID: d4e5f6a7b8c9
-Revises: ffa117ac816e, c1a2b3d4e5f6
+Revises: c1a2b3d4e5f6
 Create Date: 2026-04-08 12:00:00.000000
 
 """
@@ -13,7 +13,7 @@ from sqlalchemy import inspect
 
 
 revision: str = "d4e5f6a7b8c9"
-down_revision: Union[str, Sequence[str], None] = ("ffa117ac816e", "c1a2b3d4e5f6")
+down_revision: Union[str, Sequence[str], None] = "c1a2b3d4e5f6"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

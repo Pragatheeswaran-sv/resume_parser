@@ -1,7 +1,7 @@
-"""add admin features: extraction_config table, auth_mail extensions
+"""add admin features: extraction_config table, users extensions
 
 Revision ID: c1a2b3d4e5f6
-Revises: aeda0174eb0c
+Revises: ffa117ac816e
 Create Date: 2026-04-06 12:00:00.000000
 
 """
@@ -30,13 +30,13 @@ def _table_exists(table: str) -> bool:
 
 
 def upgrade() -> None:
-    # ── New columns on auth_mail (skip if create_all already added them) ─
-    if not _column_exists("auth_mail", "is_blocked"):
-        op.add_column('auth_mail', sa.Column('is_blocked', sa.Boolean(), server_default='false', nullable=True))
-    if not _column_exists("auth_mail", "extraction_enabled"):
-        op.add_column('auth_mail', sa.Column('extraction_enabled', sa.Boolean(), server_default='true', nullable=True))
-    if not _column_exists("auth_mail", "last_extraction_at"):
-        op.add_column('auth_mail', sa.Column('last_extraction_at', sa.DateTime(), nullable=True))
+    # ── New columns on users (skip if create_all already added them) ─
+    if not _column_exists("users", "is_blocked"):
+        op.add_column('users', sa.Column('is_blocked', sa.Boolean(), server_default='false', nullable=True))
+    if not _column_exists("users", "extraction_enabled"):
+        op.add_column('users', sa.Column('extraction_enabled', sa.Boolean(), server_default='true', nullable=True))
+    if not _column_exists("users", "last_extraction_at"):
+        op.add_column('users', sa.Column('last_extraction_at', sa.DateTime(), nullable=True))
 
     # ── extraction_config table (skip if create_all already made it) ─────
     if not _table_exists("extraction_config"):
@@ -54,6 +54,6 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table('extraction_config')
-    op.drop_column('auth_mail', 'last_extraction_at')
-    op.drop_column('auth_mail', 'extraction_enabled')
-    op.drop_column('auth_mail', 'is_blocked')
+    op.drop_column('users', 'last_extraction_at')
+    op.drop_column('users', 'extraction_enabled')
+    op.drop_column('users', 'is_blocked')
