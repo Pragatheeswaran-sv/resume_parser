@@ -98,6 +98,8 @@ class ExtractionConfigResponse(BaseModel):
     window_start_time: Optional[str] = None
     window_end_time: Optional[str] = None
     window_timezone: str
+    schedule_type: Optional[str] = None
+    weekday: Optional[str] = None
 
 
 class ExtractionConfigUpdate(BaseModel):
@@ -107,6 +109,8 @@ class ExtractionConfigUpdate(BaseModel):
     window_start_time: Optional[str] = None
     window_end_time: Optional[str] = None
     window_timezone: Optional[str] = None
+    schedule_type: Optional[str] = None
+    weekday: Optional[str] = None
 
 
 # ── Generic response helpers ─────────────────────────────────────────────

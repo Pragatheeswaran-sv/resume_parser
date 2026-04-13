@@ -4,7 +4,7 @@ import logging
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from src.admin.dependencies import get_current_admin
+from src.admin.dependencies import get_current_admin, get_current_user
 from src.admin.schema import (
     AdminCreate,
     AdminLoginRequest,
@@ -89,9 +89,10 @@ def create_admin(payload: AdminCreate):
         )
 
 @router.get("/admin_profile")
-def get_profile(admin_id):
+def get_profile(_admin=Depends(get_current_admin)):
     """Fetch the profile of the currently authenticated admin."""
     try:
+        admin_id = _admin.admin_id
         return profile(admin_id)
     except ValueError as e:
         logger.warning("[get_profile] Error: %s", str(e), exc_info=True)
@@ -113,9 +114,10 @@ def admin_login(body: AdminLoginRequest):
         )
 
 @router.patch("/admin_update")
-def update_admin(admin_id: str, payload: AdminUpdate):
+def update_admin(payload: AdminUpdate, _admin=Depends(get_current_admin)):
     """Update an existing admin's profile."""
     try:
+        admin_id = _admin.admin_id
         return update_admin_profile(admin_id, payload.model_dump())
     except ValueError as e:
         logger.warning("[update_admin] Error: %s", str(e), exc_info=True)
@@ -159,13 +161,14 @@ def get_users():
 
 
 @router.post("/create_user")
-def new_user(payload: AuthorizedUserCreate, admin_id):
+def new_user(payload: AuthorizedUserCreate,  _admin=Depends(get_current_admin)):
     """Register a new authorized email account for IMAP extraction.
 
     Accepts a validated ``AuthorizedUserCreate`` body with email,
     optional IMAP password, and connection metadata.
     """
     try:
+        admin_id = _admin.admin_id
         return new_auth(payload.model_dump(), admin_id)
     except ValueError as e:
         logger.warning("[create_user] Error: %s", str(e), exc_info=True)
@@ -177,19 +180,21 @@ def new_user(payload: AuthorizedUserCreate, admin_id):
 
 
 @router.patch("/delete_user/")
-def delete_auth(user_id: str):
+def delete_auth(user_id, _admin=Depends(get_current_admin)):
+# def delete_auth():
     """Soft-delete an authorized email account by marking it inactive.
 
     Args:
         user_id: UUID of the auth mail record to deactivate.
     """
-    if not user_id or not user_id.strip():
+    if not user_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"status": "error", "message": "user_id is required"},
         )
     try:
-        return delete_user(user_id)
+        admin_id = _admin.admin_id
+        return delete_user(user_id, admin_id)
     except ValueError as e:
         logger.warning("[delete_user] Error: %s", str(e), exc_info=True)
         raise HTTPException(
@@ -199,20 +204,24 @@ def delete_auth(user_id: str):
 
 
 @router.patch("/update_user/")
-def update_auth(user_id: str, payload: AuthorizedUserUpdate):
+# def update_auth(user_id: str, payload: AuthorizedUserUpdate):
+def update_auth(payload: AuthorizedUserUpdate, user_id, _admin=Depends(get_current_admin)):
     """Update fields on an existing authorized email account.
 
     Args:
         user_id: UUID of the auth mail record to update.
         payload: Validated partial update body.
     """
-    if not user_id or not user_id.strip():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"status": "error", "message": "user_id is required"},
-        )
+    # if not user_id or not user_id.strip():
+    #     raise HTTPException(
+    #         status_code=status.HTTP_400_BAD_REQUEST,
+    #         detail={"status": "error", "message": "user_id is required"},
+    #     )
     try:
-        return update_user(user_id, payload.model_dump(exclude_unset=True))
+        # return update_user(user_id, payload.model_dump(exclude_unset=True))
+        admin_id = _admin.admin_id
+        print(admin_id)
+        return update_user(payload.model_dump(exclude_unset=True), user_id, admin_id)
     except ValueError as e:
         logger.warning("[update_user] Error: %s", str(e), exc_info=True)
         raise HTTPException(
@@ -301,6 +310,8 @@ def update_config(
             window_start_time=body.window_start_time,
             window_end_time=body.window_end_time,
             window_timezone=body.window_timezone,
+            schedule_type = body.schedule_type,
+            weekday = body.weekday
         )
     except ValueError as e:
         raise HTTPException(
@@ -529,7 +540,8 @@ def create_model_version(model_id, payload: Dict[str, Any]):
             })
 
 @router.post("/model_config/")
-def get_model_config(payload: Dict[str, Any], admin_id):
+# def get_model_config(payload: Dict[str, Any], admin_id):
+def get_model_config(payload: Dict[str, Any]):
     """
         Create Model Configuration
 
@@ -576,7 +588,8 @@ def get_model_config(payload: Dict[str, Any], admin_id):
                 - 400 Bad Request: If admin ID, model, or model version is invalid.
     """
     try:
-        return model_config(payload, admin_id)
+        # return model_config(payload, admin_id)
+        return model_config(payload)
     except ValueError as e:
         logger.warning("[get_model_config] Error: %s", str(e), exc_info=True)
         raise HTTPException(
@@ -587,7 +600,8 @@ def get_model_config(payload: Dict[str, Any], admin_id):
             })
     
 @router.get("/get_model_config/")
-def fetch_model_config(admin_id):
+# def fetch_model_config(admin_id):
+def fetch_model_config():
     """
         Fetch Model Configuration
 
@@ -621,7 +635,8 @@ def fetch_model_config(admin_id):
                 - 400 Bad Request: If admin ID is missing or no active configuration is found.
     """
     try:
-        return get_model(admin_id)
+        # return get_model(admin_id)
+        return get_model()
     except ValueError as e:
         logger.warning("[fetch_model_config] Error: %s", str(e), exc_info=True)
         raise HTTPException(
