@@ -5,7 +5,7 @@ Provides FastAPI dependency callables (``get_current_admin``,
 Bearer JWT and verify the caller's identity against the database.
 
 ``AllowedEmailMiddleware`` enforces that non-open, non-admin requests
-carry a valid JWT whose email exists in ``auth_mail``.
+carry a valid JWT whose email exists in ``users``.
 """
 
 import logging
@@ -18,7 +18,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 from db.connection import SessionLocal
-from src.admin.models import Admin, AuthMail
+from src.admin.models import Admin, Users
 from src.auth.jwt import decode_access_token
 
 logger = logging.getLogger(__name__)
@@ -100,7 +100,7 @@ def get_current_admin(
 def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
 ):
-    """Verify the caller holds a valid *user* JWT and return the AuthMail row."""
+    """Verify the caller holds a valid *user* JWT and return the Users row."""
     payload = _extract_token_payload(credentials)
 
     if payload.get("role") != "user":
@@ -112,11 +112,11 @@ def get_current_user(
     db = SessionLocal()
     try:
         account = (
-            db.query(AuthMail)
+            db.query(Users)
             .filter(
-                AuthMail.auth_mail_id == payload["sub"],
-                AuthMail.is_active.is_(True),
-                AuthMail.is_blocked.is_(False),
+                Users.user_id == payload["sub"],
+                Users.is_active.is_(True),
+                Users.is_blocked.is_(False),
             )
             .first()
         )
@@ -147,11 +147,11 @@ def get_current_admin_or_user(
             )
         elif role == "user":
             obj = (
-                db.query(AuthMail)
+                db.query(Users)
                 .filter(
-                    AuthMail.auth_mail_id == payload["sub"],
-                    AuthMail.is_active.is_(True),
-                    AuthMail.is_blocked.is_(False),
+                    Users.user_id == payload["sub"],
+                    Users.is_active.is_(True),
+                    Users.is_blocked.is_(False),
                 )
                 .first()
             )
@@ -179,7 +179,7 @@ class AllowedEmailMiddleware(BaseHTTPMiddleware):
     Open paths and ``/api/admin/*`` are exempt — admin endpoints carry
     their own guard via ``get_current_admin``.  For everything else the
     middleware validates the Bearer token and checks that the user's
-    email exists in ``auth_mail``.
+    email exists in ``users``.
     """
 
     async def dispatch(self, request: Request, call_next):
@@ -214,11 +214,11 @@ class AllowedEmailMiddleware(BaseHTTPMiddleware):
         db = SessionLocal()
         try:
             account = (
-                db.query(AuthMail)
+                db.query(Users)
                 .filter(
-                    AuthMail.email_address == user_email,
-                    AuthMail.is_active.is_(True),
-                    AuthMail.is_blocked.is_(False),
+                    Users.email_address == user_email,
+                    Users.is_active.is_(True),
+                    Users.is_blocked.is_(False),
                 )
                 .first()
             )

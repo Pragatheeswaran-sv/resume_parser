@@ -55,7 +55,7 @@ class AdminLoginResponse(BaseModel):
     email_address: str
 
 
-# ── AuthMail (connected email accounts) ─────────────────────────────────
+# ── Users (connected email accounts) ─────────────────────────────────
 
 class AuthorizedUserCreate(BaseModel):
     name: str
@@ -71,7 +71,7 @@ class AuthorizedUserUpdate(BaseModel):
 
 
 class EmailAccountResponse(BaseModel):
-    auth_mail_id: str
+    user_id: str
     email_address: Optional[str] = None
     is_active: bool
     is_blocked: bool
