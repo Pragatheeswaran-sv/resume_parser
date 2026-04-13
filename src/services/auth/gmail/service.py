@@ -13,7 +13,8 @@ from src.auth.models import OauthSource, OauthCredentials
 from src.email_reader.models import Attachment
 from src.services.background_task.tasks import resume_track
 import base64
-
+from src.auth.jwt import create_access_token
+from src.admin.models import Users
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -179,11 +180,26 @@ def gmail_callback(code: str, db = SessionLocal()) -> dict:
             db.add(new_cred)
 
         db.commit()
+        logger.info(f"NAV----> Credentials stored for {email}, expires at {expires_at.isoformat()}")
+        access_token = create_access_token({"mail": email})
+        logger.info(f"NAV----> Access token created for {email}")
+        valid_mail = db.query(Users).filter(
+            Users.email_address == email,
+            Users.is_active == True
+        ).first()
+        if not valid_mail:
+            logger.warning(f"Email {email} is not authorized to connect")
+            raise HTTPException(status_code=403, detail={"status": "error", "message": "Email not authorized"})
 
         return {
             "status": "success",
-            "email": email,
-            "message": "OAuth connected successfully"
+            "message": "OAuth connected successfully",
+            "data":
+                {
+                    "email": email,
+                    "access_token": access_token,
+                    "is_admin": False,
+                }
         }
 
     except requests.exceptions.HTTPError as http_err:
@@ -196,10 +212,10 @@ def gmail_callback(code: str, db = SessionLocal()) -> dict:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail={"status": "error", "message": "Network error during OAuth"})
 
-    except Exception as db_err:
-        logger.error(f"Database error: {str(db_err)}")
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail={"status": "error", "message": "Database error"})
+    # except Exception as db_err:
+    #     logger.error(f"Database error: {str(db_err)}")
+    #     db.rollback()
+    #     raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail={"status": "error", "message": "Database error"})
 
     except HTTPException:
         db.rollback()
@@ -571,10 +587,25 @@ def zoho_callback(code: str, db=SessionLocal()) -> dict:
 
         db.commit()
 
+        access_token = create_access_token({"mail": email})
+
+        valid_mail = db.query(Users).filter(
+            Users.email_address == email,
+            Users.is_active == True
+        ).first()
+        if not valid_mail:
+            logger.warning(f"Email {email} is not authorized to connect")
+            raise HTTPException(status_code=403, detail={"status": "error", "message": "Email not authorized"})
+        
         return {
             "status": "success",
-            "email": email,
-            "message": "Zoho OAuth connected successfully"
+            "message": "OAuth connected successfully",
+            "data":
+                {
+                    "email": email,
+                    "access_token": access_token,
+                    "is_admin": False,
+                }
         }
 
     except requests.exceptions.HTTPError as http_err:

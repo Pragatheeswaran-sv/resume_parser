@@ -68,6 +68,7 @@ def admin_check(email: str, password: str) -> Dict[str, Any]:
                 "is_admin": True,
                 "name": admin.name,
                 "email": admin.email_address,
+                "is_admin": True,
             },
         }
     except ValueError:

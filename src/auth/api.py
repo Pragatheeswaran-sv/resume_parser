@@ -202,7 +202,7 @@ def fetch_emails_oauth() -> EmailFetchResponse:
     except Exception as e:
         logger.error(f"Fatal error in fetch_emails_oauth: {str(e)}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code= 500,
             detail={"status": "error", "message": str(e)},
         )
 
