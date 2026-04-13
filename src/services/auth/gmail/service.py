@@ -180,9 +180,18 @@ def gmail_callback(code: str, db = SessionLocal()) -> dict:
 
         db.commit()
 
+        valid_mail = db.query(OauthCredentials).filter(
+            OauthCredentials.email == email,
+            OauthCredentials.is_active == True
+        ).first()
+        if not valid_mail:
+            logger.warning(f"Email {email} is not authorized to connect")
+            raise HTTPException(status_code=403, detail={"status": "error", "message": "Email not authorized"})
+
         return {
             "status": "success",
             "email": email,
+            "is_admin": False,
             "message": "OAuth connected successfully"
         }
 
@@ -571,6 +580,14 @@ def zoho_callback(code: str, db=SessionLocal()) -> dict:
 
         db.commit()
 
+        valid_mail = db.query(OauthCredentials).filter(
+            OauthCredentials.email == email,
+            OauthCredentials.is_active == True
+        ).first()
+        if not valid_mail:
+            logger.warning(f"Email {email} is not authorized to connect")
+            raise HTTPException(status_code=403, detail={"status": "error", "message": "Email not authorized"})
+        
         return {
             "status": "success",
             "email": email,
