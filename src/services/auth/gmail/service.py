@@ -124,13 +124,13 @@ def gmail_callback(code: str, db = SessionLocal()) -> dict:
 
         logger.info(f"OAuth login success for email: {email}")
 
-        # 🔹 Step 3: Validate AuthMail
-        # auth_mail = db.query(AuthMail).filter(
-        #     AuthMail.email_address == email,
-        #     AuthMail.is_active == True
+        # 🔹 Step 3: Validate Users
+        # users = db.query(Users).filter(
+        #     Users.email_address == email,
+        #     Users.is_active == True
         # ).first()
 
-        # if not auth_mail:
+        # if not users:
         #     logger.warning(f"Unauthorized email attempted: {email}")
         #     raise HTTPException(status_code=403, detail="Authentication failed")
 

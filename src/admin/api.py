@@ -18,7 +18,7 @@ from src.admin.schema import (
 )
 from src.services.admin.service import (
     admin_check,
-    delete_auth_mail,
+    delete_user,
     get_extraction_config,
     is_within_extraction_window,
     list_email_accounts,
@@ -33,7 +33,7 @@ from src.services.admin.service import (
     toggle_extraction,
     trigger_extraction,
     update_admin_profile,
-    update_auth_mail,
+    update_user,
     update_extraction_config,
     list_model,
     model_version, 
@@ -45,9 +45,9 @@ from src.services.admin.service import (
 from typing import List, Dict, Any
 # from src.services.admin.service import (
 #     admin_check, create_model,
-#     delete_auth_mail, new_admin,
+#     delete_user, new_admin,
 #     list_mail, new_auth,
-#     update_auth_mail, list_model,
+#     update_user, list_model,
 #     model_version, new_model_version,
 #     model_config, get_model
 # )
@@ -144,22 +144,22 @@ def sso_login(body: SSOLoginRequest):
 
 # ── Legacy auth-mail CRUD (kept for backward-compat) ────────────────────
 
-@router.get("/list_auth_mail")
-def get_auth_mails():
+@router.get("/list_users")
+def get_users():
     """List all active authorized email accounts."""
     try:
         return list_mail()
     except ValueError as e:
-        logger.warning("[list_auth_mail] Error: %s", str(e), exc_info=True)
-        logger.warning("[list_auth_mail] Error: %s", str(e), exc_info=True)
+        logger.warning("[list_users] Error: %s", str(e), exc_info=True)
+        logger.warning("[list_users] Error: %s", str(e), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"status": "error", "message": str(e)},
         )
 
 
-@router.post("/create_auth_mail")
-def new_auth_mail(payload: AuthorizedUserCreate, admin_id):
+@router.post("/create_user")
+def new_user(payload: AuthorizedUserCreate, admin_id):
     """Register a new authorized email account for IMAP extraction.
 
     Accepts a validated ``AuthorizedUserCreate`` body with email,
@@ -168,53 +168,53 @@ def new_auth_mail(payload: AuthorizedUserCreate, admin_id):
     try:
         return new_auth(payload.model_dump(), admin_id)
     except ValueError as e:
-        logger.warning("[create_auth_mail] Error: %s", str(e), exc_info=True)
-        logger.warning("[create_auth_mail] Error: %s", str(e), exc_info=True)
+        logger.warning("[create_user] Error: %s", str(e), exc_info=True)
+        logger.warning("[create_user] Error: %s", str(e), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"status": "error", "message": str(e)},
         )
 
 
-@router.patch("/delete_auth_mail/")
-def delete_auth(auth_mail_id: str):
+@router.patch("/delete_user/")
+def delete_auth(user_id: str):
     """Soft-delete an authorized email account by marking it inactive.
 
     Args:
-        auth_mail_id: UUID of the auth mail record to deactivate.
+        user_id: UUID of the auth mail record to deactivate.
     """
-    if not auth_mail_id or not auth_mail_id.strip():
+    if not user_id or not user_id.strip():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"status": "error", "message": "auth_mail_id is required"},
+            detail={"status": "error", "message": "user_id is required"},
         )
     try:
-        return delete_auth_mail(auth_mail_id)
+        return delete_user(user_id)
     except ValueError as e:
-        logger.warning("[delete_auth_mail] Error: %s", str(e), exc_info=True)
+        logger.warning("[delete_user] Error: %s", str(e), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"status": "error", "message": str(e)},
         )
 
 
-@router.patch("/update_auth_mail/")
-def update_auth(auth_mail_id: str, payload: AuthorizedUserUpdate):
+@router.patch("/update_user/")
+def update_auth(user_id: str, payload: AuthorizedUserUpdate):
     """Update fields on an existing authorized email account.
 
     Args:
-        auth_mail_id: UUID of the auth mail record to update.
+        user_id: UUID of the auth mail record to update.
         payload: Validated partial update body.
     """
-    if not auth_mail_id or not auth_mail_id.strip():
+    if not user_id or not user_id.strip():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"status": "error", "message": "auth_mail_id is required"},
+            detail={"status": "error", "message": "user_id is required"},
         )
     try:
-        return update_auth_mail(auth_mail_id, payload.model_dump(exclude_unset=True))
+        return update_user(user_id, payload.model_dump(exclude_unset=True))
     except ValueError as e:
-        logger.warning("[update_auth_mail] Error: %s", str(e), exc_info=True)
+        logger.warning("[update_user] Error: %s", str(e), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"status": "error", "message": str(e)},
@@ -241,15 +241,15 @@ def email_accounts_overview(_admin=Depends(get_current_admin)):
 
 # ── 2 & 3. Per-account extraction / block toggles ───────────────────────
 
-@router.patch("/admin/email-accounts/{auth_mail_id}/extraction")
+@router.patch("/admin/email-accounts/{user_id}/extraction")
 def set_extraction(
-    auth_mail_id: str,
+    user_id: str,
     body: ExtractionToggleRequest,
     _admin=Depends(get_current_admin),
 ):
     """Enable or disable extraction for a specific email account."""
     try:
-        return toggle_extraction(auth_mail_id, body.extraction_enabled)
+        return toggle_extraction(user_id, body.extraction_enabled)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -257,15 +257,15 @@ def set_extraction(
         )
 
 
-@router.patch("/admin/email-accounts/{auth_mail_id}/block")
+@router.patch("/admin/email-accounts/{user_id}/block")
 def set_block(
-    auth_mail_id: str,
+    user_id: str,
     body: BlockToggleRequest,
     _admin=Depends(get_current_admin),
 ):
     """Block or unblock a specific email account."""
     try:
-        return toggle_block(auth_mail_id, body.is_blocked)
+        return toggle_block(user_id, body.is_blocked)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -363,23 +363,23 @@ def trigger_all(
         )
 
 
-@router.post("/admin/extraction/trigger/{auth_mail_id}")
+@router.post("/admin/extraction/trigger/{user_id}")
 def trigger_single(
-    auth_mail_id: str,
+    user_id: str,
     force: bool = False,
     _admin=Depends(get_current_admin),
 ):
     """Manually trigger extraction for a specific email account.
 
     Args:
-        auth_mail_id: UUID of the email account to extract.
+        user_id: UUID of the email account to extract.
         force: If True, bypass time-window restriction.
     """
     try:
         if not force and not is_within_extraction_window():
             logger.info(
                 "Manual trigger for %s blocked: outside configured time window (force=%s)",
-                auth_mail_id,
+                user_id,
                 force,
             )
             return {
@@ -389,9 +389,9 @@ def trigger_single(
         if force:
             logger.info(
                 "Manual trigger for %s: force=true — bypassing time window check",
-                auth_mail_id,
+                user_id,
             )
-        return trigger_extraction(auth_mail_id=auth_mail_id)
+        return trigger_extraction(user_id=user_id)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

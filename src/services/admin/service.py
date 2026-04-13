@@ -17,10 +17,10 @@ from dotenv import load_dotenv
 from db.connection import SessionLocal
 from sqlalchemy import UUID, func, cast
 from sqlalchemy.dialects.postgresql import JSON, aggregate_order_by
-from src.admin.models import Admin, AuthMail, ExtractionConfig, ist_now
+from src.admin.models import Admin, Users, ExtractionConfig, ist_now
 from src.auth.jwt import create_access_token, hash_password, verify_password
 from fastapi import status
-from src.admin.models import Admin, AiModel, AiModelConfig, AiModelversion, AuthMail
+from src.admin.models import Admin, AiModel, AiModelConfig, AiModelversion, Users
 from fastapi import  status
 
 load_dotenv()
@@ -65,7 +65,7 @@ def admin_check(email: str, password: str) -> Dict[str, Any]:
             "data": {
                 "access_token": token,
                 "token_type": "bearer",
-                "role": "admin",
+                "is_admin": True,
                 "name": admin.name,
                 "email": admin.email_address,
                 "is_admin": True,
@@ -163,12 +163,12 @@ def sso_user_login(
     provider: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Issue a JWT for an SSO-authenticated user after verifying they exist
-    in ``auth_mail`` and are not blocked.
+    in ``users`` and are not blocked.
 
     The frontend is responsible for verifying the user's identity with the
     SSO provider (Google / Zoho / Microsoft) before calling this function.
     This function normalises the provider name, validates the user against
-    ``auth_mail``, and embeds SSO metadata into the JWT so downstream
+    ``users``, and embeds SSO metadata into the JWT so downstream
     services know the authentication origin.
 
     Args:
@@ -199,11 +199,11 @@ def sso_user_login(
                 )
 
         account = (
-            session.query(AuthMail)
+            session.query(Users)
             .filter(
-                AuthMail.email_address == email,
-                AuthMail.is_active.is_(True),
-                AuthMail.is_blocked.is_(False),
+                Users.email_address == email,
+                Users.is_active.is_(True),
+                Users.is_blocked.is_(False),
             )
             .first()
         )
@@ -211,7 +211,7 @@ def sso_user_login(
             raise ValueError("Access denied: email not approved or account blocked")
 
         token_payload: Dict[str, Any] = {
-            "sub": str(account.auth_mail_id),
+            "sub": str(account.user_id),
             "email": account.email_address,
             "role": "user",
         }
@@ -305,21 +305,21 @@ def list_mail() -> Dict[str, Any]:
     """
     session = SessionLocal()
     try:
-        auth_mails = session.query(AuthMail).filter(AuthMail.is_active == True).all()
-        if not auth_mails:
+        users = session.query(Users).filter(Users.is_active == True).all()
+        if not users:
             raise ValueError("No auth mails found")
         return {
             "status": status.HTTP_200_OK,
             "message": "Auth mails retrieved successfully",
             "data": [
                 {
-                    "auth_mail_id": str(auth_mail.auth_mail_id),
-                    "name": auth_mail.name,
-                    "email_address": auth_mail.email_address,
-                    "phone_number": auth_mail.phone_number,
-                    # "connect_with": auth_mail.connect_with,
+                    "user_id": str(users.user_id),
+                    "name": users.name,
+                    "email_address": users.email_address,
+                    "phone_number": users.phone_number,
+                    # "connect_with": users.connect_with,
                 }
-                for auth_mail in auth_mails
+                for users in users
             ],
         }
     except ValueError:
@@ -355,25 +355,25 @@ def new_auth(payload: dict, admin_id) -> Dict[str, Any]:
         if not email_address or not name or not phone_number or email_address.strip() == "" or name.strip() == "" or phone_number.strip() == "":
             raise ValueError("Email, name, and phone number are required")
 
-        auth_mail = session.query(AuthMail).filter_by(email_address=email_address).first()
-        if auth_mail:
+        users = session.query(Users).filter_by(email_address=email_address).first()
+        if users:
             raise ValueError("Auth mail with this email already exists")
-        new_auth_mail = AuthMail(
+        new_users = Users(
             name=name,
             email_address=email_address,
             phone_number=phone_number,
         )
-        session.add(new_auth_mail)
+        session.add(new_users)
         session.commit()
-        session.refresh(new_auth_mail)
+        session.refresh(new_users)
         return {
             "status": status.HTTP_201_CREATED,
             "message": "Auth mail created successfully",
             "data": {
-                "auth_mail_id": str(new_auth_mail.auth_mail_id),
-                "name": new_auth_mail.name,
-                "email_address": new_auth_mail.email_address,
-                "phone_number": new_auth_mail.phone_number,
+                "user_id": str(new_users.user_id),
+                "name": new_users.name,
+                "email_address": new_users.email_address,
+                "phone_number": new_users.phone_number,
             },
         }
     except ValueError:
@@ -386,11 +386,11 @@ def new_auth(payload: dict, admin_id) -> Dict[str, Any]:
         session.close()
 
 
-def delete_auth_mail(auth_mail_id: str) -> Dict[str, Any]:
+def delete_user(user_id: str) -> Dict[str, Any]:
     """Soft-delete an authorized email account by setting ``is_active = False``.
 
     Args:
-        auth_mail_id: UUID string of the auth mail to deactivate.
+        user_id: UUID string of the auth mail to deactivate.
 
     Returns:
         Dict confirming deletion.
@@ -400,13 +400,13 @@ def delete_auth_mail(auth_mail_id: str) -> Dict[str, Any]:
     """
     session = SessionLocal()
     try:
-        if not auth_mail_id or not auth_mail_id.strip():
-            raise ValueError("auth_mail_id is required")
+        if not user_id or not user_id.strip():
+            raise ValueError("user_id is required")
 
-        auth_mail = session.query(AuthMail).filter_by(auth_mail_id=auth_mail_id, is_active = True).first()
-        if not auth_mail:
+        users = session.query(Users).filter_by(user_id=user_id, is_active = True).first()
+        if not users:
             raise ValueError("Auth mail not found")
-        auth_mail.is_active = False
+        users.is_active = False
         session.commit()
         return {
             "status": status.HTTP_200_OK,
@@ -416,20 +416,20 @@ def delete_auth_mail(auth_mail_id: str) -> Dict[str, Any]:
         raise
     except Exception as e:
         session.rollback()
-        logger.warning("[delete_auth_mail] Error: %s", str(e), exc_info=True)
+        logger.warning("[delete_user] Error: %s", str(e), exc_info=True)
         raise ValueError(str(e))
     finally:
         session.close()
 
 
-def update_auth_mail(auth_mail_id: str, payload: dict) -> Dict[str, Any]:
+def update_user(user_id: str, payload: dict) -> Dict[str, Any]:
     """Update fields on an existing authorized email account.
 
     Only non-``None`` values in *payload* are applied.  Raises if the
     resulting email+password combination duplicates another record.
 
     Args:
-        auth_mail_id: UUID string of the auth mail to update.
+        user_id: UUID string of the auth mail to update.
         payload: Dictionary of fields to update (``email``, ``imap_password``,
             ``connect_with``).
 
@@ -441,41 +441,41 @@ def update_auth_mail(auth_mail_id: str, payload: dict) -> Dict[str, Any]:
     """
     session = SessionLocal()
     try:
-        if not auth_mail_id or not auth_mail_id.strip():
-            raise ValueError("auth_mail_id is required")
+        if not user_id or not user_id.strip():
+            raise ValueError("user_id is required")
 
-        auth_mail = session.query(AuthMail).filter_by(auth_mail_id=auth_mail_id).first()
-        if not auth_mail:
+        users = session.query(Users).filter_by(user_id=user_id).first()
+        if not users:
             raise ValueError("Auth mail not found")
 
-        email_address = payload.get("email") if payload.get("email") else auth_mail.email_address
-        imap_password = payload.get("imap_password") if payload.get("imap_password") else auth_mail.imap_password
-        connect_with = payload.get("connect_with") if payload.get("connect_with") else auth_mail.connect_with
-        blocked = payload.get("is_blocked") if payload.get("is_blocked") is not None else auth_mail.is_blocked
+        email_address = payload.get("email") if payload.get("email") else users.email_address
+        imap_password = payload.get("imap_password") if payload.get("imap_password") else users.imap_password
+        connect_with = payload.get("connect_with") if payload.get("connect_with") else users.connect_with
+        blocked = payload.get("is_blocked") if payload.get("is_blocked") is not None else users.is_blocked
         print(email_address)
         print(blocked, type(blocked))
 
         if blocked == True:
-            auth_mail.is_blocked = blocked
+            users.is_blocked = blocked
             session.commit()
             return {
                 "status": status.HTTP_200_OK,
                 "message": "Auth mail deactivated successfully",
             }
         elif blocked == False:
-            auth_mail.is_blocked = blocked
+            users.is_blocked = blocked
             session.commit()
             return {
                 "status": status.HTTP_200_OK,
                 "message": "Auth mail activated successfully",
             }
         else:
-            duplicate = session.query(AuthMail).filter_by(email_address=email_address, imap_password=imap_password).first()
-            if duplicate and str(duplicate.auth_mail_id) != auth_mail_id:
+            duplicate = session.query(Users).filter_by(email_address=email_address, imap_password=imap_password).first()
+            if duplicate and str(duplicate.user_id) != user_id:
                 raise ValueError("Auth mail with this email and IMAP password already exists, nothing to update")
-            auth_mail.email_address = email_address
-            auth_mail.imap_password = imap_password
-            auth_mail.connect_with = connect_with
+            users.email_address = email_address
+            users.imap_password = imap_password
+            users.connect_with = connect_with
             session.commit()
             return {
                 "status": status.HTTP_200_OK,
@@ -485,7 +485,7 @@ def update_auth_mail(auth_mail_id: str, payload: dict) -> Dict[str, Any]:
         raise
     except Exception as e:
         session.rollback()
-        logger.warning("[update_auth_mail] Error: %s", str(e), exc_info=True)
+        logger.warning("[update_user] Error: %s", str(e), exc_info=True)
         raise ValueError(str(e))
     finally:
         session.close()
@@ -496,20 +496,20 @@ def update_auth_mail(auth_mail_id: str, payload: dict) -> Dict[str, Any]:
 # ═══════════════════════════════════════════════════════════════════════════
 
 def list_email_accounts() -> Dict[str, Any]:
-    """Return every AuthMail row with extraction-status fields.
+    """Return every Users row with extraction-status fields.
 
     Returns:
         Dict containing a list of all email accounts and their status.
     """
     session = SessionLocal()
     try:
-        accounts = session.query(AuthMail).all()
+        accounts = session.query(Users).all()
         return {
             "status": status.HTTP_200_OK,
             "message": "Email accounts retrieved",
             "data": [
                 {
-                    "auth_mail_id": str(a.auth_mail_id),
+                    "user_id": str(a.user_id),
                     "email_address": a.email_address,
                     "is_active": a.is_active,
                     "is_blocked": a.is_blocked,
@@ -528,11 +528,11 @@ def list_email_accounts() -> Dict[str, Any]:
 #  2 & 3. Per-account extraction / block toggles
 # ═══════════════════════════════════════════════════════════════════════════
 
-def toggle_extraction(auth_mail_id: str, enabled: bool) -> Dict[str, Any]:
+def toggle_extraction(user_id: str, enabled: bool) -> Dict[str, Any]:
     """Enable or disable extraction for a specific email account.
 
     Args:
-        auth_mail_id: UUID string of the target email account.
+        user_id: UUID string of the target email account.
         enabled: ``True`` to enable extraction, ``False`` to disable.
 
     Returns:
@@ -543,7 +543,7 @@ def toggle_extraction(auth_mail_id: str, enabled: bool) -> Dict[str, Any]:
     """
     session = SessionLocal()
     try:
-        account = session.query(AuthMail).filter_by(auth_mail_id=auth_mail_id).first()
+        account = session.query(Users).filter_by(user_id=user_id).first()
         if not account:
             raise ValueError("Email account not found")
         account.extraction_enabled = enabled
@@ -560,11 +560,11 @@ def toggle_extraction(auth_mail_id: str, enabled: bool) -> Dict[str, Any]:
         session.close()
 
 
-def toggle_block(auth_mail_id: str, blocked: bool) -> Dict[str, Any]:
+def toggle_block(user_id: str, blocked: bool) -> Dict[str, Any]:
     """Block or unblock a specific email account.
 
     Args:
-        auth_mail_id: UUID string of the target email account.
+        user_id: UUID string of the target email account.
         blocked: ``True`` to block, ``False`` to unblock.
 
     Returns:
@@ -575,7 +575,7 @@ def toggle_block(auth_mail_id: str, blocked: bool) -> Dict[str, Any]:
     """
     session = SessionLocal()
     try:
-        account = session.query(AuthMail).filter_by(auth_mail_id=auth_mail_id).first()
+        account = session.query(Users).filter_by(user_id=user_id).first()
         if not account:
             raise ValueError("Email account not found")
         account.is_blocked = blocked
@@ -795,16 +795,16 @@ def resume_extraction() -> Dict[str, Any]:
 #  4b. Manual extraction trigger
 # ═══════════════════════════════════════════════════════════════════════════
 
-def trigger_extraction(auth_mail_id: Optional[str] = None) -> Dict[str, Any]:
+def trigger_extraction(user_id: Optional[str] = None) -> Dict[str, Any]:
     """Fire email extraction immediately.
 
-    If *auth_mail_id* is supplied, validate the account is eligible first and
+    If *user_id* is supplied, validate the account is eligible first and
     stamp its ``last_extraction_at``.  The actual work is delegated to the
     existing ``fetch_emails()`` pipeline (which currently operates on the
     globally-configured mailbox).
 
     Args:
-        auth_mail_id: Optional UUID of a specific account to extract.
+        user_id: Optional UUID of a specific account to extract.
 
     Returns:
         Dict with extraction result data.
@@ -817,8 +817,8 @@ def trigger_extraction(auth_mail_id: Optional[str] = None) -> Dict[str, Any]:
 
     session = SessionLocal()
     try:
-        if auth_mail_id:
-            account = session.query(AuthMail).filter_by(auth_mail_id=auth_mail_id).first()
+        if user_id:
+            account = session.query(Users).filter_by(user_id=user_id).first()
             if not account:
                 raise ValueError("Email account not found")
             if account.is_blocked:
@@ -828,8 +828,8 @@ def trigger_extraction(auth_mail_id: Optional[str] = None) -> Dict[str, Any]:
 
         result = fetch_emails()
 
-        if auth_mail_id:
-            account = session.query(AuthMail).filter_by(auth_mail_id=auth_mail_id).first()
+        if user_id:
+            account = session.query(Users).filter_by(user_id=user_id).first()
             if account:
                 account.last_extraction_at = ist_now()
                 session.commit()
