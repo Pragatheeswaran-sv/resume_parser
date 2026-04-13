@@ -125,11 +125,10 @@ class WorkExperience(Base):
     company = relationship("Company")
     role = relationship("Role")
 
-class QueryLog(Base):
-    __tablename__ = "query_log"
+class LogUserQuery(Base):
+    __tablename__ = "log_user_query"
 
     user_query_id = Column(UUID, primary_key=True, default=uuid.uuid4)
-    candidate_id = Column(UUID(as_uuid=True), ForeignKey("candidates.candidate_id"), nullable=False)
     user_query = Column(Text, nullable=False)
     query_filter = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=False), default=ist_now)
@@ -137,5 +136,3 @@ class QueryLog(Base):
     created_by = Column(String, nullable = True)
     updated_by = Column(String, nullable = True)
     is_active = Column(Boolean, default = True)
-
-    candidate = relationship("Candidate")
