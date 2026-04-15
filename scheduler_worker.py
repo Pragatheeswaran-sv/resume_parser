@@ -43,6 +43,8 @@ def _load_config():
                 "window_start_time": cfg.window_start_time,
                 "window_end_time": cfg.window_end_time,
                 "window_timezone": cfg.window_timezone or "Asia/Kolkata",
+                "schedule_type" : cfg.schedule_type or "hourly",
+                "weekday" : cfg.weekday or ""
             }
         return dict(_DEFAULTS)
     except Exception:
@@ -91,11 +93,24 @@ def main():
         id="email_processing_job",
         replace_existing=True,
     )
+    logger.info('in=>',interval)
     logger.info(
         "Scheduler started — jobs will run every %d minute(s) (paused=%s)",
         interval,
         config["is_paused"],
     )
+    
+    # schedule_type = 'daily'
+
+    # if schedule_type == 'daily':
+    #     scheduler.add_job(
+    #     trigger_email_processing,
+    #     trigger="cron",
+    #     hour=start_time.hour,
+    #     minute=start_time.minute,
+    #     id="email_processing_daily",
+    #     replace_existing=True,
+    # )
     scheduler.start()
 
 

@@ -80,9 +80,10 @@ def admin_check(email: str, password: str) -> Dict[str, Any]:
         session.close()
 
 def profile(admin_id):
+# def profile():
     db = SessionLocal()
     try:
-        if not admin_id or not admin_id.strip():
+        if not admin_id:
             raise ValueError("Admin ID must be provided")
         
         admin  = db.query(Admin).filter_by(admin_id = admin_id ).first()
@@ -109,7 +110,7 @@ def profile(admin_id):
 def update_admin_profile(admin_id, payload):
     db = SessionLocal()
     try:
-        if not admin_id or not admin_id.strip():
+        if not admin_id:
             raise ValueError("Admin ID must be provided")
         
         admin  = db.query(Admin).filter_by(admin_id = admin_id ).first()
@@ -298,25 +299,26 @@ def list_mail() -> Dict[str, Any]:
     """Return all active authorized email accounts.
 
     Returns:
-        Dict with a list of auth mail summaries.
+        Dict with a list of User summaries.
 
     Raises:
-        ValueError: If no active auth mails exist.
+        ValueError: If no active Users exist.
     """
     session = SessionLocal()
     try:
         users = session.query(Users).filter(Users.is_active == True).all()
         if not users:
-            raise ValueError("No auth mails found")
+            raise ValueError("No Users found")
         return {
             "status": status.HTTP_200_OK,
-            "message": "Auth mails retrieved successfully",
+            "message": "Users retrieved successfully",
             "data": [
                 {
                     "user_id": str(users.user_id),
                     "name": users.name,
                     "email_address": users.email_address,
                     "phone_number": users.phone_number,
+                    "is_blocked" : users.is_blocked
                     # "connect_with": users.connect_with,
                 }
                 for users in users
@@ -331,6 +333,7 @@ def list_mail() -> Dict[str, Any]:
         session.close()
 
 
+# def new_auth(payload: dict, admin_id) -> Dict[str, Any]:
 def new_auth(payload: dict, admin_id) -> Dict[str, Any]:
     """Register a new authorized email account for IMAP extraction.
 
@@ -339,14 +342,14 @@ def new_auth(payload: dict, admin_id) -> Dict[str, Any]:
             and ``connect_with`` metadata.
 
     Returns:
-        Dict with the newly created auth mail's ID and details.
+        Dict with the newly created User's ID and details.
 
     Raises:
         ValueError: If email is missing or already registered.
     """
     session = SessionLocal()   
     try:
-        if not admin_id or not admin_id.strip():
+        if not admin_id:
             raise ValueError("Admin ID must be provided")
         name = payload.get("name")
         email_address = payload.get("email")
@@ -357,7 +360,7 @@ def new_auth(payload: dict, admin_id) -> Dict[str, Any]:
 
         users = session.query(Users).filter_by(email_address=email_address).first()
         if users:
-            raise ValueError("Auth mail with this email already exists")
+            raise ValueError("User with this email already exists")
         new_users = Users(
             name=name,
             email_address=email_address,
@@ -368,7 +371,7 @@ def new_auth(payload: dict, admin_id) -> Dict[str, Any]:
         session.refresh(new_users)
         return {
             "status": status.HTTP_201_CREATED,
-            "message": "Auth mail created successfully",
+            "message": "User created successfully",
             "data": {
                 "user_id": str(new_users.user_id),
                 "name": new_users.name,
@@ -386,31 +389,36 @@ def new_auth(payload: dict, admin_id) -> Dict[str, Any]:
         session.close()
 
 
-def delete_user(user_id: str) -> Dict[str, Any]:
+# def delete_user(user_id: str) -> Dict[str, Any]:
+def delete_user(user_id: str, admin_id) -> Dict[str, Any]:
     """Soft-delete an authorized email account by setting ``is_active = False``.
 
     Args:
-        user_id: UUID string of the auth mail to deactivate.
+        user_id: UUID string of the User to deactivate.
 
     Returns:
         Dict confirming deletion.
 
     Raises:
-        ValueError: If the auth mail ID is not found.
+        ValueError: If the User ID is not found.
     """
     session = SessionLocal()
     try:
+        admin = session.query(Admin).filter(admin_id == admin_id).first()
+        if not admin:
+            raise ValueError("user has no access to delete account")
+
         if not user_id or not user_id.strip():
             raise ValueError("user_id is required")
 
         users = session.query(Users).filter_by(user_id=user_id, is_active = True).first()
         if not users:
-            raise ValueError("Auth mail not found")
+            raise ValueError("User not found")
         users.is_active = False
         session.commit()
         return {
             "status": status.HTTP_200_OK,
-            "message": "Auth mail deleted successfully",
+            "message": "User deleted successfully",
         }
     except ValueError:
         raise
@@ -422,14 +430,14 @@ def delete_user(user_id: str) -> Dict[str, Any]:
         session.close()
 
 
-def update_user(user_id: str, payload: dict) -> Dict[str, Any]:
+def update_user(payload: dict, user_id: str, admin_id) -> Dict[str, Any]:
     """Update fields on an existing authorized email account.
 
     Only non-``None`` values in *payload* are applied.  Raises if the
     resulting email+password combination duplicates another record.
 
     Args:
-        user_id: UUID string of the auth mail to update.
+        user_id: UUID string of the User to update.
         payload: Dictionary of fields to update (``email``, ``imap_password``,
             ``connect_with``).
 
@@ -441,12 +449,12 @@ def update_user(user_id: str, payload: dict) -> Dict[str, Any]:
     """
     session = SessionLocal()
     try:
-        if not user_id or not user_id.strip():
+        if not user_id:
             raise ValueError("user_id is required")
 
         users = session.query(Users).filter_by(user_id=user_id).first()
         if not users:
-            raise ValueError("Auth mail not found")
+            raise ValueError("User not found")
 
         email_address = payload.get("email") if payload.get("email") else users.email_address
         imap_password = payload.get("imap_password") if payload.get("imap_password") else users.imap_password
@@ -455,31 +463,37 @@ def update_user(user_id: str, payload: dict) -> Dict[str, Any]:
         print(email_address)
         print(blocked, type(blocked))
 
-        if blocked == True:
-            users.is_blocked = blocked
-            session.commit()
-            return {
-                "status": status.HTTP_200_OK,
-                "message": "Auth mail deactivated successfully",
-            }
-        elif blocked == False:
-            users.is_blocked = blocked
-            session.commit()
-            return {
-                "status": status.HTTP_200_OK,
-                "message": "Auth mail activated successfully",
-            }
+        admin = session.query(Admin).filter(admin_id == admin_id).first()
+
+        if not admin:
+            raise ValueError("user has no access to enable/disable account")
         else:
+            if blocked == True:
+                users.is_blocked = blocked
+                session.commit()
+                return {
+                    "status": status.HTTP_200_OK,
+                    "message": "User deactivated successfully",
+                }
+            elif blocked == False:
+                users.is_blocked = blocked
+                session.commit()
+                return {
+                    "status": status.HTTP_200_OK,
+                    "message": "User activated successfully",
+                }
+            
+        if users:
             duplicate = session.query(Users).filter_by(email_address=email_address, imap_password=imap_password).first()
             if duplicate and str(duplicate.user_id) != user_id:
-                raise ValueError("Auth mail with this email and IMAP password already exists, nothing to update")
+                raise ValueError("User with this email and IMAP password already exists, nothing to update")
             users.email_address = email_address
             users.imap_password = imap_password
             users.connect_with = connect_with
             session.commit()
             return {
                 "status": status.HTTP_200_OK,
-                "message": "Auth mail updated successfully",
+                "message": "User mail updated successfully",
             }
     except ValueError:
         raise
@@ -625,6 +639,8 @@ def is_within_extraction_window(config: Optional[Dict[str, Any]] = None) -> bool
                 "window_start_time": cfg.window_start_time,
                 "window_end_time": cfg.window_end_time,
                 "window_timezone": cfg.window_timezone,
+                "schedule_type": cfg.schedule_type,
+                "weekday": cfg.weekday
             }
         finally:
             session.close()
@@ -705,6 +721,8 @@ def get_extraction_config() -> Dict[str, Any]:
                 "window_start_time": cfg.window_start_time,
                 "window_end_time": cfg.window_end_time,
                 "window_timezone": cfg.window_timezone or "Asia/Kolkata",
+                "schedule_type": cfg.schedule_type,
+                "weekday": cfg.weekday
             },
         }
     finally:
@@ -718,6 +736,8 @@ def update_extraction_config(
     window_start_time: Optional[str] = None,
     window_end_time: Optional[str] = None,
     window_timezone: Optional[str] = None,
+    schedule_type: Optional[str] = None,
+    weekday: Optional[str] = None
 ) -> Dict[str, Any]:
     """Update the global extraction schedule configuration.
 
@@ -756,6 +776,18 @@ def update_extraction_config(
         if window_timezone is not None:
             ZoneInfo(window_timezone)
             cfg.window_timezone = window_timezone
+        
+        if schedule_type:
+            cfg.schedule_type = schedule_type
+        
+        if weekday:
+            cfg.weekday = weekday
+
+        # if schedule_type is None:
+        #     raise ("Shedule_type should not be None")
+        
+        # if weekday == "":
+        #     raise ("weekdat should not be empty")
 
         session.commit()
         return {
@@ -769,6 +801,8 @@ def update_extraction_config(
                 "window_start_time": cfg.window_start_time,
                 "window_end_time": cfg.window_end_time,
                 "window_timezone": cfg.window_timezone or "Asia/Kolkata",
+                "schedule_type" : cfg.schedule_type,
+                "weekday": cfg.weekday
             },
         }
     except ValueError:
@@ -976,7 +1010,8 @@ def new_model_version(model_id, payload):
     finally:
         db.close()  
 
-def model_config(payload, admin_id):
+# def model_config(payload, admin_id):
+def model_config(payload):
     try:
         db = SessionLocal()
         model_version_id = payload.get("model_version_id") 
@@ -990,8 +1025,8 @@ def model_config(payload, admin_id):
         print(max_tokens)
         temperature = payload.get("temperature") if payload.get("temperature") else None
         print(temperature)
-        if not admin_id:
-            raise ValueError("Admin ID must be provided")
+        # if not admin_id:
+        #     raise ValueError("Admin ID must be provided")
         
         model = db.query(AiModel).filter_by(ai_model_id=ai_model_id, is_active=True).first()
         if not model:
@@ -1005,7 +1040,7 @@ def model_config(payload, admin_id):
         new_config = AiModelConfig(
             ai_model_version_id = model_version_id,
             ai_model_id = ai_model_id,
-            admin_id = admin_id,
+            # admin_id = admin_id,
             apikey = apikey,
             version = version,
             max_tokens = max_tokens
@@ -1022,7 +1057,7 @@ def model_config(payload, admin_id):
                 "model_name" : model.model_name,
                 "model_version_id": str(new_config.ai_model_version_id),
                 "model_version_name": model_version.version_name,
-                "admin_id": str(new_config.admin_id),
+                # "admin_id": str(new_config.admin_id),
                 "apikey": new_config.apikey,
                 "max_tokens": new_config.max_tokens,
             }
@@ -1033,11 +1068,12 @@ def model_config(payload, admin_id):
     finally:
         db.close()
     
-def get_model(admin_id):
+# def get_model(admin_id):
+def get_model():
     try:
         db = SessionLocal()
-        if not admin_id:
-            raise ValueError("Admin ID must be provided")
+        # if not admin_id:
+        #     raise ValueError("Admin ID must be provided")
 
         model_config =( db.query(
             func.json_build_object(
@@ -1055,7 +1091,7 @@ def get_model(admin_id):
         .select_from(AiModelConfig).
         join(AiModel, AiModel.ai_model_id == AiModelConfig.ai_model_id).
         join(AiModelversion, AiModelversion.ai_model_version_id == AiModelConfig.ai_model_version_id).
-        filter(AiModelConfig.admin_id == admin_id, AiModelConfig.is_active == True).
+        # filter(AiModelConfig.admin_id == admin_id, AiModelConfig.is_active == True).
         first())
         
         if not model_config:
