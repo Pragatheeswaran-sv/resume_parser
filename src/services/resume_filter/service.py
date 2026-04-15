@@ -1208,16 +1208,24 @@ Return ONLY valid JSON matching this schema (omit keys whose value would be null
     "companies": ["company1"],
     "min_experience": <number or null>,
     "max_experience": <number or null>,
-    "name": "<candidate name or null>"
+    "name": "<candidate name or null>",
+    "passout_start_year": <four-digit year or null>,
+    "passout_end_year": <four-digit year or null>,
+    "percentage": <number 0-100 or null>
 }
 
 RULES:
 1. skills, education, roles, companies must be arrays of SHORT strings (e.g. "Python", "B.Tech").
 2. Experience: "5+ years" → min_experience=5. "3-5 years" → min_experience=3, max_experience=5.
    "10 years" → min_experience=10, max_experience=10.
-3. Only include fields explicitly mentioned in the query.
-4. Do NOT guess or infer values not present in the query.
-5. Return ONLY JSON – no markdown, no explanation, no extra text.
+3. Graduation / passout year: "graduated after 2020" → passout_start_year=2020.
+   "passed out between 2018 and 2022" → passout_start_year=2018, passout_end_year=2022.
+   "2021 batch" → passout_start_year=2021, passout_end_year=2021.
+4. Percentage / score: "above 80%" → percentage=80. "minimum 75 percentage" → percentage=75.
+   If a CGPA is mentioned (e.g. "8.5 CGPA"), convert to percentage: multiply by 10 (8.5 → 85).
+5. Only include fields explicitly mentioned in the query.
+6. Do NOT guess or infer values not present in the query.
+7. Return ONLY JSON – no markdown, no explanation, no extra text.
 """
     try:
         response = ollama.chat(
@@ -1240,7 +1248,11 @@ RULES:
         if not isinstance(parsed, dict):
             return {}
 
-        allowed_keys = {"skills", "education", "roles", "companies", "min_experience", "max_experience", "name"}
+        allowed_keys = {
+            "skills", "education", "roles", "companies",
+            "min_experience", "max_experience", "name",
+            "passout_start_year", "passout_end_year", "percentage",
+        }
         return {k: v for k, v in parsed.items() if k in allowed_keys and v is not None}
 
     except Exception as e:
@@ -1265,13 +1277,13 @@ def resolve_dynamic_filters(dynamic_filters: dict) -> dict:
             for name in skill_names:
                 if not name or not isinstance(name, str):
                     continue
-                match = db.query(Skill).filter(Skill.skill.ilike(name.strip())).first()
-                if match:
-                    skill_ids.append(str(match.skill_id))
+                matches = db.query(Skill).filter(Skill.skill.ilike(f"%{name.strip()}%")).all()
+                if matches:
+                    skill_ids.extend(str(m.skill_id) for m in matches)
                 else:
                     logger.debug("[resolve_dynamic_filters] No skill match for '%s'", name)
             if skill_ids:
-                resolved["skills"] = skill_ids
+                resolved["skills"] = list(dict.fromkeys(skill_ids))
 
         edu_names = dynamic_filters.get("education")
         if edu_names and isinstance(edu_names, list):
@@ -1279,13 +1291,13 @@ def resolve_dynamic_filters(dynamic_filters: dict) -> dict:
             for name in edu_names:
                 if not name or not isinstance(name, str):
                     continue
-                match = db.query(Education).filter(Education.education.ilike(name.strip())).first()
-                if match:
-                    edu_ids.append(str(match.education_id))
+                matches = db.query(Education).filter(Education.education.ilike(f"%{name.strip()}%")).all()
+                if matches:
+                    edu_ids.extend(str(m.education_id) for m in matches)
                 else:
                     logger.debug("[resolve_dynamic_filters] No education match for '%s'", name)
             if edu_ids:
-                resolved["education"] = edu_ids
+                resolved["education"] = list(dict.fromkeys(edu_ids))
 
         role_names = dynamic_filters.get("roles")
         if role_names and isinstance(role_names, list):
@@ -1293,13 +1305,13 @@ def resolve_dynamic_filters(dynamic_filters: dict) -> dict:
             for name in role_names:
                 if not name or not isinstance(name, str):
                     continue
-                match = db.query(Role).filter(Role.role.ilike(name.strip())).first()
-                if match:
-                    role_ids.append(str(match.role_id))
+                matches = db.query(Role).filter(Role.role.ilike(f"%{name.strip()}%")).all()
+                if matches:
+                    role_ids.extend(str(m.role_id) for m in matches)
                 else:
                     logger.debug("[resolve_dynamic_filters] No role match for '%s'", name)
             if role_ids:
-                resolved["roles"] = role_ids
+                resolved["roles"] = list(dict.fromkeys(role_ids))
 
         companies = dynamic_filters.get("companies")
         if companies and isinstance(companies, list):
@@ -1322,6 +1334,33 @@ def resolve_dynamic_filters(dynamic_filters: dict) -> dict:
         name_val = dynamic_filters.get("name")
         if name_val and isinstance(name_val, str) and name_val.strip():
             resolved["name"] = name_val.strip()
+
+        for field in ("passout_start_year", "passout_end_year"):
+            val = dynamic_filters.get(field)
+            if val is not None:
+                if isinstance(val, str):
+                    import re as _re2
+                    m = _re2.search(r"(\d{4})", val)
+                    if m:
+                        resolved[field] = int(m.group(1))
+                else:
+                    try:
+                        resolved[field] = int(val)
+                    except (ValueError, TypeError):
+                        pass
+
+        pct_val = dynamic_filters.get("percentage")
+        if pct_val is not None:
+            if isinstance(pct_val, str):
+                import re as _re3
+                m = _re3.search(r"(\d+(?:\.\d+)?)", pct_val)
+                if m:
+                    resolved["percentage"] = float(m.group(1))
+            else:
+                try:
+                    resolved["percentage"] = float(pct_val)
+                except (ValueError, TypeError):
+                    pass
 
         logger.info("[resolve_dynamic_filters] Resolved: %s", resolved)
         return resolved
@@ -1371,6 +1410,10 @@ def merge_filters(standard: dict, dynamic: dict) -> dict:
     for key in pagination_fields:
         if key in dynamic and key not in merged:
             pass
+
+    for key in list_fields:
+        if key in merged and not merged[key]:
+            del merged[key]
 
     return merged
 

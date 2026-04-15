@@ -202,19 +202,22 @@ class ResumeFilterRequest(BaseModel):
 
     @field_validator("skills", "education", "roles", mode="before")
     @classmethod
-    def validate_uuid_lists(cls, v, info):
+    def validate_list_of_str_or_uuid(cls, v, info):
         if v is None:
             return v
         if not isinstance(v, list):
-            raise ValueError(f"{info.field_name} must be a list of UUID strings")
+            raise ValueError(f"{info.field_name} must be a list")
         validated: list[str] = []
         for idx, item in enumerate(v):
-            try:
-                validated.append(str(UUID(str(item))))
-            except (ValueError, AttributeError):
+            if not isinstance(item, str) or not item.strip():
                 raise ValueError(
-                    f"{info.field_name}[{idx}] = '{item}' is not a valid UUID"
+                    f"{info.field_name}[{idx}] must be a non-empty string"
                 )
+            item = item.strip()
+            try:
+                validated.append(str(UUID(item)))
+            except ValueError:
+                validated.append(item)
         return validated
 
     @field_validator("min_experience", "max_experience", mode="before")
@@ -493,6 +496,9 @@ class DynamicFilterResponse(BaseModel):
     min_experience: Optional[float] = None
     max_experience: Optional[float] = None
     name: Optional[str] = None
+    passout_start_year: Optional[int] = None
+    passout_end_year: Optional[int] = None
+    percentage: Optional[float] = None
 
     @field_validator("min_experience", "max_experience", mode="before")
     @classmethod
@@ -508,6 +514,186 @@ class DynamicFilterResponse(BaseModel):
             return float(v)
         except (ValueError, TypeError):
             return None
+
+    @field_validator("passout_start_year", "passout_end_year", mode="before")
+    @classmethod
+    def coerce_passout_year(cls, v, info):
+        if v is None or v == "":
+            return None
+        if isinstance(v, str):
+            match = re.search(r"(\d{4})", v)
+            if match:
+                return int(match.group(1))
+            return None
+        try:
+            val = int(v)
+            if MIN_YEAR <= val <= MAX_YEAR:
+                return val
+            return None
+        except (ValueError, TypeError):
+            return None
+
+    @field_validator("percentage", mode="before")
+    @classmethod
+    def coerce_percentage(cls, v):
+        if v is None or v == "":
+            return None
+        if isinstance(v, str):
+            match = re.search(r"(\d+(?:\.\d+)?)", v)
+            if match:
+                val = float(match.group(1))
+                return val if 0 <= val <= 100 else None
+            return None
+        try:
+            val = float(v)
+            return val if 0 <= val <= 100 else None
+        except (ValueError, TypeError):
+            return None
+
+
+# ---------------------------------------------------------------------------
+# Natural-language search schemas
+# ---------------------------------------------------------------------------
+
+class NLSearchRequest(BaseModel):
+    """Initial NL search: the LLM parses the query and a search_id is minted."""
+    user_query: str
+    page: Optional[int] = 1
+    page_size: Optional[int] = 20
+    sort_by: Optional[str] = None
+    sort_order: Optional[str] = "asc"
+
+    @field_validator("user_query", mode="before")
+    @classmethod
+    def validate_user_query(cls, v):
+        if not v or not isinstance(v, str) or not v.strip():
+            raise ValueError("user_query must be a non-empty string")
+        cleaned = v.strip()
+        if len(cleaned) > 1000:
+            raise ValueError("user_query must not exceed 1000 characters")
+        return cleaned
+
+    @field_validator("page", mode="before")
+    @classmethod
+    def validate_nl_page(cls, v):
+        if v is None:
+            return 1
+        try:
+            val = int(v)
+        except (ValueError, TypeError):
+            raise ValueError(f"page must be a positive integer, got '{v}'")
+        if val < 1:
+            raise ValueError("page must be >= 1")
+        return val
+
+    @field_validator("page_size", mode="before")
+    @classmethod
+    def validate_nl_page_size(cls, v):
+        if v is None:
+            return 20
+        try:
+            val = int(v)
+        except (ValueError, TypeError):
+            raise ValueError(f"page_size must be a positive integer, got '{v}'")
+        if val < 1:
+            raise ValueError("page_size must be >= 1")
+        if val > MAX_PAGE_SIZE:
+            raise ValueError(f"page_size cannot exceed {MAX_PAGE_SIZE}")
+        return val
+
+    @field_validator("sort_by", mode="before")
+    @classmethod
+    def validate_nl_sort_by(cls, v):
+        if v is None or v == "":
+            return None
+        if v not in ALLOWED_SORT_FIELDS:
+            raise ValueError(f"sort_by must be one of {ALLOWED_SORT_FIELDS}, got '{v}'")
+        return v
+
+    @field_validator("sort_order", mode="before")
+    @classmethod
+    def validate_nl_sort_order(cls, v):
+        if v is None or v == "":
+            return "asc"
+        v_lower = str(v).lower()
+        if v_lower not in ALLOWED_SORT_ORDERS:
+            raise ValueError(f"sort_order must be 'asc' or 'desc', got '{v}'")
+        return v_lower
+
+
+class NLSearchPaginateRequest(BaseModel):
+    """Follow-up paginated request: reuses cached filters via search_id."""
+    search_id: str
+    page: Optional[int] = 1
+    page_size: Optional[int] = 20
+    sort_by: Optional[str] = None
+    sort_order: Optional[str] = "asc"
+
+    @field_validator("search_id", mode="before")
+    @classmethod
+    def validate_search_id(cls, v):
+        if not v or not isinstance(v, str) or not v.strip():
+            raise ValueError("search_id must be a non-empty string")
+        return v.strip()
+
+    @field_validator("page", mode="before")
+    @classmethod
+    def validate_nlp_page(cls, v):
+        if v is None:
+            return 1
+        try:
+            val = int(v)
+        except (ValueError, TypeError):
+            raise ValueError(f"page must be a positive integer, got '{v}'")
+        if val < 1:
+            raise ValueError("page must be >= 1")
+        return val
+
+    @field_validator("page_size", mode="before")
+    @classmethod
+    def validate_nlp_page_size(cls, v):
+        if v is None:
+            return 20
+        try:
+            val = int(v)
+        except (ValueError, TypeError):
+            raise ValueError(f"page_size must be a positive integer, got '{v}'")
+        if val < 1:
+            raise ValueError("page_size must be >= 1")
+        if val > MAX_PAGE_SIZE:
+            raise ValueError(f"page_size cannot exceed {MAX_PAGE_SIZE}")
+        return val
+
+    @field_validator("sort_by", mode="before")
+    @classmethod
+    def validate_nlp_sort_by(cls, v):
+        if v is None or v == "":
+            return None
+        if v not in ALLOWED_SORT_FIELDS:
+            raise ValueError(f"sort_by must be one of {ALLOWED_SORT_FIELDS}, got '{v}'")
+        return v
+
+    @field_validator("sort_order", mode="before")
+    @classmethod
+    def validate_nlp_sort_order(cls, v):
+        if v is None or v == "":
+            return "asc"
+        v_lower = str(v).lower()
+        if v_lower not in ALLOWED_SORT_ORDERS:
+            raise ValueError(f"sort_order must be 'asc' or 'desc', got '{v}'")
+        return v_lower
+
+
+class NLSearchResponse(BaseModel):
+    """Wrapper returned by the NL search endpoint."""
+    status: str = "success"
+    search_id: str
+    user_query: Optional[str] = None
+    filters_applied: Optional[Dict[str, Any]] = None
+    candidates: List[Dict[str, Any]] = []
+    total_record: int = 0
+    page: int = 1
+    page_size: int = 20
 
 
 class CombinedFilterPayload(BaseModel):
