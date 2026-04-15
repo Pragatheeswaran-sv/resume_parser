@@ -35,6 +35,7 @@ def _build_redis_key(search_id: str) -> str:
 
 def _store_search_session(
     search_id: str,
+    raw_filters: dict,
     resolved_filters: dict,
     user_query: str,
 ) -> None:
@@ -42,6 +43,7 @@ def _store_search_session(
     r = get_redis()
     payload = {
         "filters": resolved_filters,
+        "raw_filters": raw_filters,
         "user_query": user_query,
         "created_at": dt.datetime.utcnow().isoformat(),
     }
@@ -65,9 +67,12 @@ def _load_search_session(search_id: str) -> dict | None:
         return None
 
 
-def _extract_and_resolve(user_query: str) -> dict:
-    """Run the LLM extraction → UUID resolution pipeline and return
-    a dict suitable for ``ResumeFilterRequest``.
+def _extract_and_resolve(user_query: str) -> tuple[dict, dict]:
+    """Run the LLM extraction → UUID resolution pipeline.
+
+    Returns ``(raw_filters, resolved_filters)`` where:
+    * ``raw_filters``  – human-readable LLM output (for display in the response)
+    * ``resolved_filters`` – UUID-resolved dict ready for ``search_resumes``
     """
     raw_filters = extract_filters_from_query(user_query)
     logger.info("[nl_search] LLM raw output: %s", raw_filters)
@@ -85,10 +90,11 @@ def _extract_and_resolve(user_query: str) -> dict:
 
     if not resolved:
         raise ValueError(
-            "None of the LLM-extracted filter values matched known data"
+            "None of the LLM-extracted filter values matched known data. "
+            "Extracted: " + ", ".join(f"{k}={v}" for k, v in raw_filters.items())
         )
 
-    return resolved
+    return raw_filters, resolved
 
 
 def _execute_search(
@@ -141,10 +147,10 @@ def nl_search_initial(
     _page_size = page_size or 20
     _sort_order = sort_order or "asc"
 
-    resolved_filters = _extract_and_resolve(user_query)
+    raw_filters, resolved_filters = _extract_and_resolve(user_query)
 
     search_id = uuid.uuid4().hex
-    _store_search_session(search_id, resolved_filters, user_query)
+    _store_search_session(search_id, raw_filters, resolved_filters, user_query)
 
     candidates, total_record = _execute_search(
         resolved_filters, _page, _page_size, sort_by, _sort_order,
@@ -154,7 +160,7 @@ def nl_search_initial(
         "status": "success",
         "search_id": search_id,
         "user_query": user_query,
-        "filters_applied": resolved_filters,
+        "filters_applied": raw_filters,
         "candidates": candidates,
         "total_record": total_record,
         "page": _page,
@@ -182,6 +188,7 @@ def nl_search_paginate(
         )
 
     resolved_filters = session["filters"]
+    raw_filters = session.get("raw_filters", resolved_filters)
     user_query = session.get("user_query")
 
     candidates, total_record = _execute_search(
@@ -192,7 +199,7 @@ def nl_search_paginate(
         "status": "success",
         "search_id": search_id,
         "user_query": user_query,
-        "filters_applied": resolved_filters,
+        "filters_applied": raw_filters,
         "candidates": candidates,
         "total_record": total_record,
         "page": _page,
