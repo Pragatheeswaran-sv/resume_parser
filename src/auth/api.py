@@ -19,6 +19,7 @@ from src.auth.schemas import EmailRequest, EmailFetchResponse, EmailFetchResult
 from src.services.auth.zoho.service import zoho_login
 from src.auth.models import OauthCredentials, OauthSource
 from src.admin.models import Users
+from src.services.auth.service import fetch_emails_oauth
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -101,7 +102,7 @@ def oauth_zoho_login() -> dict:
 #     return response
 
 @router.post("/emails")
-def fetch_emails_oauth() -> EmailFetchResponse:
+def fetch_oauth_emails() -> EmailFetchResponse:
     """
     Fetch emails from all active users based on OAuth source (Gmail / Zoho).
 
@@ -124,87 +125,12 @@ def fetch_emails_oauth() -> EmailFetchResponse:
     - 500: Internal server error
     """
 
-    logger.info("NAV----> Fetching emails for all active users")
-    db = SessionLocal()
-
-    results = []
-
     try:
-        # 1. Get all active email
-        users = db.query(Users).filter(
-            Users.is_active == True
-        ).all()
-        logger.info(f"NAV----> Found {len(users)} active email accounts")
-
-        if not users:
-            return EmailFetchResponse(
-                message="No active email accounts found",
-                results=[]
-            )
-
-        for mail in users:
-            email_id = (mail.email_address or "").strip()
-
-            if not email_id:
-                logger.warning("Empty email found, skipping...")
-                continue
-
-            logger.info(f"Processing email: {email_id}")
-
-            # 2. Fetch OAuth credentials
-            cred = db.query(OauthCredentials).filter(
-                OauthCredentials.email == email_id,
-                OauthCredentials.is_active == True
-            ).first()
-
-            if not cred:
-                logger.warning(f"No OAuth credentials found for {email_id}")
-                continue
-
-            if not cred.source:
-                logger.warning(f"No source mapped for {email_id}")
-                continue
-
-            # 3. Identify source
-            source_name = cred.source.source_name.lower().strip()
-
-            logger.info(f"Source detected: {source_name}")
-
-            # 4. Call respective service
-            try:
-                if source_name == "gmail":
-                    service_response = fetch_emails_gmail(email_id=email_id)
-
-                elif source_name == "zoho":
-                    service_response = fetch_emails_zoho(email_id=email_id)
-
-                else:
-                    logger.warning(f"Unsupported source: {source_name}")
-                    continue
-
-                status = "success"
-
-            except Exception as service_error:
-                logger.error(f"Error processing {email_id}: {str(service_error)}")
-                status = f"failed: {str(service_error)}"
-
-            results.append(
-                EmailFetchResult(
-                    email=email_id,
-                    source=source_name,
-                    status=status
-                )
-            )
-
-        return EmailFetchResponse(
-            message="Email fetching completed",
-            results=results
-        )
-
+        response = fetch_emails_oauth()
+        return response
     except Exception as e:
-        logger.error(f"Fatal error in fetch_emails_oauth: {str(e)}")
+        logger.error(f"Error occurred while initiating Zoho OAuth: {e}")
         raise HTTPException(
-            status_code= 500,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail={"status": "error", "message": str(e)},
         )
-
