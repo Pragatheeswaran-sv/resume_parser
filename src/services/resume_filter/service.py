@@ -858,14 +858,13 @@ def search_resumes(filters: dict):
                         logger.debug("[search_resumes] Company '%s' matched %d records", comp, len(matched))
                     else:
                         logger.debug("[search_resumes] No companies matched name: '%s'", comp)
-                if company_ids:
-                    conditions.append(
-                        Candidate.candidate_id.in_(
-                            db.query(WorkExperience.candidate_id).filter(
-                                WorkExperience.company_id.in_(company_ids)
-                            )
+                conditions.append(
+                    Candidate.candidate_id.in_(
+                        db.query(WorkExperience.candidate_id).filter(
+                            WorkExperience.company_id.in_(company_ids)
                         )
                     )
+                )
 
         education_vals = filters.get("education")
         if education_vals:
@@ -1333,7 +1332,7 @@ def resolve_dynamic_filters(dynamic_filters: dict) -> dict:
 
         name_val = dynamic_filters.get("name")
         if name_val and isinstance(name_val, str) and name_val.strip():
-            resolved["name"] = name_val.strip()
+            resolved["name"] = [name_val.strip()]
 
         for field in ("passout_start_year", "passout_end_year"):
             val = dynamic_filters.get(field)
