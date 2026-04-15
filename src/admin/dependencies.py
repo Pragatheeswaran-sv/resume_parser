@@ -33,11 +33,11 @@ OPEN_PATHS = {
     "/api/create_admin",
     "/api/admin/login",
     "/api/auth/sso/login",
-    "/oauth/login/gmail",
-    "/oauth/login/zoho",
-    "/auth/gmail/callback",
-    "/auth/zoho/callback",
-    "/emails"
+    "/api/oauth/login/gmail",
+    "/api/oauth/login/zoho",
+    "/api/auth/gmail/callback",
+    "/api/auth/zoho/callback",
+    "/api/emails"
 }
 
 ADMIN_PREFIX = "/api/admin"

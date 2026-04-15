@@ -24,6 +24,7 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
+    prefix="/api",
 	tags=["Payment-Process"],
 	responses={
 		400: {"description": "Bad Request"},
