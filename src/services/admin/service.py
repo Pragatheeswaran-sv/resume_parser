@@ -317,6 +317,7 @@ def list_mail() -> Dict[str, Any]:
                     "name": users.name,
                     "email_address": users.email_address,
                     "phone_number": users.phone_number,
+                    "is_blocked" : users.is_blocked
                     # "connect_with": users.connect_with,
                 }
                 for users in users
