@@ -31,6 +31,7 @@ from src.services.admin.service import (
     sso_user_login,
     toggle_block,
     toggle_extraction,
+    toggle_model,
     trigger_extraction,
     update_admin_profile,
     update_user,
@@ -147,10 +148,10 @@ def sso_login(body: SSOLoginRequest):
 # ── Legacy auth-mail CRUD (kept for backward-compat) ────────────────────
 
 @router.get("/list_users")
-def get_users():
+def get_users(page, page_size):
     """List all active authorized email accounts."""
     try:
-        return list_mail()
+        return list_mail(page, page_size)
     except ValueError as e:
         logger.warning("[list_users] Error: %s", str(e), exc_info=True)
         logger.warning("[list_users] Error: %s", str(e), exc_info=True)
@@ -541,7 +542,7 @@ def create_model_version(model_id, payload: Dict[str, Any]):
 
 @router.post("/model_config/")
 # def get_model_config(payload: Dict[str, Any], admin_id):
-def get_model_config(payload: Dict[str, Any]):
+def get_model_config(payload: Dict[str, Any], _admin=Depends(get_current_admin)):
     """
         Create Model Configuration
 
@@ -588,8 +589,9 @@ def get_model_config(payload: Dict[str, Any]):
                 - 400 Bad Request: If admin ID, model, or model version is invalid.
     """
     try:
-        # return model_config(payload, admin_id)
-        return model_config(payload)
+        admin_id = _admin.admin_id
+        return model_config(payload, admin_id)
+        # return model_config(payload)
     except ValueError as e:
         logger.warning("[get_model_config] Error: %s", str(e), exc_info=True)
         raise HTTPException(
@@ -601,7 +603,7 @@ def get_model_config(payload: Dict[str, Any]):
     
 @router.get("/get_model_config/")
 # def fetch_model_config(admin_id):
-def fetch_model_config():
+def fetch_model_config(page, page_size, _admin=Depends(get_current_admin)):
     """
         Fetch Model Configuration
 
@@ -635,8 +637,60 @@ def fetch_model_config():
                 - 400 Bad Request: If admin ID is missing or no active configuration is found.
     """
     try:
-        # return get_model(admin_id)
-        return get_model()
+        admin_id = _admin.admin_id
+        return get_model(page, page_size, admin_id)
+    except ValueError as e:
+        logger.warning("[fetch_model_config] Error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "status": "error",
+                "message": str(e),
+            })
+
+@router.patch('/enable_ai_model')
+def enable_model(model_config_id, _admin=Depends(get_current_admin)):
+    """
+        Enable AI Model Configuration
+
+        Activates a specific AI model configuration for the authenticated admin.
+        When a model configuration is enabled, all other configurations associated
+        with the same admin will be automatically disabled to ensure that only
+        one model remains active at a time.
+
+        This endpoint is useful for switching between different AI models or
+        model versions configured by the admin.
+
+        Endpoint:
+            PATCH /enable_ai_model
+
+        Args:
+            model_config_id (str):
+                The unique identifier of the model configuration to be enabled.
+
+            _admin (Admin):
+                The currently authenticated admin user (injected via dependency).
+
+        Returns:
+            dict: A response object containing:
+                - status (str): "success" or "error"
+                - message (str): Description of the operation result
+                - data (dict, optional): Details of the updated model configuration
+
+        Behavior:
+            - Sets `is_active = True` for the given model_config_id
+            - Sets `is_active = False` for all other configurations of the same admin
+
+        Raises:
+            HTTPException:
+                - 400 Bad Request:
+                    - If model_config_id is invalid
+                    - If the model configuration does not belong to the admin
+                    - If update operation fails
+    """
+    try:
+        admin_id = _admin.admin_id
+        return toggle_model(model_config_id, admin_id)
     except ValueError as e:
         logger.warning("[fetch_model_config] Error: %s", str(e), exc_info=True)
         raise HTTPException(

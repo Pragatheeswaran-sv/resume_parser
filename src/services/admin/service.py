@@ -295,7 +295,7 @@ def new_admin(payload: dict) -> Dict[str, Any]:
         session.close()
 
 
-def list_mail() -> Dict[str, Any]:
+def list_mail(page, page_size) -> Dict[str, Any]:
     """Return all active authorized email accounts.
 
     Returns:
@@ -306,7 +306,17 @@ def list_mail() -> Dict[str, Any]:
     """
     session = SessionLocal()
     try:
-        users = session.query(Users).filter(Users.is_active == True).all()
+        page = int(page)
+        page_size = int(page_size)
+        offset = (int(page) - 1) * page_size
+
+        users = session.query(Users).filter(Users.is_active == True).limit(page_size).offset(offset)
+        user_count = session.query(Users).filter(Users.is_active == True).all()
+        total_users = len(user_count)
+
+        if total_users <= offset:
+            raise ValueError("Invalid page number")
+
         if not users:
             raise ValueError("No Users found")
         return {
@@ -318,11 +328,12 @@ def list_mail() -> Dict[str, Any]:
                     "name": users.name,
                     "email_address": users.email_address,
                     "phone_number": users.phone_number,
-                    "is_blocked" : users.is_blocked
+                    "is_blocked" : users.is_blocked,
                     # "connect_with": users.connect_with,
                 }
                 for users in users
             ],
+            "total_records": total_users
         }
     except ValueError:
         raise
@@ -988,10 +999,9 @@ def new_model_version(model_id, payload):
         if not version_name or version_name.strip() == "" or version_name == None:
             raise ValueError("Version name must be provided")
         
-        # version_name = f"{model.model_name}_v{len(db.query(AiModelversion).filter_by(ai_model_id=model_id).all()) + 1}"
         new_version = AiModelversion(
             ai_model_id = model_id,
-            version_name = version_name
+            version_name = version_name,
         )
         db.add(new_version)
         db.commit()
@@ -1011,22 +1021,17 @@ def new_model_version(model_id, payload):
         db.close()  
 
 # def model_config(payload, admin_id):
-def model_config(payload):
+def model_config(payload, admin_id):
     try:
         db = SessionLocal()
         model_version_id = payload.get("model_version_id") 
         ai_model_id = payload.get("model_id") 
-        print(ai_model_id)
         apikey = payload.get("apikey") if payload.get("apikey") else None
-        print(apikey)
         version = payload.get("version") if payload.get("version") else None
-        print(version)
         max_tokens = payload.get("max_tokens") if payload.get("max_tokens") else None
-        print(max_tokens)
         temperature = payload.get("temperature") if payload.get("temperature") else None
-        print(temperature)
-        # if not admin_id:
-        #     raise ValueError("Admin ID must be provided")
+        if not admin_id:
+            raise ValueError("Admin ID must be provided")
         
         model = db.query(AiModel).filter_by(ai_model_id=ai_model_id, is_active=True).first()
         if not model:
@@ -1036,14 +1041,18 @@ def model_config(payload):
         if not model_version:
             raise ValueError("No model version found for the given model version ID")
         
+        duplicate_config = db.query(AiModelConfig).filter_by(ai_model_version_id = model_version_id, ai_model_id = ai_model_id, apikey = apikey).first()
+        if duplicate_config:
+            raise ValueError("Model with APIKEY is already exist")
         
         new_config = AiModelConfig(
             ai_model_version_id = model_version_id,
             ai_model_id = ai_model_id,
-            # admin_id = admin_id,
+            admin_id = admin_id,
             apikey = apikey,
             version = version,
-            max_tokens = max_tokens
+            max_tokens = max_tokens,
+            is_active = True
         )
         db.add(new_config)
         db.commit()
@@ -1057,7 +1066,7 @@ def model_config(payload):
                 "model_name" : model.model_name,
                 "model_version_id": str(new_config.ai_model_version_id),
                 "model_version_name": model_version.version_name,
-                # "admin_id": str(new_config.admin_id),
+                "admin_id": str(new_config.admin_id),
                 "apikey": new_config.apikey,
                 "max_tokens": new_config.max_tokens,
             }
@@ -1068,12 +1077,21 @@ def model_config(payload):
     finally:
         db.close()
     
-# def get_model(admin_id):
-def get_model():
+def get_model(page, page_size, admin_id):
+    db = SessionLocal()
     try:
-        db = SessionLocal()
-        # if not admin_id:
-        #     raise ValueError("Admin ID must be provided")
+        page = int(page)
+        page_size = int(page_size)
+        offset = (int(page) - 1) * page_size
+
+        total = db.query(AiModelConfig).all()
+        total_record = len(total)
+        
+        if total_record <= offset:
+            raise ValueError("Invalid page number")  
+       
+        if not admin_id:
+            raise ValueError("Admin ID must be provided")
 
         model_config =( db.query(
             func.json_build_object(
@@ -1085,25 +1103,66 @@ def get_model():
                 'admin_id', AiModelConfig.admin_id,
                 'apikey', AiModelConfig.apikey,
                 'max_tokens', AiModelConfig.max_tokens,
-                'temparature', AiModelConfig.temparature,
+                'temperature', AiModelConfig.temparature,
+                'is_active', AiModelConfig.is_active
             )
         )
         .select_from(AiModelConfig).
         join(AiModel, AiModel.ai_model_id == AiModelConfig.ai_model_id).
         join(AiModelversion, AiModelversion.ai_model_version_id == AiModelConfig.ai_model_version_id).
-        # filter(AiModelConfig.admin_id == admin_id, AiModelConfig.is_active == True).
-        first())
+        filter(AiModelConfig.admin_id == admin_id).
+        limit(page_size).offset(offset).all()
+        )
         
+        # return model_config
         if not model_config:
             raise ValueError("No model config found for the given admin ID")
         
         return{
             "status": status.HTTP_200_OK,
             "message": "Model config retrieved successfully",
-            "data": model_config[0] if model_config else None
+            "data": [row[0] for row in model_config],
+            "total_record" : total_record
         }             
     except Exception as e:
         logger.warning("[get_model] Error: %s", str(e), exc_info=True)
+        raise ValueError(str(e))
+    finally:
+        db.close()
+
+def toggle_model(model_config_id, admin_id):
+    try:
+        db = SessionLocal()
+        # return admin_id
+        if not admin_id:
+            raise ValueError("Admin ID must be provided")
+        
+        disable_all = db.query(AiModelConfig).filter(
+            AiModelConfig.ai_model_config_id != model_config_id
+            ).update(
+                {AiModelConfig.is_active: False},
+                synchronize_session=False
+            )
+        
+        enable_one = db.query(AiModelConfig).filter(
+                AiModelConfig.ai_model_config_id == model_config_id
+            ).update(
+                {AiModelConfig.is_active: True},
+                synchronize_session=False
+            )
+        db.commit()
+
+        active_model = db.query(AiModelConfig).filter_by(is_active = True).all()
+
+        return{
+            "status": status.HTTP_200_OK,
+            "message": "Model enabled successfully",
+            "data": active_model
+        }      
+
+
+    except Exception as e:
+        logger.warning("[enable/disable model] Error: %s", str(e), exc_info=True)
         raise ValueError(str(e))
     finally:
         db.close()
