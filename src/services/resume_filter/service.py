@@ -6,6 +6,8 @@ from uuid import UUID
 import datetime as dt
 
 # from django import db
+from alembic.util import status
+from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 import ollama
 from dotenv import load_dotenv
@@ -25,7 +27,7 @@ from src.candidate.models import (
 	WorkExperience, Skill, Education, Company, Role
 )
 from src.services.admin.service import get_model
-from src.admin.models import Admin
+from src.admin.models import Admin, AiModel, AiModelConfig, AiModelversion
 
 from openai import OpenAI
 from anthropic import Anthropic
@@ -97,18 +99,26 @@ def save_resumes_to_db(resumes):
             #         db.add(candidate)
             #     logger.info(f'Using existing candidate: {candidate.candidate_id}')
             # else:
-            candidate = Candidate(
-                name=info.get("name", ""),
-                email_address=info_email or sender_email or "",
-                email_from_sender=bool(sender_email and not info_email),
-                phone_number=info.get("phone_number", ""),
-                location=info.get("location", ""),
-                total_experience=normalize_experience(info.get("total_experience")),
-                created_by="resume_parser"
-            )
-            db.add(candidate)
-            db.flush()
-            logger.info("NAV----> candidate added to db")
+
+            email_address=info_email or sender_email or ""
+            phone_number=info.get("phone_number", "")
+
+            duplicate_candidate = db.query(Candidate).filter(candidate.email_address == email_address, candidate.phone_number == phone_number).first()
+            if not duplicate_candidate:
+                candidate = Candidate(
+                    name=info.get("name", ""),
+                    email_address=info_email or sender_email or "",
+                    email_from_sender=bool(sender_email and not info_email),
+                    phone_number=info.get("phone_number", ""),
+                    location=info.get("location", ""),
+                    total_experience=normalize_experience(info.get("total_experience")),
+                    created_by="resume_parser"
+                )
+                db.add(candidate)
+                db.flush()
+                logger.info("NAV----> candidate added to db")
+            
+            candidate_id = duplicate_candidate.candidate_id
             
             # Add skills
             skills_list = info.get("skills", [])
@@ -371,18 +381,42 @@ def is_resume(text: str) -> bool:
             raise Exception("No admin found")
         
         admin_id = admin.admin_id
-        model_info = get_model(admin_id)
+
+        model_info =( db.query(
+            func.json_build_object(
+                'model_name', AiModel.model_name,
+                'model_version_name', AiModelversion.version_name,
+                'apikey', AiModelConfig.apikey,
+                'max_tokens', AiModelConfig.max_tokens,
+                'temperature', AiModelConfig.temparature,
+                'is_active', AiModelConfig.is_active
+            )
+        )
+        .select_from(AiModelConfig).
+        join(AiModel, AiModel.ai_model_id == AiModelConfig.ai_model_id).
+        join(AiModelversion, AiModelversion.ai_model_version_id == AiModelConfig.ai_model_version_id).
+        filter(AiModelConfig.is_active == True).
+        first()
+        )
+
+        if not model_info:
+            model_info = {}
+        else:
+            model_info = model_info[0]
+
+        print("model=>", model_info)
 
         model = model_info.get("model_name", "ollama").lower()
         version = model_info.get("model_version_name", "latest").lower()
-        api_key = model_info.get("apikey")
+        api_key = model_info.get("apikey") or None
+
         message = [
                     {"role": "system", "content": "You only return JSON"},
                     {"role": "user", "content": prompt + "\n\nDocument:\n" + text[:2000]}
                 ]
-
+        
         if model == "openai":
-            if not api_key:
+            if not api_key or api_key == None:
                 raise Exception("OpenAI API key not found")
 
             client = OpenAI(api_key=api_key)
@@ -394,7 +428,7 @@ def is_resume(text: str) -> bool:
             content = response.choices[0].message.content.strip()
             logger.info(f"NAV----> the response from OpenAi {response}")
         elif model == "claude":
-            if not api_key:
+            if not api_key or api_key == None:
                 raise Exception("Claude API key not found")
 
             client = Anthropic(api_key=api_key)
@@ -545,11 +579,35 @@ def extract_basic_info(resume_text):
             raise Exception("No admin found")
         
         admin_id = admin.admin_id
-        model_info = get_model(admin_id)
+        # model_info = get_model(admin_id)
+
+        model_info =( db.query(
+            func.json_build_object(
+                'model_name', AiModel.model_name,
+                'model_version_name', AiModelversion.version_name,
+                'apikey', AiModelConfig.apikey,
+                'max_tokens', AiModelConfig.max_tokens,
+                'temperature', AiModelConfig.temparature,
+                'is_active', AiModelConfig.is_active
+            )
+        )
+        .select_from(AiModelConfig).
+        join(AiModel, AiModel.ai_model_id == AiModelConfig.ai_model_id).
+        join(AiModelversion, AiModelversion.ai_model_version_id == AiModelConfig.ai_model_version_id).
+        filter(AiModelConfig.is_active == True).
+        first()
+        )
+
+        if not model_info:
+            model_info = {}
+        else:
+            model_info = model_info[0]
+
+        print("model=>", model_info)
 
         model = model_info.get("model_name", "ollama").lower()
         version = model_info.get("model_version_name", "latest").lower()
-        api_key = model_info.get("apikey")
+        api_key = model_info.get("apikey") or None
         
         message = [
                     {"role": "system", "content": "You only return JSON"},
@@ -557,7 +615,7 @@ def extract_basic_info(resume_text):
                 ]
 
         if model == "openai":
-            if not api_key:
+            if not api_key or api_key == None:
                 raise Exception("OpenAI API key not found")
 
             client = OpenAI(api_key=api_key)
@@ -569,7 +627,7 @@ def extract_basic_info(resume_text):
             content = response.choices[0].message.content.strip()
             logger.info(f"NAV----> the response from OpenAi {response}")
         elif model == "claude":
-            if not api_key:
+            if not api_key or api_key == None:
                 raise Exception("Claude API key not found")
 
             client = Anthropic(api_key=api_key)
