@@ -456,18 +456,17 @@ def update_user(payload: dict, user_id: str, admin_id) -> Dict[str, Any]:
         if not users:
             raise ValueError("User not found")
 
+        name = payload.get("name") or users.name
         email_address = payload.get("email") if payload.get("email") else users.email_address
         imap_password = payload.get("imap_password") if payload.get("imap_password") else users.imap_password
         connect_with = payload.get("connect_with") if payload.get("connect_with") else users.connect_with
         blocked = payload.get("is_blocked") if payload.get("is_blocked") is not None else users.is_blocked
-        print(email_address)
-        print(blocked, type(blocked))
 
         admin = session.query(Admin).filter(admin_id == admin_id).first()
 
         if not admin:
             raise ValueError("user has no access to enable/disable account")
-        else:
+        if "is_blocked" in payload:
             if blocked == True:
                 users.is_blocked = blocked
                 session.commit()
@@ -487,6 +486,7 @@ def update_user(payload: dict, user_id: str, admin_id) -> Dict[str, Any]:
             duplicate = session.query(Users).filter_by(email_address=email_address, imap_password=imap_password).first()
             if duplicate and str(duplicate.user_id) != user_id:
                 raise ValueError("User with this email and IMAP password already exists, nothing to update")
+            users.name = name
             users.email_address = email_address
             users.imap_password = imap_password
             users.connect_with = connect_with
