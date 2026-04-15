@@ -1,3 +1,9 @@
+"""Resume filter REST API router.
+
+Provides endpoints for structured filter search, semantic (vector)
+search, and master-data retrieval for filter dropdowns.
+"""
+
 import time
 import logging
 from dotenv import load_dotenv
@@ -18,7 +24,7 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 router = APIRouter(
 	prefix="/api",
-	tags=["Payment-Process"],
+	tags=["Resume-Filter"],
 	responses={
 		400: {"description": "Bad Request"},
 		404: {"description": "Not Found"},
@@ -338,14 +344,15 @@ def filter_resumes(
         )
 
 @router.post("/semantic_search")
-def semantic_search(body: dict) -> List[Dict[str, Any]]:
-    query = body.get("query")
-    if not query:
-        raise HTTPException(status_code=400, detail="Query is required")
-    top_k = int(body.get("top_k", 1) or 1)
+def semantic_search(body: SemanticSearchRequest) -> List[Dict[str, Any]]:
+    """Perform a standalone semantic (vector-similarity) search over resumes.
 
+    Accepts a validated ``SemanticSearchRequest`` with a natural-language
+    query and an optional ``top_k`` limit.  Returns matching candidates
+    ranked by embedding similarity.
+    """
     try:
-        results = semantic_search_resumes(query, top_k)
+        results = semantic_search_resumes(body.query, body.top_k or 5)
     except Exception as e:
         logger.error("[semantic_search] Error: %s", str(e), exc_info=True)
         raise HTTPException(

@@ -20,6 +20,7 @@ class Resume(Base):
     embedding = Column(Vector(384))
     attachment_id = Column(UUID(as_uuid=True), ForeignKey("attachments.attachment_id"), nullable = True)
     candidate_id = Column(UUID(as_uuid=True), ForeignKey("candidates.candidate_id"), nullable = True)
+    candidate_role = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=False), default=ist_now)
     updated_at = Column(DateTime(timezone=False), default=ist_now, onupdate=ist_now)
     created_by = Column(String, nullable = True)

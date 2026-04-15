@@ -5,6 +5,7 @@ import logging
 from uuid import UUID
 import datetime as dt
 
+# from django import db
 from fastapi.responses import JSONResponse
 import ollama
 from dotenv import load_dotenv
@@ -16,13 +17,18 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from db.connection import SessionLocal
 from src.resume_filter.models import Resume
-from sqlalchemy import JSON, select, and_, cast, String, text, func
+from sqlalchemy import JSON, select, and_, cast, String, text, func, or_
 from sqlalchemy.orm import aliased, joinedload
 from src.email_reader.models import EmailLogs, Attachment
 from src.candidate.models import (
 	Candidate, CandidateSkills, CandidateEducation, 
 	WorkExperience, Skill, Education, Company, Role
 )
+from src.services.admin.service import get_model
+from src.admin.models import Admin
+
+from openai import OpenAI
+from anthropic import Anthropic
 
 
 load_dotenv()
@@ -65,6 +71,7 @@ def save_resumes_to_db(resumes):
             logger.info(f'NAV----> the info extracted {info}')
 
             info_email = (info.get("email") or "").strip().lower()
+            role = info.get("role", "").strip()
             if not info_email and sender_email:
                 logger.info(f'NAV----> using sender email fallback: {sender_email}')
                 info_email = sender_email
@@ -73,35 +80,35 @@ def save_resumes_to_db(resumes):
             vector = embedding_model.embed_query(raw_text)
 
             existing_candidate = None
-            if info_email:
-                existing_candidate = db.query(Candidate).filter(
-                    Candidate.email_address == info_email
-                ).first()
-            if not existing_candidate and info.get("phone_number"):
-                existing_candidate = db.query(Candidate).filter(
-                    Candidate.phone_number == info.get("phone_number")
-                ).first()
+            # if info_email:
+            #     existing_candidate = db.query(Candidate).filter(
+            #         Candidate.email_address == info_email
+            #     ).first()
+            # if not existing_candidate and info.get("phone_number"):
+            #     existing_candidate = db.query(Candidate).filter(
+            #         Candidate.phone_number == info.get("phone_number")
+            #     ).first()
 
-            if existing_candidate:
-                candidate = existing_candidate
-                if not candidate.email_address and sender_email:
-                    candidate.email_address = sender_email
-                    candidate.email_from_sender = True
-                    db.add(candidate)
-                logger.info(f'Using existing candidate: {candidate.candidate_id}')
-            else:
-                candidate = Candidate(
-                    name=info.get("name", ""),
-                    email_address=info_email or sender_email or "",
-                    email_from_sender=bool(sender_email and not info_email),
-                    phone_number=info.get("phone_number", ""),
-                    location=info.get("location", ""),
-                    total_experience=normalize_experience(info.get("total_experience")),
-                    created_by="resume_parser"
-                )
-                db.add(candidate)
-                db.flush()
-                logger.info("NAV----> candidate added to db")
+            # if existing_candidate:
+            #     candidate = existing_candidate
+            #     if not candidate.email_address and sender_email:
+            #         candidate.email_address = sender_email
+            #         candidate.email_from_sender = True
+            #         db.add(candidate)
+            #     logger.info(f'Using existing candidate: {candidate.candidate_id}')
+            # else:
+            candidate = Candidate(
+                name=info.get("name", ""),
+                email_address=info_email or sender_email or "",
+                email_from_sender=bool(sender_email and not info_email),
+                phone_number=info.get("phone_number", ""),
+                location=info.get("location", ""),
+                total_experience=normalize_experience(info.get("total_experience")),
+                created_by="resume_parser"
+            )
+            db.add(candidate)
+            db.flush()
+            logger.info("NAV----> candidate added to db")
             
             # Add skills
             skills_list = info.get("skills", [])
@@ -273,12 +280,13 @@ def save_resumes_to_db(resumes):
                             )
                             db.add(work_exp)
                             logger.info("NAV----> candidate experience added to db")
-            
+                                      
             # Create Resume record linking to candidate and attachment
             resume_record = Resume(
                 embedding=vector,
                 candidate_id=candidate.candidate_id,
                 attachment_id=attachment_id,
+                candidate_role= role,
                 created_by="resume_parser"
             )
             db.add(resume_record)
@@ -290,9 +298,11 @@ def save_resumes_to_db(resumes):
             logger.error(f"Error saving resume: {e}")
             db.rollback()
             continue
-    
-    db.commit()
-    db.close()
+
+    try:
+        db.commit()
+    finally:
+        db.close()
 
 def save_to_faiss(resumes, save_path=VECTORDB_PATH):
     splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
@@ -329,111 +339,274 @@ def extract_text_from_docx(path):
         logger.info(f"[ERROR] DOCX read failed: {path} -> {e}")
     return text
 
+def is_resume(text: str) -> bool:
+    """Classify whether a document is a resume/CV using the local LLM."""
+
+    prompt = """ 
+        You are a strict classifier.
+
+        Return ONLY JSON:
+        {"is_resume": true} or {"is_resume": false}
+
+        Rules:
+        - Return TRUE only if this is clearly a complete resume/CV
+        - A resume MUST contain at least 2 of these sections:
+        Skills, Experience, Education, Projects
+
+        - Return FALSE if:
+        - It is incomplete
+        - It is random text
+        - It is invoice, email, report, or any other document
+        - It looks like partial resume content
+
+        - If unsure → return FALSE
+        """
+
+    try:
+        db = SessionLocal()
+        admin = db.query(Admin).filter(Admin.is_active == True).first()
+
+        if not admin:   
+            logger.warning("No admin found, defaulting to ollama with latest model")
+            raise Exception("No admin found")
+        
+        admin_id = admin.admin_id
+        model_info = get_model(admin_id)
+
+        model = model_info.get("model_name", "ollama").lower()
+        version = model_info.get("model_version_name", "latest").lower()
+        api_key = model_info.get("apikey")
+        message = [
+                    {"role": "system", "content": "You only return JSON"},
+                    {"role": "user", "content": prompt + "\n\nDocument:\n" + text[:2000]}
+                ]
+
+        if model == "openai":
+            if not api_key:
+                raise Exception("OpenAI API key not found")
+
+            client = OpenAI(api_key=api_key)
+
+            response = client.chat.completions.create(
+                model = version,
+                messages = message
+            )
+            content = response.choices[0].message.content.strip()
+            logger.info(f"NAV----> the response from OpenAi {response}")
+        elif model == "claude":
+            if not api_key:
+                raise Exception("Claude API key not found")
+
+            client = Anthropic(api_key=api_key)
+
+            response = client.messages.create(
+                model=version,
+                max_tokens=1000,
+                system="You only return JSON",
+                messages=[
+                    {"role": "user", "content": prompt + "\n\nDocument:\n" + text[:2000]}
+                ]
+            )
+            content = response.content[0].text.strip()
+            logger.info(f"NAV----> the response from Claude {response}")
+        else:
+            response = ollama.chat(
+                model = "llama3",
+                messages = message
+            )
+            logger.info(f"NAV----> the response from Ollama {response}")
+            content = response["message"]["content"].strip()
+
+        try:
+            start = content.find("{")
+            end = content.rfind("}") + 1
+
+            if start == -1 or end == 0:
+                raise ValueError("No valid JSON object found in model response")
+
+            json_str = content[start:end]
+            data = json.loads(json_str)
+            logger.info(f"is_resume classification result: {data}")
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON returned by model: {content}")
+            raise ValueError("Model returned invalid JSON") from e
+        
+        return data.get("is_resume", False)
+
+    except Exception as e:
+        logger.error("Resume detection failed: %s", e)
+        return False
+    finally:
+        db.close()
+
+
 def extract_basic_info(resume_text):
     """Use local Ollama LLM to extract structured info from resume text."""
-
-    logger.info("This section executed -----> ")
+    logger.info('This process started=>>>>')
+    logger.info("This extract_basic_info executed -----> ")
     OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
     prompt = """
-		You are a highly accurate resume parser.
-	
-		Extract structured candidate information from the given resume.
-	
-		Return ONLY valid JSON.
-		Do NOT add explanation.
-		Do NOT add any text before or after JSON.
-	
-		STRICT JSON FORMAT:
-	
-		{
-			"name": "",
-			"total_experience": 0,
-			"email": "",
-			"phone_number": "",
-			"location": "",
-			"skills": [],
-			"education": [
-				{
-					"qualification": "",
-					"institution": "",
-					"percentage": "",
-					"passout_year": ""
-				}
-			],
-			"work_experience": [
-				{
-					"company_name": "",
-					"role": "",
-					"start_date": "",
-					"end_date": ""
-				}
-			]
-		}
-	
-		STRICT RULES:
-	
-		1. ALWAYS return all keys. Do NOT skip any field.
-	
-		2. If any value is missing:
-		- Use "" for strings
-		- Use 0 for total_experience
-		- Use [] for arrays
-	
-		3. DO NOT return null.
-	
-		4. total_experience must be a NUMBER (years).
-	
-		5. skills must be SHORT keywords (e.g., "Python", "SQL", "Communication").
-		Do NOT return full sentences.
-	
-		6. DATE NORMALIZATION (VERY IMPORTANT):
-		- Convert all dates to format:
-			YYYY-MM (e.g., 2016-06)
-			OR YYYY (e.g., 2016)
-		- Examples:
-			"June 2016" → "2016-06"
-			"Feb 2017" → "2017-02"
-			"2018" → "2018"
-		- If only month/year given → convert to YYYY-MM
-		- If invalid text like "Year 11" → return ""
-	
-		7. passout_year must be ONLY a YEAR (YYYY).
-		- If not a valid year → return ""
-	
-		8. work_experience dates must ALWAYS follow YYYY-MM or YYYY.
-		- If end_date is "present" → return "Present"
-	
-		9. DO NOT include words like:
-		- "June", "Feb", "Year 11", "Currently"
-		Only return normalized values.
-	
-		10. Do NOT guess missing data.
-	
-		11. Ensure output is valid JSON (parsable).
-	
-		IMPORTANT:
-		- No extra text
-		- No trailing commas
-		- Strict JSON only
-		"""
-    try:
-        response = ollama.chat(
-            model="llama3",
-            messages=[
-                {"role": "system", "content": "You output only JSON."},
-                {"role": "user", "content": prompt + "\n\nResume:\n" + resume_text[:4000]}
+        You are a highly accurate resume parser.
+
+        Extract structured candidate information from the given resume.
+
+        Return ONLY valid JSON.
+        Do NOT add explanation.
+        Do NOT add any text before or after JSON.
+
+        STRICT JSON FORMAT:
+
+        {
+            "name": "",
+            "total_experience": 0,
+            "email": "",
+            "phone_number": "",
+            "location": "",
+            "role": "",
+            "skills": [],
+            "education": [
+                {
+                    "qualification": "",
+                    "institution": "",
+                    "percentage": "",
+                    "passout_year": ""
+                }
+            ],
+            "work_experience": [
+                {
+                    "company_name": "",
+                    "role": "",
+                    "start_date": "",
+                    "end_date": ""
+                }
             ]
-        )
-        logger.info(f'NAV----> before content')
-        content = response["message"]["content"].strip()
-        logger.info(f"NAv----> content {content}")
-        # clean JSON
-        start = content.find("{")
-        end = content.rfind("}") + 1
-        logger.info(f"NAV---> start {start}")
-        logger.info(f"NAV---> end {end}")
-        json_str = content[start:end]
-        return json.loads(json_str)
+        }
+
+        STRICT RULES:
+
+        1. ALWAYS return all keys. Do NOT skip any field.
+
+        2. If any value is missing:
+        - Use "" for strings
+        - Use 0 for total_experience
+        - Use [] for arrays
+
+        3. DO NOT return null.
+
+        4. total_experience must be a NUMBER (years).
+
+        5. skills must be SHORT keywords (e.g., "Python", "SQL", "Communication").
+        Do NOT return full sentences.
+
+        6. DATE NORMALIZATION (VERY IMPORTANT):
+        - Convert all dates to format:
+        YYYY-MM (e.g., 2016-06)
+        OR YYYY (e.g., 2016)
+        - Examples:
+        "June 2016" -> "2016-06"
+        "Feb 2017" -> "2017-02"
+        "2018" -> "2018"
+        - If only month/year given -> convert to YYYY-MM
+        - If invalid text like "Year 11" -> return ""
+
+        7. passout_year must be ONLY a YEAR (YYYY).
+        - If not a valid year -> return ""
+
+        8. work_experience dates must ALWAYS follow YYYY-MM or YYYY.
+        - If end_date is "present" -> return "Present"
+
+        9. DO NOT include words like:
+        - "June", "Feb", "Year 11", "Currently"
+        Only return normalized values.
+
+        10. Do NOT guess missing data except for top-level role inference from skills.
+
+        11. Ensure output is valid JSON (parsable).
+
+        12. Infer top-level "role" ONLY from technical skills; do not use summary, titles, company, projects, responsibilities, certifications, education, or any other content. Keep it short and professional; if unclear, return "".
+
+        13. Example mappings: Python/FastAPI/Django -> Python Developer, React/JS/HTML/CSS -> Frontend Developer, Node/Express/MongoDB -> Backend Developer, React+Node -> Full Stack Developer, Java/Spring -> Java Developer, Selenium/Testing -> QA Engineer, AWS/Docker/K8s/Jenkins -> DevOps Engineer, ML/NLP/TensorFlow -> Machine Learning Engineer, Power BI/Tableau/SQL -> Data Analyst, Python/Pandas/ETL -> Data Engineer, Kotlin/Java -> Android Developer, Swift/iOS -> iOS Developer, PHP/Laravel -> PHP Developer, C#/.NET -> .NET Developer.
+
+        14. work_experience.role must be extracted only if explicitly mentioned; otherwise return "".
+
+        IMPORTANT:
+        - Top-level "role" must be based ONLY on skills.
+        - Do NOT use any other information for top-level role inference.
+        - No extra text
+        - No trailing commas
+        - Strict JSON only
+        """
+    try:
+        db = SessionLocal()
+        admin = db.query(Admin).filter(Admin.is_active == True).first()
+
+        if not admin:   
+            logger.warning("No admin found, defaulting to ollama with latest model")
+            raise Exception("No admin found")
+        
+        admin_id = admin.admin_id
+        model_info = get_model(admin_id)
+
+        model = model_info.get("model_name", "ollama").lower()
+        version = model_info.get("model_version_name", "latest").lower()
+        api_key = model_info.get("apikey")
+        
+        message = [
+                    {"role": "system", "content": "You only return JSON"},
+                    {"role": "user", "content": prompt + "\n\nDocument:\n" + resume_text[:2000]}
+                ]
+
+        if model == "openai":
+            if not api_key:
+                raise Exception("OpenAI API key not found")
+
+            client = OpenAI(api_key=api_key)
+
+            response = client.chat.completions.create(
+                model = version,
+                messages = message
+            )
+            content = response.choices[0].message.content.strip()
+            logger.info(f"NAV----> the response from OpenAi {response}")
+        elif model == "claude":
+            if not api_key:
+                raise Exception("Claude API key not found")
+
+            client = Anthropic(api_key=api_key)
+
+            response = client.messages.create(
+                model=version,
+                max_tokens=1000,
+                system="You only return JSON",
+                messages=[
+                    {"role": "user", "content": prompt + "\n\nDocument:\n" + resume_text[:2000]}
+                ]
+            )
+            content = response.content[0].text.strip()
+            logger.info(f"NAV----> the response from Claude {response}")
+        else:
+            response = ollama.chat(
+                model = "llama3",
+                messages = message
+            )
+            logger.info(f"NAV----> the response from Ollama {response}")
+            content = response["message"]["content"].strip()
+
+        try:
+            start = content.find("{")
+            end = content.rfind("}") + 1
+
+            if start == -1 or end == 0:
+                raise ValueError("No valid JSON object found in model response")
+
+            json_str = content[start:end]
+            data = json.loads(json_str)
+            logger.info(f"is_resume classification result: {data}")
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON returned by model: {content}")
+            raise ValueError("Model returned invalid JSON") from e
+       
+        return data
     
     except Exception as e:
         logger.info(f"[ERROR] LLM parse failed: {e}")
@@ -485,65 +658,73 @@ def extract_basic_info(resume_text):
 
 def process_resumes(email_id: UUID) -> dict:
     """
-    This function processes resumes from email attachments. It performs the following    steps:
-        1. Fetches the email and its attachments using the provided message_id. It looks for attachments marked as resumes in the database.
-        2. For each resume attachment, it extracts text content (supports PDF and DOCX formats).
-        3. Uses a local Ollama LLM (llama3) to extract structured information such as name, experience, skills, companies, and education.
-        4. Generates vector embeddings for the resume text using the HuggingFace model `all-MiniLM-L6-v2`.
-        5. Stores the extracted resume data in the PostgreSQL database, linking it to the email.
-        6. Saves vector embeddings in a FAISS vector database for semantic search.
+    Classify and process resume attachments for a given email.
+
+    Steps:
+        1. Fetch all attachments for the email.
+        2. Extract text and classify each attachment as resume or not (LLM).
+        3. For confirmed resumes, extract structured info (name, skills, etc.).
+        4. Store resume data in PostgreSQL and vector embeddings in FAISS.
     """
-    
-    logger.info("NAV----> the process resume function called")
+
+    logger.info("process_resumes called for email_id=%s", email_id)
     db = SessionLocal()
-    email_obj = db.query(EmailLogs).filter(
-        EmailLogs.email_id == email_id
-    ).first()
+    try:
+        email_obj = db.query(EmailLogs).filter(
+            EmailLogs.email_id == email_id
+        ).first()
 
-    if not email_obj:
-        return {"message": "Email not found"}
-    attachments = db.query(Attachment).filter(
-        Attachment.email_id == email_obj.email_id,
-        Attachment.is_resume == True
-    ).all()
-    logger.info("NAV----> the attachments fetched successfully")
-    results = []
+        if not email_obj:
+            return {"message": "Email not found"}
 
-    for att in attachments:
-        file_path = f"attachments/{att.file_name}"
-        if file_path.endswith(".pdf"):
-            text = extract_text_from_pdf(file_path)
-            logger.info(f"NAV----> the text extracted from pdf {text[:100]}...")
-        elif file_path.endswith(".docx"):
-            text = extract_text_from_docx(file_path)
-            logger.info(f"NAV----> the text extracted from docx {text[:100]}...")
-        else:
-            continue
+        all_attachments = db.query(Attachment).filter(
+            Attachment.email_id == email_obj.email_id
+        ).all()
+        logger.info("Fetched %d attachments for classification", len(all_attachments))
 
-        if not text.strip():
-            continue
+        results = []
+        for att in all_attachments:
+            file_path = f"attachments/{att.file_name}"
+            if file_path.endswith(".pdf"):
+                text = extract_text_from_pdf(file_path)
+            elif file_path.endswith(".docx"):
+                text = extract_text_from_docx(file_path)
+            else:
+                continue
 
-        info = extract_basic_info(text)
-        if info:
-            info["file_name"] = att.file_name
-            results.append({
-                "info": info,
-                "text": text,
-                "attachment_id": att.attachment_id,
-                "sender_email": parse_email_address(email_obj.sender)
-            })
-        logger.info("NAV----> the info extracted successfully")
-    if results:
-        # save_to_faiss(results)
-        logger.info(f"NACV----> This result section executed {results}")
-        save_resumes_to_db(results)
+            if not text.strip():
+                logger.info("Empty document, skipping: %s", att.file_name)
+                continue
 
-    db.close()
+            resume_flag = is_resume(text)
+            att.is_resume = resume_flag
+            db.commit()
+            logger.info("Classified %s — is_resume=%s", att.file_name, resume_flag)
 
-    return {
-        "message_id": str(email_id),
-        "processed_files": len(results)
-    }
+            if not resume_flag:
+                continue
+
+            info = extract_basic_info(text)
+            if info:
+                info["file_name"] = att.file_name
+                results.append({
+                    "info": info,
+                    "text": text,
+                    "attachment_id": att.attachment_id,
+                    "sender_email": parse_email_address(email_obj.sender)
+                })
+            logger.info("Extracted info for %s", att.file_name)
+
+        if results:
+            logger.info("Saving %d resume(s) to DB", len(results))
+            save_resumes_to_db(results)
+
+        return {
+            "message_id": str(email_id),
+            "processed_files": len(results)
+        }
+    finally:
+        db.close()
 
 def search_resumes(filters: dict):
     """Search candidates based on dynamic filters using aggregation subqueries."""
@@ -617,11 +798,17 @@ def search_resumes(filters: dict):
 
         conditions = [Candidate.is_active == True]
 
-        name = filters.get("name")
-        if name:
-            name = str(name).strip()
-            if name:
-                conditions.append(Candidate.name.ilike(f"%{name}%"))
+        name_list = filters.get("name")
+        if name_list:
+            name_conditions = []
+
+            for name in name_list:
+                name = str(name).strip()
+                if name:
+                    name_conditions.append(Candidate.name.ilike(f"%{name}%"))
+
+            if name_conditions:
+                conditions.append(or_(*name_conditions))
 
         exp_min = filters.get("min_experience")
         if exp_min is not None and exp_min != "":

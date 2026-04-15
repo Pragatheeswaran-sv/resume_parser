@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import UUID, Column, Float, Integer, String, DateTime, ForeignKey, Boolean, Text, Date
+from sqlalchemy import UUID, Column, Float, Integer, String, DateTime, ForeignKey, Boolean, Text, Date, JSON
 from sqlalchemy.orm import relationship
 from db.connection import Base
 import datetime
@@ -124,3 +124,15 @@ class WorkExperience(Base):
     candidate = relationship("Candidate")
     company = relationship("Company")
     role = relationship("Role")
+
+class LogUserQuery(Base):
+    __tablename__ = "log_user_query"
+
+    user_query_id = Column(UUID, primary_key=True, default=uuid.uuid4)
+    user_query = Column(Text, nullable=False)
+    query_filter = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=False), default=ist_now)
+    updated_at = Column(DateTime(timezone=False), default=ist_now, onupdate=ist_now)
+    created_by = Column(String, nullable = True)
+    updated_by = Column(String, nullable = True)
+    is_active = Column(Boolean, default = True)
