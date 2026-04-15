@@ -603,7 +603,7 @@ def zoho_callback(code: str, db=SessionLocal()):
             existing_cred.access_token = access_token
             existing_cred.refresh_token = refresh_token or existing_cred.refresh_token
             existing_cred.expires_in = expires_in
-            # existing_cred.api_domain = api_domain
+            existing_cred.api_domain = api_domain
             existing_cred.updated_at = datetime.utcnow()
 
         else:  
@@ -612,7 +612,7 @@ def zoho_callback(code: str, db=SessionLocal()):
                 access_token=access_token,
                 refresh_token=refresh_token,
                 expires_in=expires_in,
-                # api_domain=api_domain,   # 🔑 STORE THIS
+                api_domain=api_domain,   # 🔑 STORE THIS
                 created_by=email
             )
             db.add(new_cred)
@@ -635,16 +635,46 @@ def zoho_callback(code: str, db=SessionLocal()):
     finally:
         db.close()
 
-def get_zoho_accounts_token_url(api_domain: str) -> str:
-    """
-    mail.zoho.in → https://accounts.zoho.in/oauth/v2/token
-    """
-    parsed = urlparse(api_domain)
-    domain = parsed.netloc.replace("mail.", "")
-    return f"https://accounts.{domain}/oauth/v2/token"
 
 def get_mail_api_base(api_domain: str) -> str:
-    return api_domain.rstrip("/") + "/api"
+    """
+    Converts Zoho api_domain to the correct regional mail API base URL.
+    
+    Examples:
+        https://www.zohoapis.com   → https://mail.zoho.com/api
+        https://www.zohoapis.in    → https://mail.zoho.in/api
+        https://www.zohoapis.eu    → https://mail.zoho.eu/api
+        https://www.zohoapis.com.au → https://mail.zoho.com.au/api
+        https://www.zohoapis.jp    → https://mail.zoho.jp/api
+    """
+    parsed = urlparse(api_domain)
+    # "www.zohoapis.in" → "zoho.in"
+    regional_suffix = parsed.netloc.replace("www.zohoapis.", "zoho.")
+    return f"https://mail.{regional_suffix}/api"
+
+def get_zoho_accounts_token_url(api_domain: str) -> str:
+    """
+    Converts Zoho api_domain to the correct regional accounts OAuth token URL.
+
+    Examples:
+        https://www.zohoapis.com   → https://accounts.zoho.com/oauth/v2/token
+        https://www.zohoapis.in    → https://accounts.zoho.in/oauth/v2/token
+        https://www.zohoapis.eu    → https://accounts.zoho.eu/oauth/v2/token
+    """
+    parsed = urlparse(api_domain)
+    regional_suffix = parsed.netloc.replace("www.zohoapis.", "zoho.")
+    return f"https://accounts.{regional_suffix}/oauth/v2/token"
+
+# def get_zoho_accounts_token_url(api_domain: str) -> str:
+#     """
+#     mail.zoho.in → https://accounts.zoho.in/oauth/v2/token
+#     """
+#     parsed = urlparse(api_domain)
+#     domain = parsed.netloc.replace("mail.", "")
+#     return f"https://accounts.{domain}/oauth/v2/token"
+
+# def get_mail_api_base(api_domain: str) -> str:
+#     return api_domain.rstrip("/") + "/api"
 
 
 def get_valid_zoho_token(email: str, db = SessionLocal()) -> str:
@@ -800,6 +830,8 @@ def fetch_emails_zoho(email_id: str) -> dict:
 
         for msg in messages:
             message_id = msg["messageId"]
+
+            logger.info(f"NAV----> Processing Zoho email: {message_id}")
 
             if db.query(EmailLogs).filter(
                 EmailLogs.message_id == message_id

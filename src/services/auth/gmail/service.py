@@ -14,6 +14,7 @@ from src.email_reader.models import Attachment
 from src.services.background_task.tasks import resume_track
 import base64
 from src.auth.jwt import create_access_token
+from email.utils import parseaddr
 from src.admin.models import Users
 
 load_dotenv()
@@ -76,7 +77,7 @@ def gmail_callback(code: str, db = SessionLocal()) -> dict:
     
 
     try:
-        logger.info(f"Received auth code")
+        logger.info(f"NAV----> Received auth code {code}")
 
         # 🔹 Step 1: Exchange code for tokens
         token_data = {
@@ -346,8 +347,7 @@ def fetch_emails_gmail(email_id: str) -> dict:
         headers = {"Authorization": f"Bearer {access_token}"}
         params = {
             # "q": "is:unread has:attachment",
-            "q": "has:attachment",
-            "maxResults": 10
+            "q": "has:attachment"
         }
 
         resp = requests.get(gmail_list_url, headers=headers, params=params)
@@ -383,7 +383,8 @@ def fetch_emails_gmail(email_id: str) -> dict:
                 if h["name"] == "Subject":
                     subject = h["value"]
                 if h["name"] == "From":
-                    sender = h["value"]
+                    # sender = h["value"]
+                    sender = parseaddr(h["value"])[1] 
 
             email_obj = EmailLogs(
                 message_id=message_id,
