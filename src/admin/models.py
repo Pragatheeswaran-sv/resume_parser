@@ -81,7 +81,7 @@ class AiModelConfig(Base):
     updated_at = Column(DateTime(timezone=False), default=ist_now, onupdate=ist_now, nullable=False)
     created_by = Column(String, nullable = True)
     updated_by = Column(String, nullable = True)
-    is_active = Column(Boolean, default = True)
+    is_active = Column(Boolean, default = False)
 
     ai_model_version = relationship("AiModelversion")
     ai_model = relationship("AiModel")
@@ -100,8 +100,8 @@ class ExtractionConfig(Base):
     is_active = Column(Boolean, default=True)
 
     window_enabled = Column(Boolean, default=False)
-    window_start_time = Column(String(5), nullable=True)
-    window_end_time = Column(String(5), nullable=True)
+    window_start_time = Column(String(10), nullable=True)
+    window_end_time = Column(String(10), nullable=True)
     window_timezone = Column(String(50), default="Asia/Kolkata")
 
     schedule_type = Column(String(10), default="hourly")

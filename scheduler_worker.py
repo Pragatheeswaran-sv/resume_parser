@@ -1,4 +1,200 @@
+# import logging
+# from apscheduler.schedulers.blocking import BlockingScheduler
+# from dotenv import load_dotenv
+
+# from db.connection import SessionLocal
+# from src.admin.models import ExtractionConfig
+# from src.services.admin.service import is_within_extraction_window
+# from src.services.email_reader.service import fetch_emails
+
+# load_dotenv()
+
+# logging.basicConfig(
+#     level=logging.INFO,
+#     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+# )
+# logger = logging.getLogger("scheduler")
+
+# scheduler = BlockingScheduler(timezone="Asia/Kolkata")
+
+
+# # ------------------ CONFIG ------------------ #
+# def _load_config():
+#     session = SessionLocal()
+#     try:
+#         cfg = (
+#             session.query(ExtractionConfig)
+#             .filter(ExtractionConfig.is_active.is_(True))
+#             .first()
+#         )
+
+#         if cfg:
+#             return {
+#                 "is_paused": cfg.is_paused,
+#                 "interval_minutes": cfg.interval_minutes or 15,
+#                 "schedule_type": cfg.schedule_type or "hourly",
+#                 "window_start_time": cfg.window_start_time,
+#                 "weekday": cfg.weekday or "mon",
+#             }
+
+#         return {
+#             "is_paused": False,
+#             "interval_minutes": 15,
+#             "schedule_type": "hourly",
+#             "window_start_time": None,
+#             "weekday": "mon",
+#         }
+
+#     except Exception:
+#         logger.exception("DB read failed")
+#         return {
+#             "is_paused": False,
+#             "interval_minutes": 15,
+#             "schedule_type": "hourly",
+#             "window_start_time": None,
+#             "weekday": "mon",
+#         }
+
+#     finally:
+#         session.close()
+
+
+# # ------------------ MAIN JOB ------------------ #
+# def trigger_email_processing():
+#     config = _load_config()
+
+#     if config["is_paused"]:
+#         logger.info("⏸ Paused")
+#         return
+
+#     if not is_within_extraction_window(config):
+#         logger.info("⏰ Outside window")
+#         return
+
+#     logger.info("📩 Processing emails...")
+#     try:
+#         result = fetch_emails()
+#         logger.info("✅ Done: %s", result)
+#     except Exception:
+#         logger.exception("❌ Job failed")
+
+
+# # ------------------ APPLY SCHEDULE ------------------ #
+# def apply_schedule():
+#     config = _load_config()
+
+#     schedule_type = config["schedule_type"]
+#     interval = int(config["interval_minutes"])
+#     start_time = config["window_start_time"]
+#     weekday = config["weekday"]
+#     print(start_time, start_time.hour)
+
+#     job = scheduler.get_job("email_processing_job")
+
+#     # -------- Determine trigger -------- #
+#     if schedule_type == "hourly":
+#         trigger_args = {
+#             "trigger": "interval",
+#             "minutes": interval,
+#         }
+#         logger.info('Hourly based shedule started')
+
+#     elif schedule_type == "daily":
+#         if not start_time:
+#             logger.warning("Missing start_time for daily")
+#             return
+
+#         trigger_args = {
+#             "trigger": "cron",
+#             "hour": start_time.hour,
+#             "minute": start_time.minute,
+#         }
+#         logger.info('Daily based shedule started')
+
+#     elif schedule_type == "weekly":
+#         if not start_time:
+#             logger.warning("Missing start_time for weekly")
+#             return
+
+#         trigger_args = {
+#             "trigger": "cron",
+#             "day_of_week": weekday,
+#             "hour": start_time.hour,
+#             "minute": start_time.minute,
+#         }
+#         logger.info('weekly based shedule started')
+#     else:
+#         logger.warning("Invalid schedule_type → default hourly")
+#         trigger_args = {
+#             "trigger": "interval",
+#             "minutes": 15,
+#         }
+
+#     # -------- Create or Update -------- #
+#     if not job:
+#         scheduler.add_job(
+#             trigger_email_processing,
+#             id="email_processing_job",
+#             replace_existing=True,
+#             **trigger_args,
+#         )
+#         logger.info("✅ Job CREATED → %s", trigger_args)
+#         return
+
+#     # Compare and update
+#     try:
+#         need_update = False
+
+#         if job.trigger.__class__.__name__ == "IntervalTrigger":
+#             current = int(job.trigger.interval.total_seconds() / 60)
+#             if trigger_args["trigger"] != "interval" or current != interval:
+#                 need_update = True
+
+#         else:
+#             # cron → always update (safe)
+#             need_update = True
+
+#         if need_update:
+#             scheduler.reschedule_job(
+#                 "email_processing_job",
+#                 **trigger_args,
+#             )
+#             logger.info("🔄 Job UPDATED → %s", trigger_args)
+
+#     except Exception:
+#         logger.exception("❌ Failed updating job")
+
+
+# # ------------------ AUTO REFRESH ------------------ #
+# def refresh_scheduler():
+#     logger.info("🔍 Checking for schedule updates...")
+#     apply_schedule()
+
+
+# # ------------------ MAIN ------------------ #
+# def main():
+#     # initial schedule
+#     apply_schedule()
+
+#     # auto refresh every 30 sec
+#     scheduler.add_job(
+#         refresh_scheduler,
+#         "interval",
+#         seconds=30,
+#         id="refresh_job",
+#         replace_existing=True,
+#     )
+
+#     logger.info("🚀 Scheduler started (auto-refresh enabled)")
+#     scheduler.start()
+
+
+# if __name__ == "__main__":
+#     main()
+
+
 import logging
+from datetime import datetime
 from apscheduler.schedulers.blocking import BlockingScheduler
 from dotenv import load_dotenv
 
@@ -15,19 +211,29 @@ logging.basicConfig(
 )
 logger = logging.getLogger("scheduler")
 
-DEFAULT_INTERVAL_MINUTES = 15
-_DEFAULTS = {
-    "is_paused": False,
-    "interval_minutes": DEFAULT_INTERVAL_MINUTES,
-    "window_enabled": False,
-    "window_start_time": None,
-    "window_end_time": None,
-    "window_timezone": "Asia/Kolkata",
-}
+scheduler = BlockingScheduler(timezone="Asia/Kolkata")
 
 
+# ------------------ TIME PARSER ------------------ #
+def parse_time_string(time_str):
+    """Convert string → datetime.time"""
+    if not time_str:
+        return None
+
+    if isinstance(time_str, str):
+        try:
+            return datetime.strptime(time_str, "%H:%M:%S").time()
+        except ValueError:
+            try:
+                return datetime.strptime(time_str, "%H:%M").time()
+            except ValueError:
+                raise ValueError(f"Invalid time format: {time_str}")
+
+    return time_str  # already time object
+
+
+# ------------------ CONFIG ------------------ #
 def _load_config():
-    """Read the active ExtractionConfig row; return defaults when absent or on DB error."""
     session = SessionLocal()
     try:
         cfg = (
@@ -35,82 +241,164 @@ def _load_config():
             .filter(ExtractionConfig.is_active.is_(True))
             .first()
         )
+
         if cfg:
+            start_time = parse_time_string(cfg.window_start_time)
+
             return {
                 "is_paused": cfg.is_paused,
-                "interval_minutes": cfg.interval_minutes,
-                "window_enabled": cfg.window_enabled or False,
-                "window_start_time": cfg.window_start_time,
-                "window_end_time": cfg.window_end_time,
-                "window_timezone": cfg.window_timezone or "Asia/Kolkata",
-                "schedule_type" : cfg.schedule_type or "hourly",
-                "weekday" : cfg.weekday or ""
+                "interval_minutes": cfg.interval_minutes or 15,
+                "schedule_type": cfg.schedule_type or "hourly",
+                "window_start_time": start_time,
+                "weekday": cfg.weekday or "mon",
             }
-        return dict(_DEFAULTS)
+
+        return {
+            "is_paused": False,
+            "interval_minutes": 15,
+            "schedule_type": "hourly",
+            "window_start_time": None,
+            "weekday": "mon",
+        }
+
     except Exception:
-        logger.warning(
-            "Could not read extraction_config (table may not exist yet) — using defaults",
-            exc_info=True,
-        )
-        session.rollback()
-        return dict(_DEFAULTS)
+        logger.exception("DB read failed")
+        return {
+            "is_paused": False,
+            "interval_minutes": 15,
+            "schedule_type": "hourly",
+            "window_start_time": None,
+            "weekday": "mon",
+        }
+
     finally:
         session.close()
 
 
+# ------------------ MAIN JOB ------------------ #
 def trigger_email_processing():
-    """Fetch new emails and enqueue resume_track tasks via Celery.
-
-    Respects the global ``is_paused`` flag and time-window restriction
-    stored in ``extraction_config``.
-    """
     config = _load_config()
+
     if config["is_paused"]:
-        logger.info("Extraction is globally paused — skipping this cycle")
+        logger.info("Paused")
         return
 
     if not is_within_extraction_window(config):
-        logger.info("Skipping extraction: outside configured time window")
+        logger.info("Outside window")
         return
 
-    logger.info("Scheduler job triggered — checking for new emails")
+    logger.info("Processing emails...")
     try:
         result = fetch_emails()
-        logger.info("Email processing cycle complete: %s", result)
+        logger.info("Done: %s", result)
     except Exception:
-        logger.exception("Error during scheduled email processing")
+        logger.exception("Job failed")
 
 
-def main():
+# ------------------ APPLY SCHEDULE ------------------ #
+def apply_schedule():
     config = _load_config()
-    interval = config["interval_minutes"]
 
-    scheduler = BlockingScheduler(timezone="UTC")
+    schedule_type = config["schedule_type"]
+    interval = int(config["interval_minutes"])
+    start_time = config["window_start_time"]
+    weekday = config["weekday"]
+
+    logger.info(f"CONFIG => {config}")
+
+    job = scheduler.get_job("email_processing_job")
+
+    # -------- Determine trigger -------- #
+    if schedule_type == "hourly":
+        trigger_args = {
+            "trigger": "interval",
+            "minutes": interval,
+        }
+        logger.info(f"Hourly schedule at {interval}")
+
+    elif schedule_type == "daily":
+        if not start_time:
+            logger.warning("Missing start_time for daily")
+            return
+
+        trigger_args = {
+            "trigger": "cron",
+            "hour": start_time.hour,
+            "minute": start_time.minute,
+        }
+        logger.info(f"Daily at {start_time}")
+
+    elif schedule_type == "weekly":
+        if not start_time:
+            logger.warning("Missing start_time for weekly")
+            return
+
+        trigger_args = {
+            "trigger": "cron",
+            "day_of_week": weekday,
+            "hour": start_time.hour,
+            "minute": start_time.minute,
+        }
+        logger.info(f"Weekly on {weekday} at {start_time}")
+
+    else:
+        logger.warning("Invalid schedule_type → default hourly")
+        trigger_args = {
+            "trigger": "interval",
+            "minutes": 15,
+        }
+
+    # -------- Create or Update -------- #
+    if not job:
+        scheduler.add_job(
+            trigger_email_processing,
+            id="email_processing_job",
+            replace_existing=True,
+            **trigger_args,
+        )
+        logger.info("Job CREATED → %s", trigger_args)
+        return
+
+    try:
+        need_update = False
+
+        if job.trigger.__class__.__name__ == "IntervalTrigger":
+            current = int(job.trigger.interval.total_seconds() / 60)
+            if trigger_args["trigger"] != "interval" or current != interval:
+                need_update = True
+        else:
+            need_update = True  # cron → always update
+
+        if need_update:
+            scheduler.reschedule_job(
+                "email_processing_job",
+                **trigger_args,
+            )
+            logger.info("Job UPDATED → %s", trigger_args)
+
+    except Exception:
+        logger.exception("Failed updating job")
+
+
+# ------------------ AUTO REFRESH ------------------ #
+def refresh_scheduler():
+    logger.info("Checking for schedule updates...")
+    apply_schedule()
+
+
+# ------------------ MAIN ------------------ #
+def main():
+    apply_schedule()
+
     scheduler.add_job(
-        trigger_email_processing,
+        refresh_scheduler,
         "interval",
-        minutes=interval,
-        id="email_processing_job",
+        seconds=600,
+        id="refresh_job",
         replace_existing=True,
     )
-    logger.info('in=>',interval)
-    logger.info(
-        "Scheduler started — jobs will run every %d minute(s) (paused=%s)",
-        interval,
-        config["is_paused"],
-    )
-    
-    # schedule_type = 'daily'
 
-    # if schedule_type == 'daily':
-    #     scheduler.add_job(
-    #     trigger_email_processing,
-    #     trigger="cron",
-    #     hour=start_time.hour,
-    #     minute=start_time.minute,
-    #     id="email_processing_daily",
-    #     replace_existing=True,
-    # )
+    logger.info("Scheduler started (auto-refresh enabled)")
     scheduler.start()
 
 
