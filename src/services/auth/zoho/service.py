@@ -838,15 +838,30 @@ def fetch_emails_zoho(email_id: str) -> dict:
             ).first():
                 continue
 
-            email_log = EmailLogs(
-                message_id=message_id,
-                subject=msg.get("subject", ""),
-                sender=msg.get("fromAddress", ""),
-            )
+            # email_log = EmailLogs(
+            #     message_id=message_id,
+            #     subject=msg.get("subject", ""),
+            #     sender=msg.get("fromAddress", ""),
+            # )
 
-            db.add(email_log)
-            db.commit()
-            db.refresh(email_log)
+            # db.add(email_log)
+            # db.commit()
+            # db.refresh(email_log)
+            try:
+                email_log = EmailLogs(
+                    message_id=message_id,
+                    subject=msg.get("subject", ""),
+                    sender=msg.get("fromAddress", ""),
+                )
+                db.add(email_log)
+                db.commit()
+                db.refresh(email_log)
+
+            except Exception as e:
+                # Another worker already inserted this message_id
+                db.rollback()
+                logger.warning(f"Duplicate message_id skipped: {message_id}")
+                continue
 
             attachments = get_attachments(
                 api_domain,
