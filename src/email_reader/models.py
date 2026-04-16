@@ -28,6 +28,7 @@ class EmailLogs(Base):
     uid = Column(Integer)
     subject = Column(String)
     sender = Column(String)
+    source_mail = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=False), default=ist_now)
     updated_at = Column(DateTime(timezone=False), default=ist_now, onupdate=ist_now)
     created_by = Column(String, nullable = True)

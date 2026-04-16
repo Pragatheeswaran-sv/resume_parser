@@ -15,6 +15,7 @@ from src.admin.schema import (
     ExtractionConfigUpdate,
     ExtractionToggleRequest,
     SSOLoginRequest,
+    Validate_new_job,
 )
 from src.services.admin.service import (
     admin_check,
@@ -25,6 +26,7 @@ from src.services.admin.service import (
     list_mail,
     new_admin,
     new_auth,
+    new_job,
     pause_extraction,
     profile,
     resume_extraction,
@@ -374,6 +376,18 @@ def trigger_all(
             detail={"status": "error", "message": str(e)},
         )
 
+@router.post("/admin/extraction/create_schedule")
+def add_job(payload : Validate_new_job, _admin=Depends(get_current_admin)):
+    try:
+        admin_id = _admin.admin_id
+        return new_job(payload, admin_id)
+    except ValueError as e:
+        logger.warning("[create new_job] Error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"status": "error in creating new job", "message": str(e)},
+        )
+    
 
 @router.post("/admin/extraction/trigger/{user_id}")
 def trigger_single(
