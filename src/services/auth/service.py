@@ -105,11 +105,13 @@ def fetch_emails_oauth() -> EmailFetchResponse:
                 logger.error(f"Error processing {email_id}: {str(service_error)}")
                 status = f"failed: {str(service_error)}"
 
+            service_response = service_response 
             results.append(
                 EmailFetchResult(
                     email=email_id,
                     source=source_name,
-                    status=status
+                    status=status,
+                    processed_count=service_response.get('processed_count', 0)
                 )
             )
 

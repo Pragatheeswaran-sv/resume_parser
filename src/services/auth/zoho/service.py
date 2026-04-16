@@ -894,7 +894,8 @@ def fetch_emails_zoho(email_id: str) -> dict:
             logger.info(f"Processed email {email_log.subject}, task={celery_task.id}")
 
             processed_count += 1
-
+        
+        logger.info(f'Processed_mail zoho count for {email_id}: {processed_count}')
         return {
             "status": "success",
             "processed_count": processed_count

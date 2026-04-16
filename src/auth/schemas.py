@@ -8,6 +8,7 @@ class EmailFetchResult(BaseModel):
     email: str
     source: str
     status: str
+    processed_count: int
 
 
 class EmailFetchResponse(BaseModel):

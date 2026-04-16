@@ -410,6 +410,7 @@ def fetch_emails_gmail(email_id: str) -> dict:
 
             processed_count += 1
 
+        logger.info(f"Total emails processed for {email_id}: {processed_count}")
         return {
             "status": "success",
             "message": "Gmail emails processed",
