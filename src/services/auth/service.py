@@ -49,6 +49,7 @@ def fetch_emails_oauth() -> EmailFetchResponse:
     try:
         # 1. Get all active email
         users = db.query(Users).filter(
+            Users.is_blocked == False,
             Users.is_active == True
         ).all()
         logger.info(f"NAV----> Found {len(users)} active email accounts")
