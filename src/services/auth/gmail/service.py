@@ -121,7 +121,7 @@ def gmail_callback(code: str, db = SessionLocal()) -> dict:
 
         if not email:
             logger.error(f"User info response invalid: {profile_data}")
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"status": "error", "message": "Unable to fetch user email"})
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"status": "400", "message": "Unable to fetch user email"})
 
         logger.info(f"OAuth login success for email: {email}")
 
@@ -185,14 +185,15 @@ def gmail_callback(code: str, db = SessionLocal()) -> dict:
         logger.info(f"NAV----> Access token created for {email}")
         valid_mail = db.query(Users).filter(
             Users.email_address == email,
+            Users.is_blocked == False,
             Users.is_active == True
         ).first()
         if not valid_mail:
             logger.warning(f"Email {email} is not authorized to connect")
-            raise HTTPException(status_code=403, detail={"status": "error", "message": "Email not authorized"})
+            raise HTTPException(status_code=status.HTTP_200_OK, detail={"status": status.HTTP_401_UNAUTHORIZED, "message": "Email not authorized"})
 
         return {
-            "status": "success",
+            "status": status.HTTP_200_OK,
             "message": "OAuth connected successfully",
             "data":
                 {
@@ -590,15 +591,16 @@ def zoho_callback(code: str, db=SessionLocal()) -> dict:
         access_token = create_access_token({"mail": email})
 
         valid_mail = db.query(Users).filter(
+            Users.is_blocked == False,
             Users.email_address == email,
             Users.is_active == True
         ).first()
         if not valid_mail:
             logger.warning(f"Email {email} is not authorized to connect")
-            raise HTTPException(status_code=403, detail={"status": "error", "message": "Email not authorized"})
+            raise HTTPException(status_code=status.HTTP_200_OK, detail={"status": status.HTTP_401_UNAUTHORIZED, "message": "Email not authorized"})
         
         return {
-            "status": "success",
+            "status": status.HTTP_200_OK,
             "message": "OAuth connected successfully",
             "data":
                 {
