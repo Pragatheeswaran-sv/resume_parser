@@ -9,97 +9,15 @@ import os
 from urllib.parse import urlencode
 from db.connection import SessionLocal
 from src.email_reader.models import EmailLogs
-from src.services.auth.gmail.service import gmail_login
-from src.services.auth.gmail.service import gmail_callback
-from src.services.auth.gmail.service import zoho_callback
 from src.services.auth.gmail.service import fetch_emails_gmail
 from src.services.auth.zoho.service import fetch_emails_zoho
 from src.auth.schemas import EmailRequest, EmailFetchResponse, EmailFetchResult
-from src.services.auth.zoho.service import zoho_login
 from src.auth.models import OauthCredentials, OauthSource
 from src.admin.models import Users
 
 load_dotenv()
 logger = logging.getLogger(__name__)
 
-router = APIRouter(
-    prefix="/api",
-	tags=["Payment-Process"],
-	responses={
-		400: {"description": "Bad Request"},
-		404: {"description": "Not Found"},
-		500: {"description": "Internal Server Error"},
-	},
-)
-
-# GMAIL_AUTH_URL = os.getenv("GMAIL_AUTH_URL")
-# GMAIL_TOKEN_URL = os.getenv("GMAIL_TOKEN_URL")
-# GMAIL_CLIENT_ID = os.getenv("GMAIL_CLIENT_ID")
-# GMAIL_CLIENT_SECRET = os.getenv("GMAIL_CLIENT_SECRET")
-# GMAIL_REDIRECT_URI = os.getenv("GMAIL_REDIRECT_URI")
-
-@router.get("/oauth/login/gmail")
-def oauth_gmail_login() -> dict:
-    """Initiate OAuth flow by redirecting user to Google's auth page."""
-    try:
-        response = gmail_login()
-        return response
-    except Exception as e:
-        logger.error(f"Error occurred while initiating Gmail OAuth: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"status": "error", "message": str(e)},
-        )
-
-@router.get("/auth/gmail/callback")
-def callback(code: str) -> dict:
-    """Handle OAuth callback and exchange code for tokens."""
-
-    try:
-        response = gmail_callback(code)
-        return response
-    except Exception as e:
-        logger.error(f"Error occurred while handling Gmail OAuth callback: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"status": "error", "message": str(e)},
-        )
-
-@router.get("/auth/zoho/callback")
-def callback(code: str) -> dict:
-    """Handle OAuth callback and exchange code for tokens."""
-
-    try:
-        response = zoho_callback(code)
-        return response
-    except Exception as e:
-        logger.error(f"Error occurred while handling Zoho OAuth callback: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"status": "error", "message": str(e)},
-        )
-
-@router.get("/oauth/login/zoho")
-def oauth_zoho_login() -> dict:
-    """Initiate OAuth flow by redirecting user to Zoho's auth page."""
-    try:
-        response = zoho_login()
-        return response
-    except Exception as e:
-        logger.error(f"Error occurred while initiating Zoho OAuth: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"status": "error", "message": str(e)},
-        )
-
-# @router.post("/emails")
-# def fetch_emails_oauth(request: EmailRequest) -> dict:
-#     logger.info(f"NAV----> Fetching emails for email_id: {request.email_id}")
-#     response = fetch_emails_gmail(email_id=request.email_id)
-#     # response = fetch_emails_zoho(email_id=request.email_id)
-#     return response
-
-@router.post("/emails")
 def fetch_emails_oauth() -> EmailFetchResponse:
     """
     Fetch emails from all active users based on OAuth source (Gmail / Zoho).
@@ -188,11 +106,13 @@ def fetch_emails_oauth() -> EmailFetchResponse:
                 logger.error(f"Error processing {email_id}: {str(service_error)}")
                 status = f"failed: {str(service_error)}"
 
+            service_response = service_response 
             results.append(
                 EmailFetchResult(
                     email=email_id,
                     source=source_name,
-                    status=status
+                    status=status,
+                    processed_count=service_response.get('processed_count', 0)
                 )
             )
 
@@ -200,11 +120,10 @@ def fetch_emails_oauth() -> EmailFetchResponse:
             message="Email fetching completed",
             results=results
         )
-
+    
     except Exception as e:
         logger.error(f"Fatal error in fetch_emails_oauth: {str(e)}")
         raise HTTPException(
             status_code= 500,
             detail={"status": "error", "message": str(e)},
         )
-
