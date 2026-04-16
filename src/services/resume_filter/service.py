@@ -389,7 +389,7 @@ def is_resume(text: str) -> bool:
             model_info = model_info[0]
 
         model = model_info.get("model_name", "ollama").lower()
-        version = model_info.get("model_version_name", "latest").lower()
+        version = model_info.get("model_version_name", "llama3").lower()
         api_key = model_info.get("apikey") or None
 
         message = [
@@ -426,8 +426,9 @@ def is_resume(text: str) -> bool:
             content = response.content[0].text.strip()
             logger.info(f"NAV----> the response from Claude {response}")
         else:
-            response = ollama.chat(
-                model = "llama3",
+            client = ollama
+            response = client.chat(
+                model = version,
                 messages = message
             )
             logger.info(f"NAV----> the response from Ollama {response}")
@@ -585,7 +586,7 @@ def extract_basic_info(resume_text):
         else:
             model_info = model_info[0]
 
-        model = model_info.get("model_name", "ollama").lower()
+        model = model_info.get("model_name", "llama3").lower()
         version = model_info.get("model_version_name", "latest").lower()
         api_key = model_info.get("apikey") or None
         
@@ -623,8 +624,9 @@ def extract_basic_info(resume_text):
             content = response.content[0].text.strip()
             logger.info(f"NAV----> the response from Claude {response}")
         else:
-            response = ollama.chat(
-                model = "llama3",
+            client = ollama
+            response = client.chat(
+                model = version,
                 messages = message
             )
             logger.info(f"NAV----> the response from Ollama {response}")
