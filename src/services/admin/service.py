@@ -343,6 +343,32 @@ def list_mail(page, page_size) -> Dict[str, Any]:
     finally:
         session.close()
 
+def get_user_by_id(user_id, admin_id):
+    try:
+        db = SessionLocal()
+        admin = db.query(Admin).filter(admin_id == admin_id).first()
+        if not admin:
+            raise Exception("user has no access to delete account")
+        
+        user = db.query(Users).filter(Users.user_id == user_id, Users.is_active == True).first()
+        if not user:
+            raise Exception("User not found")
+        
+        return{
+            "status": status.HTTP_200_CREATED,
+            "message": "User retrieved successfully",
+            "data": {
+                "user_id": str(user.user_id),
+                "name": user.name,
+                "email_address": user.email_address,
+                "phone_number": user.phone_number,
+            },
+        }
+    except Exception as e:
+        logger.warning("[particular_user] Error: %s", str(e), exc_info=True)
+        raise ValueError(str(e))
+    finally:
+        db.close()
 
 # def new_auth(payload: dict, admin_id) -> Dict[str, Any]:
 def new_auth(payload: dict, admin_id) -> Dict[str, Any]:
@@ -417,14 +443,14 @@ def delete_user(user_id: str, admin_id) -> Dict[str, Any]:
     try:
         admin = session.query(Admin).filter(admin_id == admin_id).first()
         if not admin:
-            raise ValueError("user has no access to delete account")
+            raise Exception("user has no access to delete account")
 
         if not user_id or not user_id.strip():
-            raise ValueError("user_id is required")
+            raise Exception("user_id is required")
 
         users = session.query(Users).filter_by(user_id=user_id, is_active = True).first()
         if not users:
-            raise ValueError("User not found")
+            raise Exception("User not found")
         users.is_active = False
         session.commit()
         return {
@@ -476,7 +502,7 @@ def update_user(payload: dict, user_id: str, admin_id) -> Dict[str, Any]:
         admin = session.query(Admin).filter(admin_id == admin_id).first()
 
         if not admin:
-            raise ValueError("user has no access to enable/disable account")
+            raise Exception("user has no access to enable/disable account")
         if "is_blocked" in payload:
             if blocked == True:
                 users.is_blocked = blocked
@@ -900,11 +926,11 @@ def new_job(payload, admin_id):
 
         admin = db.query(Admin).filter(admin_id == admin_id).first()
         if not admin:
-            raise ValueError("User are restricted to schedule job")
+            raise Exception("User are restricted to schedule job")
         
         duplicate = db.query(ExtractionConfig).all()
         if len(duplicate) > 1:
-            raise ValueError("can't create more than one job")
+            raise Exception("can't create more than one job")
         
         interval_minutes = payload.get('interval_minutes') or None
         is_paused = payload.get('is_paused') or None
@@ -915,10 +941,10 @@ def new_job(payload, admin_id):
         weekday = payload.get('weekday') or None
 
         if window_enabled and not window_start_time:
-            raise ValueError("window_start_time required when window is enabled")
+            raise Exception("window_start_time required when window is enabled")
 
         if schedule_type == "weekly" and not weekday:
-            raise ValueError("weekday required for weekly schedule")
+            raise Exception("weekday required for weekly schedule")
         
         job = ExtractionConfig(
             interval_minutes = interval_minutes,
