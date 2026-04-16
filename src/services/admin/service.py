@@ -893,6 +893,59 @@ def trigger_extraction(user_id: Optional[str] = None) -> Dict[str, Any]:
     finally:
         session.close()
 
+def new_job(payload, admin_id):
+    try:
+        payload = payload.dict()
+        db =SessionLocal()
+
+        admin = db.query(Admin).filter(admin_id == admin_id).first()
+        if not admin:
+            raise ValueError("User are restricted to schedule job")
+        
+        duplicate = db.query(ExtractionConfig).all()
+        if len(duplicate) > 1:
+            raise ValueError("can't create more than one job")
+        
+        interval_minutes = payload.get('interval_minutes') or None
+        is_paused = payload.get('is_paused') or None
+        window_enabled = payload.get('window_enabled') or None
+        window_start_time = payload.get('window_start_time') or None
+        window_timezone = payload.get('window_timezone') or None
+        schedule_type = payload.get('schedule_type') or None
+        weekday = payload.get('weekday') or None
+
+        if window_enabled and not window_start_time:
+            raise ValueError("window_start_time required when window is enabled")
+
+        if schedule_type == "weekly" and not weekday:
+            raise ValueError("weekday required for weekly schedule")
+        
+        job = ExtractionConfig(
+            interval_minutes = interval_minutes,
+            is_paused = is_paused,
+            window_enabled = window_enabled,
+            window_start_time = window_start_time,
+            # window_timezone = window_timezone,
+            schedule_type = schedule_type,
+            weekday = weekday
+        )
+
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+        return {
+            "status": status.HTTP_201_CREATED,
+            "message": "Job created successfully",
+            "data": {
+                "config_id": str(job.config_id),
+            },
+        }
+    except Exception as e:
+        logger.warning("[new_job] Error: %s", str(e), exc_info=True)
+        raise ValueError(str(e))
+    finally:
+        db.close()
+
     
 def list_model():
     try:

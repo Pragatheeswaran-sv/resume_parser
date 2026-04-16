@@ -30,6 +30,7 @@ class OauthCredentials(Base):
     source_id = Column(UUID(as_uuid=True), ForeignKey("oauth_source.source_id"), nullable = True)
     api_domain = Column(String, nullable = True)
     last_uid = Column(Integer)
+    last_processed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=False), default=ist_now)
     updated_at = Column(DateTime(timezone=False), default=ist_now, onupdate=ist_now)
     created_by = Column(String, nullable = True)

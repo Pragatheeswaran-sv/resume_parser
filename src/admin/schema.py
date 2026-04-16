@@ -113,6 +113,16 @@ class ExtractionConfigUpdate(BaseModel):
     schedule_type: Optional[str] = None
     weekday: Optional[str] = None
 
+class Validate_new_job(BaseModel):
+    interval_minutes: int
+    is_paused: bool
+    window_enabled: bool
+    window_start_time: str
+    # window_end_time: str
+    # window_timezone: Optional[str]
+    schedule_type: str
+    weekday: str
+
 
 # ── Generic response helpers ─────────────────────────────────────────────
 

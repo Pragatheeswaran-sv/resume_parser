@@ -73,7 +73,7 @@ def save_resumes_to_db(resumes):
             logger.info(f'NAV----> the info extracted {info}')
 
             info_email = (info.get("email") or "").strip().lower()
-            role = info.get("role", "").strip()
+            extracted_role = info.get("role", "").strip()
             if not info_email and sender_email:
                 logger.info(f'NAV----> using sender email fallback: {sender_email}')
                 info_email = sender_email
@@ -81,35 +81,36 @@ def save_resumes_to_db(resumes):
 
             vector = embedding_model.embed_query(raw_text)
 
-            existing_candidate = None
-            # if info_email:
-            #     existing_candidate = db.query(Candidate).filter(
-            #         Candidate.email_address == info_email
-            #     ).first()
-            # if not existing_candidate and info.get("phone_number"):
-            #     existing_candidate = db.query(Candidate).filter(
-            #         Candidate.phone_number == info.get("phone_number")
-            #     ).first()
+            email_address = info_email or sender_email or ""
+            phone_number = (info.get("phone_number") or "").strip()
 
-            # if existing_candidate:
-            #     candidate = existing_candidate
-            #     if not candidate.email_address and sender_email:
-            #         candidate.email_address = sender_email
-            #         candidate.email_from_sender = True
-            #         db.add(candidate)
-            #     logger.info(f'Using existing candidate: {candidate.candidate_id}')
-            # else:
+            candidate = None
+            if email_address:
+                candidate = db.query(Candidate).filter(
+                    func.lower(Candidate.email_address) == email_address.lower()
+                ).first()
 
-            email_address=info_email or sender_email or ""
-            phone_number=info.get("phone_number", "")
+            if not candidate and phone_number:
+                candidate = db.query(Candidate).filter(
+                    Candidate.phone_number == phone_number
+                ).first()
 
-            duplicate_candidate = db.query(Candidate).filter(candidate.email_address == email_address, candidate.phone_number == phone_number).first()
-            if not duplicate_candidate:
+            if candidate:
+                logger.info("NAV----> candidate already exists, reusing candidate_id")
+
+                # Keep existing candidate fresh with any missing contact values.
+                if not candidate.email_address and email_address:
+                    candidate.email_address = email_address
+                    candidate.email_from_sender = bool(sender_email and not info_email)
+                if not candidate.phone_number and phone_number:
+                    candidate.phone_number = phone_number
+                db.add(candidate)
+            else:
                 candidate = Candidate(
                     name=info.get("name", ""),
-                    email_address=info_email or sender_email or "",
+                    email_address=email_address,
                     email_from_sender=bool(sender_email and not info_email),
-                    phone_number=info.get("phone_number", ""),
+                    phone_number=phone_number,
                     location=info.get("location", ""),
                     total_experience=normalize_experience(info.get("total_experience")),
                     created_by="resume_parser"
@@ -117,8 +118,6 @@ def save_resumes_to_db(resumes):
                 db.add(candidate)
                 db.flush()
                 logger.info("NAV----> candidate added to db")
-            
-            candidate_id = duplicate_candidate.candidate_id
             
             # Add skills
             skills_list = info.get("skills", [])
@@ -140,20 +139,13 @@ def save_resumes_to_db(resumes):
                             db.add(skill)
                             db.flush()
                             logger.info("NAV----> new skills added to db")
-                        # Check if already linked
-                        existing_link = db.query(CandidateSkills).filter(
-                            CandidateSkills.candidate_id == candidate.candidate_id,
-                            CandidateSkills.skill_id == skill.skill_id
-                        ).first()
-                        
-                        if not existing_link:
-                            candidate_skill = CandidateSkills(
-                                candidate_id=candidate.candidate_id,
-                                skill_id=skill.skill_id,
-                                created_by="resume_parser"
-                            )
-                            db.add(candidate_skill)
-                            logger.info("NAV----> candidate skills added to db")
+                        candidate_skill = CandidateSkills(
+                            candidate_id=candidate.candidate_id,
+                            skill_id=skill.skill_id,
+                            created_by="resume_parser"
+                        )
+                        db.add(candidate_skill)
+                        logger.info("NAV----> candidate skills added to db")
             # Add education from new structure (objects with qualification, institution, percentage, passout_year)
             education_list = info.get("education", [])
             logger.info(f'NAV----> the education {education_list}...')
@@ -192,23 +184,16 @@ def save_resumes_to_db(resumes):
                             except (ValueError, TypeError):
                                 percentage_val = None
                             
-                            # Check if already linked
-                            existing_edu = db.query(CandidateEducation).filter(
-                                CandidateEducation.candidate_id == candidate.candidate_id,
-                                CandidateEducation.education_id == education_type.education_id
-                            ).first()
-                            
-                            if not existing_edu:
-                                candidate_edu = CandidateEducation(
-                                    candidate_id=candidate.candidate_id,
-                                    education_id=education_type.education_id,
-                                    institution=institution if institution else None,
-                                    percentage=percentage_val,
-                                    year_of_passed=year_passed,
-                                    created_by="resume_parser"
-                                )
-                                db.add(candidate_edu)
-                                logger.info("NAV----> candidate education added to db")
+                            candidate_edu = CandidateEducation(
+                                candidate_id=candidate.candidate_id,
+                                education_id=education_type.education_id,
+                                institution=institution if institution else None,
+                                percentage=percentage_val,
+                                year_of_passed=year_passed,
+                                created_by="resume_parser"
+                            )
+                            db.add(candidate_edu)
+                            logger.info("NAV----> candidate education added to db")
             
             # Add work experience from new structure (objects with company_name, role, start_date, end_date)
             work_experience_list = info.get("work_experience", [])
@@ -238,16 +223,16 @@ def save_resumes_to_db(resumes):
                                 logger.info("NAV----> new company added to db")
                             
                             # Get or create role
-                            role = db.query(Role).filter(
+                            role_obj = db.query(Role).filter(
                                 Role.role.ilike(role_name)
                             ).first()
                             
-                            if not role:
-                                role = Role(
+                            if not role_obj:
+                                role_obj = Role(
                                     role=role_name,
                                     created_by="resume_parser"
                                 )
-                                db.add(role)
+                                db.add(role_obj)
                                 db.flush()
                                 logger.info("NAV----> new role added to db")
                             # Parse dates (YYYY-MM or YYYY format)
@@ -283,7 +268,7 @@ def save_resumes_to_db(resumes):
                             work_exp = WorkExperience(
                                 candidate_id=candidate.candidate_id,
                                 company_id=company.company_id,
-                                role_id=role.role_id,
+                                role_id=role_obj.role_id,
                                 start_date=start_dt,
                                 end_date=end_dt,
                                 created_by="resume_parser"
@@ -296,7 +281,7 @@ def save_resumes_to_db(resumes):
                 embedding=vector,
                 candidate_id=candidate.candidate_id,
                 attachment_id=attachment_id,
-                candidate_role= role,
+                candidate_role=extracted_role,
                 created_by="resume_parser"
             )
             db.add(resume_record)
@@ -364,7 +349,6 @@ def is_resume(text: str) -> bool:
         Skills, Experience, Education, Projects
 
         - Return FALSE if:
-        - It is incomplete
         - It is random text
         - It is invoice, email, report, or any other document
         - It looks like partial resume content
@@ -403,8 +387,6 @@ def is_resume(text: str) -> bool:
             model_info = {}
         else:
             model_info = model_info[0]
-
-        print("model=>", model_info)
 
         model = model_info.get("model_name", "ollama").lower()
         version = model_info.get("model_version_name", "latest").lower()
@@ -602,8 +584,6 @@ def extract_basic_info(resume_text):
             model_info = {}
         else:
             model_info = model_info[0]
-
-        print("model=>", model_info)
 
         model = model_info.get("model_name", "ollama").lower()
         version = model_info.get("model_version_name", "latest").lower()
