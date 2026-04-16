@@ -1152,7 +1152,7 @@ def toggle_model(model_config_id, admin_id):
             )
         db.commit()
 
-        active_model = db.query(AiModelConfig).filter_by(is_active = True).all()
+        active_model = db.query(AiModelConfig).all()
 
         
 
