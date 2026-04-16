@@ -21,6 +21,7 @@ from src.services.admin.service import (
     admin_check,
     delete_user,
     get_extraction_config,
+    get_user_by_id,
     is_within_extraction_window,
     list_email_accounts,
     list_mail,
@@ -164,7 +165,7 @@ def get_users(page, page_size):
 
 
 @router.post("/create_user")
-def new_user(payload: AuthorizedUserCreate,  _admin=Depends(get_current_admin)):
+def new_user(payload: AuthorizedUserCreate, _admin=Depends(get_current_admin)):
     """Register a new authorized email account for IMAP extraction.
 
     Accepts a validated ``AuthorizedUserCreate`` body with email,
@@ -180,6 +181,19 @@ def new_user(payload: AuthorizedUserCreate,  _admin=Depends(get_current_admin)):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"status": "error", "message": str(e)},
         )
+
+@router.get('/particular_user')
+def get_particular_user(user_id, _admin=Depends(get_current_admin)):
+    try:
+        admin_id = _admin.admin_id
+        return get_user_by_id(user_id, admin_id)
+    except ValueError as e:
+        logger.warning("[particular_user] Error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"status": "error", "message": str(e)},
+        )
+
 
 
 @router.patch("/delete_user/")
@@ -387,7 +401,8 @@ def add_job(payload : Validate_new_job, _admin=Depends(get_current_admin)):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"status": "error in creating new job", "message": str(e)},
         )
-    
+
+
 
 @router.post("/admin/extraction/trigger/{user_id}")
 def trigger_single(
@@ -450,7 +465,6 @@ def list_models() :
                 "status": "error",
                 "message": str(e),
             })
-
 
 @router.post(
     "/create_model/",
