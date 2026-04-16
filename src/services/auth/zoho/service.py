@@ -852,6 +852,7 @@ def fetch_emails_zoho(email_id: str) -> dict:
                     message_id=message_id,
                     subject=msg.get("subject", ""),
                     sender=msg.get("fromAddress", ""),
+                    source_mail=email_id
                 )
                 db.add(email_log)
                 db.commit()
