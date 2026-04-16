@@ -391,6 +391,7 @@ def fetch_emails_gmail(email_id: str) -> dict:
                 message_id=message_id,
                 subject=subject,
                 sender=sender,
+                source_mail = email_id
             )
             db.add(email_obj)
             db.commit()
