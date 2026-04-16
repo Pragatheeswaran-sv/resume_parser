@@ -1152,13 +1152,26 @@ def toggle_model(model_config_id, admin_id):
             )
         db.commit()
 
-        active_model = db.query(AiModelConfig).filter_by(is_active = True).all()
+        active_model = db.query(AiModelConfig).all()
 
-        return{
+        
+
+        return {
             "status": status.HTTP_200_OK,
             "message": "Model enabled successfully",
-            "data": active_model
-        }      
+            "data": [
+                {
+                    "config_id": active.ai_model_config_id,
+                    "model_id": active.ai_model_id,
+                    "version_id": active.ai_model_version_id,
+                    "apikey": active.apikey,
+                    "max_tokens": active.max_tokens,
+                    "admin_id": active.admin_id,
+                    "is_active": active.is_active,
+                }
+                for active in active_model
+            ]
+        }  
 
 
     except Exception as e:
