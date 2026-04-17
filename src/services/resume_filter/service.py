@@ -289,17 +289,21 @@ def save_resumes_to_db(resumes):
                             logger.info("candidate experience already exists")
                                       
             # Create Resume record linking to candidate and attachment
-            resume_record = Resume(
-                embedding=vector,
-                candidate_id=candidate.candidate_id,
-                attachment_id=attachment_id,
-                candidate_role=extracted_role,
-                created_by="resume_parser"
-            )
-            db.add(resume_record)
-            db.flush()
+            is_resume_record = db.query(Resume).filter(Resume.candidate_id == candidate.candidate_id, Resume.candidate_role == extracted_role)
+            if not is_resume_record:
+                resume_record = Resume(
+                    embedding=vector,
+                    candidate_id=candidate.candidate_id,
+                    attachment_id=attachment_id,
+                    candidate_role=extracted_role,
+                    created_by="resume_parser"
+                )
+                db.add(resume_record)
+                db.flush()
+                
+                logger.info(f'Successfully saved resume for {info.get("name", "Unknown")}')
             
-            logger.info(f'Successfully saved resume for {info.get("name", "Unknown")}')
+            logger.info('Resume of candidate is already exists')
             
         except Exception as e:
             logger.error(f"Error saving resume: {e}")
