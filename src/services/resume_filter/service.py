@@ -70,12 +70,12 @@ def save_resumes_to_db(resumes):
             info = r["info"]            
             attachment_id = r.get("attachment_id")
             sender_email = parse_email_address(r.get("sender_email", ""))
-            logger.info(f'NAV----> the info extracted {info}')
+            logger.info(f' the info extracted {info}')
 
             info_email = (info.get("email") or "").strip().lower()
             extracted_role = info.get("role", "").strip()
             if not info_email and sender_email:
-                logger.info(f'NAV----> using sender email fallback: {sender_email}')
+                logger.info(f' using sender email fallback: {sender_email}')
                 info_email = sender_email
                 info["email"] = sender_email
 
@@ -96,7 +96,7 @@ def save_resumes_to_db(resumes):
                 ).first()
 
             if candidate:
-                logger.info("NAV----> candidate already exists, reusing candidate_id")
+                logger.info(" candidate already exists, reusing candidate_id")
 
                 # Keep existing candidate fresh with any missing contact values.
                 if not candidate.email_address and email_address:
@@ -117,11 +117,11 @@ def save_resumes_to_db(resumes):
                 )
                 db.add(candidate)
                 db.flush()
-                logger.info("NAV----> candidate added to db")
+                logger.info(" candidate added to db")
             
             # Add skills
             skills_list = info.get("skills", [])
-            logger.info(f'NAV----> the skills {skills_list}...')
+            logger.info(f' the skills {skills_list}...')
             if skills_list:
                 for skill_name in skills_list:
                     if skill_name and isinstance(skill_name, str):
@@ -138,17 +138,22 @@ def save_resumes_to_db(resumes):
                             )
                             db.add(skill)
                             db.flush()
-                            logger.info("NAV----> new skills added to db")
-                        candidate_skill = CandidateSkills(
-                            candidate_id=candidate.candidate_id,
-                            skill_id=skill.skill_id,
-                            created_by="resume_parser"
-                        )
-                        db.add(candidate_skill)
-                        logger.info("NAV----> candidate skills added to db")
+                            logger.info("new skills added to db")
+                        is_skill = db.query(CandidateSkills).filter(CandidateSkills.skill_id == skill.skill_id).first()
+                        
+                        if not is_skill:
+                            candidate_skill = CandidateSkills(
+                                candidate_id=candidate.candidate_id,
+                                skill_id=skill.skill_id,
+                                created_by="resume_parser"
+                            )
+                            db.add(candidate_skill)
+                            logger.info("candidate skills added to db")
+
+                        logger.info('candidate skill already exists')
             # Add education from new structure (objects with qualification, institution, percentage, passout_year)
             education_list = info.get("education", [])
-            logger.info(f'NAV----> the education {education_list}...')
+            logger.info(f' the education {education_list}...')
             if education_list:
                 for edu_item in education_list:
                     if isinstance(edu_item, dict):
@@ -170,7 +175,7 @@ def save_resumes_to_db(resumes):
                                 )
                                 db.add(education_type)
                                 db.flush()
-                                logger.info("NAV----> new education added to db")
+                                logger.info("new education added to db")
                             
                             # Parse passout_year to integer
                             try:
@@ -183,21 +188,24 @@ def save_resumes_to_db(resumes):
                                 percentage_val = float(percentage) if percentage else None
                             except (ValueError, TypeError):
                                 percentage_val = None
-                            
-                            candidate_edu = CandidateEducation(
-                                candidate_id=candidate.candidate_id,
-                                education_id=education_type.education_id,
-                                institution=institution if institution else None,
-                                percentage=percentage_val,
-                                year_of_passed=year_passed,
-                                created_by="resume_parser"
-                            )
-                            db.add(candidate_edu)
-                            logger.info("NAV----> candidate education added to db")
+                            is_education = db.query(CandidateEducation).filter(CandidateEducation.education_id == education_type.education_id).first()
+                            if not is_education:
+                                candidate_edu = CandidateEducation(
+                                    candidate_id=candidate.candidate_id,
+                                    education_id=education_type.education_id,
+                                    institution=institution if institution else None,
+                                    percentage=percentage_val,
+                                    year_of_passed=year_passed,
+                                    created_by="resume_parser"
+                                )
+                                db.add(candidate_edu)
+                                logger.info("candidate education added to db")
+
+                            logger.info("candidate education already exists")
             
             # Add work experience from new structure (objects with company_name, role, start_date, end_date)
             work_experience_list = info.get("work_experience", [])
-            logger.info(f'NAV----> the work experience {work_experience_list}...')
+            logger.info(f' the work experience {work_experience_list}...')
             if work_experience_list:
                 for work_exp_item in work_experience_list:
                     if isinstance(work_exp_item, dict):
@@ -220,7 +228,7 @@ def save_resumes_to_db(resumes):
                                 )
                                 db.add(company)
                                 db.flush()
-                                logger.info("NAV----> new company added to db")
+                                logger.info(" new company added to db")
                             
                             # Get or create role
                             role_obj = db.query(Role).filter(
@@ -234,7 +242,7 @@ def save_resumes_to_db(resumes):
                                 )
                                 db.add(role_obj)
                                 db.flush()
-                                logger.info("NAV----> new role added to db")
+                                logger.info(" new role added to db")
                             # Parse dates (YYYY-MM or YYYY format)
                             start_dt = None
                             end_dt = None
@@ -264,17 +272,21 @@ def save_resumes_to_db(resumes):
                             except (ValueError, TypeError):
                                 pass
                             
+                            is_work_exp = db.query(WorkExperience).filter(WorkExperience.company_id == company.company_id, WorkExperience.role_id == role_obj.role_id).first()
+                            if not is_work_exp:
                             # Create work experience record
-                            work_exp = WorkExperience(
-                                candidate_id=candidate.candidate_id,
-                                company_id=company.company_id,
-                                role_id=role_obj.role_id,
-                                start_date=start_dt,
-                                end_date=end_dt,
-                                created_by="resume_parser"
-                            )
-                            db.add(work_exp)
-                            logger.info("NAV----> candidate experience added to db")
+                                work_exp = WorkExperience(
+                                    candidate_id=candidate.candidate_id,
+                                    company_id=company.company_id,
+                                    role_id=role_obj.role_id,
+                                    start_date=start_dt,
+                                    end_date=end_dt,
+                                    created_by="resume_parser"
+                                )
+                                db.add(work_exp)
+                                logger.info("candidate experience added to db")
+                            
+                            logger.info("candidate experience already exists")
                                       
             # Create Resume record linking to candidate and attachment
             resume_record = Resume(
@@ -408,7 +420,7 @@ def is_resume(text: str) -> bool:
                 messages = message
             )
             content = response.choices[0].message.content.strip()
-            logger.info(f"NAV----> the response from OpenAi {response}")
+            logger.info(f" the response from OpenAi {response}")
         elif model == "claude":
             if not api_key or api_key == None:
                 raise Exception("Claude API key not found")
@@ -424,14 +436,14 @@ def is_resume(text: str) -> bool:
                 ]
             )
             content = response.content[0].text.strip()
-            logger.info(f"NAV----> the response from Claude {response}")
+            logger.info(f" the response from Claude {response}")
         else:
             client = ollama
             response = client.chat(
                 model = version,
                 messages = message
             )
-            logger.info(f"NAV----> the response from Ollama {response}")
+            logger.info(f" the response from Ollama {response}")
             content = response["message"]["content"].strip()
 
         try:
@@ -606,7 +618,7 @@ def extract_basic_info(resume_text):
                 messages = message
             )
             content = response.choices[0].message.content.strip()
-            logger.info(f"NAV----> the response from OpenAi {response}")
+            logger.info(f" the response from OpenAi {response}")
         elif model == "claude":
             if not api_key or api_key == None:
                 raise Exception("Claude API key not found")
@@ -622,14 +634,14 @@ def extract_basic_info(resume_text):
                 ]
             )
             content = response.content[0].text.strip()
-            logger.info(f"NAV----> the response from Claude {response}")
+            logger.info(f" the response from Claude {response}")
         else:
             client = ollama
             response = client.chat(
                 model = version,
                 messages = message
             )
-            logger.info(f"NAV----> the response from Ollama {response}")
+            logger.info(f" the response from Ollama {response}")
             content = response["message"]["content"].strip()
 
         try:
