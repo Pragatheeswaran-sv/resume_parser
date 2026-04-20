@@ -631,7 +631,7 @@ def zoho_callback(code: str, db=SessionLocal()):
                 refresh_token=refresh_token,
                 expires_in=expires_in,
                 source_id=source.source_id,
-                api_domain=api_domain,   # 🔑 STORE THIS
+                api_domain=api_domain,
                 created_by=email
             )
             db.add(new_cred)
