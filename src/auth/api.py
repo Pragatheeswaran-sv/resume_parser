@@ -1,5 +1,5 @@
 from fastapi.responses import RedirectResponse
-from fastapi import Request
+from fastapi import Request, Depends
 import requests
 import logging
 from dotenv import load_dotenv
@@ -21,6 +21,9 @@ from src.auth.models import OauthCredentials, OauthSource
 from src.admin.models import Users
 from src.services.auth.service import fetch_emails_oauth
 
+from src.services.auth.logout_service import logout_user
+from src.auth.jwt import decode_access_token
+from jose import JWTError
 load_dotenv()
 logger = logging.getLogger(__name__)
 
@@ -139,4 +142,79 @@ def fetch_oauth_emails() -> EmailFetchResponse:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"status": "error", "message": str(e)},
+        )
+
+@router.post("/auth/logout")
+def logout_endpoint(request: Request) -> dict:
+    """
+    Generic logout endpoint that revokes OAuth tokens across all providers.
+    
+    This endpoint:
+    1. Extracts user email from JWT token
+    2. Finds user's OAuth credentials
+    3. Revokes tokens with the appropriate provider (Gmail/Zoho)
+    4. Deletes credentials from database
+    
+    ### Headers:
+    - Authorization: Bearer <JWT_TOKEN>
+    
+    ### Returns:
+    - Status of logout operation and providers that were revoked
+    
+    ### Errors:
+    - 401: Missing or invalid authorization header
+    - 500: Server error during logout
+    """
+    try:
+        # Extract JWT from Authorization header
+        auth_header = request.headers.get("Authorization")
+        
+        if not auth_header or not auth_header.startswith("Bearer "):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={"status": "error", "message": "Missing or invalid Authorization header"}
+            )
+        
+        token = auth_header.split(" ")[1]
+        
+        # Decode token to get email
+        try:
+            payload = decode_access_token(token)
+            email = payload.get("email")  # Standard JWT email claim
+            
+            if not email:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail={"status": "error", "message": "Token missing email claim"}
+                )
+        except JWTError as e:
+            logger.error(f"Invalid token: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={"status": "error", "message": "Invalid or expired token"}
+            )
+        
+        # Perform logout
+        logger.info(f"Logout request for email: {email}")
+        result = logout_user(email)
+        
+        if result["status"] == "success":
+            return {
+                "status": status.HTTP_200_OK,
+                "message": "Logout successful",
+                "data": result.get("data", {})
+            }
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={"status": "error", "message": result.get("message", "Logout failed")}
+            )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in logout endpoint: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"status": "error", "message": str(e)}
         )

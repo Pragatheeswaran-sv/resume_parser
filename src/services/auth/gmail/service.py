@@ -182,7 +182,7 @@ def gmail_callback(code: str, db = SessionLocal()) -> dict:
 
         db.commit()
         logger.info(f"NAV----> Credentials stored for {email}, expires at {expires_at.isoformat()}")
-        access_token = create_access_token({"mail": email})
+        access_token = create_access_token({"email": email, "sub": email})
         logger.info(f"NAV----> Access token created for {email}")
         valid_mail = db.query(Users).filter(
             Users.email_address == email,
@@ -507,10 +507,12 @@ def zoho_callback(code: str, db=SessionLocal()) -> dict:
         }
 
         token_res = requests.post(token_url, data=token_data)
+        println("test123", token_res)
         token_res.raise_for_status()
-
         tokens = token_res.json()
+        println("test123", tokens)
 
+      
         access_token = tokens.get("access_token")
         refresh_token = tokens.get("refresh_token")
         scope = tokens.get("scope")
