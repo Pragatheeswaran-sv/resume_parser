@@ -4,8 +4,6 @@ import json
 import logging
 from uuid import UUID
 import datetime as dt
-
-# from django import db
 from alembic.util import status
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
@@ -31,6 +29,8 @@ from src.admin.models import Admin, AiModel, AiModelConfig, AiModelversion
 
 from openai import OpenAI
 from anthropic import Anthropic
+
+from src.utils.helper import compress_file
 
 
 load_dotenv()
@@ -463,8 +463,8 @@ def is_resume(text: str) -> bool:
         except json.JSONDecodeError as e:
             logger.error(f"Invalid JSON returned by model: {content}")
             raise ValueError("Model returned invalid JSON") from e
-        
-        return data.get("is_resume", False)
+        resume_state = data.get("is_resume", False)
+        return resume_state
 
     except Exception as e:
         logger.error("Resume detection failed: %s", e)
@@ -757,6 +757,13 @@ def process_resumes(email_id: UUID) -> dict:
             db.commit()
             logger.info("Classified %s — is_resume=%s", att.file_name, resume_flag)
 
+            if resume_flag == False:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                    logger.info(f"{file_path} removed successfully")
+                else:
+                    logger.info(f"{file_path} does not exist")
+                
             if not resume_flag:
                 continue
 
@@ -774,6 +781,12 @@ def process_resumes(email_id: UUID) -> dict:
         if results:
             logger.info("Saving %d resume(s) to DB", len(results))
             save_resumes_to_db(results)
+
+        file_compress = compress_file(file_path)
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            logger.info(f"{file_path} removed successfully")
+        logger.info(f'{file_compress}')
 
         return {
             "message_id": str(email_id),
