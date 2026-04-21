@@ -1162,7 +1162,7 @@ def model_config(payload, admin_id):
             apikey = apikey,
             version = version,
             max_tokens = max_tokens,
-            is_active = True
+            is_active = False
         )
         db.add(new_config)
         db.commit()
