@@ -294,47 +294,56 @@ def new_admin(payload: dict) -> Dict[str, Any]:
     finally:
         session.close()
 
-
-def list_mail(page, page_size) -> Dict[str, Any]:
-    """Return all active authorized email accounts.
-
-    Returns:
-        Dict with a list of User summaries.
-
-    Raises:
-        ValueError: If no active Users exist.
-    """
+def list_mail(page, page_size, sort_by, sort_order) -> Dict[str, Any]:
     session = SessionLocal()
     try:
         page = int(page)
         page_size = int(page_size)
-        offset = (int(page) - 1) * page_size
+        offset = (page - 1) * page_size
 
-        users = session.query(Users).filter(Users.is_active == True).limit(page_size).offset(offset)
-        user_count = session.query(Users).filter(Users.is_active == True).all()
-        total_users = len(user_count)
+        query = session.query(Users).filter(Users.is_active == True)
 
-        if total_users <= offset:
+        sort_map = {
+            "name": Users.name,
+            "email": Users.email_address,
+            "phone_number": Users.phone_number,
+            "created_at": Users.created_at,
+            "updated_at": Users.updated_at,
+        }
+
+        if sort_by in sort_map:
+            sort_col = sort_map[sort_by]
+            query = query.order_by(
+                sort_col.desc() if sort_order == "desc" else sort_col.asc()
+            )
+
+        total_users = query.count()
+
+        if total_users == 0:
+            raise ValueError("No Users found")
+
+        if offset >= total_users:
             raise ValueError("Invalid page number")
 
-        if not users:
-            raise ValueError("No Users found")
+       
+        users = query.limit(page_size).offset(offset).all()
+
         return {
             "status": status.HTTP_200_OK,
             "message": "Users retrieved successfully",
             "data": [
                 {
-                    "user_id": str(users.user_id),
-                    "name": users.name,
-                    "email_address": users.email_address,
-                    "phone_number": users.phone_number,
-                    "is_blocked" : users.is_blocked,
-                    # "connect_with": users.connect_with,
+                    "user_id": str(user.user_id),
+                    "name": user.name,
+                    "email_address": user.email_address,
+                    "phone_number": user.phone_number,
+                    "is_blocked": user.is_blocked,
                 }
-                for users in users
+                for user in users
             ],
-            "total_records": total_users
+            "total_records": total_users,
         }
+
     except ValueError:
         raise
     except Exception as e:
@@ -1178,53 +1187,72 @@ def model_config(payload, admin_id):
     finally:
         db.close()
     
-def get_model(page, page_size, admin_id):
+def get_model(page, page_size, sort_by, sort_order, admin_id):
     db = SessionLocal()
     try:
         page = int(page)
         page_size = int(page_size)
-        offset = (int(page) - 1) * page_size
+        offset = (page - 1) * page_size
 
-        total = db.query(AiModelConfig).all()
-        total_record = len(total)
-        
-        if total_record <= offset:
-            raise ValueError("Invalid page number")  
-       
         if not admin_id:
             raise ValueError("Admin ID must be provided")
 
-        model_config =( db.query(
-            func.json_build_object(
-                'model_config_id', AiModelConfig.ai_model_config_id,
-                'model_id', AiModelConfig.ai_model_id,
-                'model_name', AiModel.model_name,
-                'model_version_id', AiModelConfig.ai_model_version_id,
-                'model_version_name', AiModelversion.version_name,
-                'admin_id', AiModelConfig.admin_id,
-                'apikey', AiModelConfig.apikey,
-                'max_tokens', AiModelConfig.max_tokens,
-                'temperature', AiModelConfig.temparature,
-                'is_active', AiModelConfig.is_active
+        query = (
+            db.query(
+                func.json_build_object(
+                    'model_config_id', AiModelConfig.ai_model_config_id,
+                    'model_id', AiModelConfig.ai_model_id,
+                    'model_name', AiModel.model_name,
+                    'model_version_id', AiModelConfig.ai_model_version_id,
+                    'model_version_name', AiModelversion.version_name,
+                    'admin_id', AiModelConfig.admin_id,
+                    'apikey', AiModelConfig.apikey,
+                    'max_tokens', AiModelConfig.max_tokens,
+                    'temperature', AiModelConfig.temparature,
+                    'is_active', AiModelConfig.is_active
+                )
             )
+            .select_from(AiModelConfig)
+            .join(AiModel, AiModel.ai_model_id == AiModelConfig.ai_model_id)
+            .join(AiModelversion, AiModelversion.ai_model_version_id == AiModelConfig.ai_model_version_id)
+            .filter(AiModelConfig.admin_id == admin_id)
         )
-        .select_from(AiModelConfig).
-        join(AiModel, AiModel.ai_model_id == AiModelConfig.ai_model_id).
-        join(AiModelversion, AiModelversion.ai_model_version_id == AiModelConfig.ai_model_version_id).
-        filter(AiModelConfig.admin_id == admin_id).
-        limit(page_size).offset(offset).all()
-        )
-        
-        # return model_config
-        if not model_config:
+
+        sort_map = {
+            "name": AiModel.model_name,
+            "version_name": AiModelversion.version_name,
+            "api_key" : AiModelConfig.apikey,
+            "max_tokens": AiModelConfig.max_tokens,
+            "temperature": AiModelConfig.temparature,
+            "created_at": AiModelConfig.created_at,
+            "updated_at" : AiModelConfig.updated_by,
+        }
+
+        if sort_by and sort_by in sort_map:
+            sort_col = sort_map[sort_by]
+            sort_order = (sort_order or "asc").lower()
+
+            query = query.order_by(
+                sort_col.desc() if sort_order == "desc" else sort_col.asc()
+            )
+
+        total_record = query.count()
+
+        if total_record == 0:
             raise ValueError("No model config found for the given admin ID")
-        
-        return{
+
+        if offset >= total_record:
+            raise ValueError("Invalid page number")
+
+        model_config = query.limit(page_size).offset(offset).all()
+
+        return {
             "status": status.HTTP_200_OK,
             "message": "Model config retrieved successfully",
             "data": [row[0] for row in model_config],
-            "total_record" : total_record
-        }             
+            "total_record": total_record
+        }
+
     except Exception as e:
         logger.warning("[get_model] Error: %s", str(e), exc_info=True)
         raise ValueError(str(e))

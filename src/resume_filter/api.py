@@ -345,7 +345,7 @@ def filter_resumes(
             }
         )
 
-@router.post("/nl_search", response_model=NLSearchResponse)
+@router.post("/profile_search", response_model=NLSearchResponse)
 def nl_search(body: dict) -> Dict[str, Any]:
     """Search candidates using a natural-language query.
 
