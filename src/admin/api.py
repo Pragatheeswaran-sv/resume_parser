@@ -12,6 +12,7 @@ from src.admin.schema import (
     AuthorizedUserCreate,
     AuthorizedUserUpdate,
     BlockToggleRequest,
+    CreateModelValidate,
     ExtractionConfigUpdate,
     ExtractionToggleRequest,
     SSOLoginRequest,
@@ -41,7 +42,7 @@ from src.services.admin.service import (
     update_extraction_config,
     list_model,
     model_version, 
-    new_model_version,
+    # new_model_version,
     model_config, 
     get_model,
     create_model
@@ -472,10 +473,10 @@ def list_models() :
     description="Create and store a new active AI model by model name.",
     response_description="Created AI model details.",
 )
-def add_model(payload: Dict[str, Any]):
+def add_model(payload: CreateModelValidate):
     """Create a new model with the provided ``model_name``."""
     try:
-        return create_model(payload)
+        return create_model(payload.model_dump())
     except ValueError as e:
         logger.warning("[create_model] Error: %s", str(e), exc_info=True)
         raise HTTPException(
@@ -525,48 +526,48 @@ def list_model_versions(model_id):
             })
     
 
-@router.post("/new_model_version/")
-def create_model_version(model_id, payload: Dict[str, Any]):
-    """
-        Create Model Version
+# @router.post("/new_model_version/")
+# def create_model_version(model_id, payload: Dict[str, Any]):
+#     """
+#         Create Model Version
 
-        Creates a new version entry for a given AI model using the provided model ID
-        and request payload.
+#         Creates a new version entry for a given AI model using the provided model ID
+#         and request payload.
 
-        This endpoint first validates whether the AI model exists and is active.
-        If the model is valid, it creates a new active version associated with that model.
+#         This endpoint first validates whether the AI model exists and is active.
+#         If the model is valid, it creates a new active version associated with that model.
 
-        Args:
-            model_id (str): The unique identifier of the AI model.
-            payload (Dict[str, Any]): Request body containing model version details.
+#         Args:
+#             model_id (str): The unique identifier of the AI model.
+#             payload (Dict[str, Any]): Request body containing model version details.
 
-        Request Body:
-            - version_name (str): Name of the new model version
+#         Request Body:
+#             - version_name (str): Name of the new model version
 
-        Returns:
-            dict: A response object containing:
-                - status (int): HTTP status code
-                - message (str): Success message
-                - data (dict): Newly created model version details
+#         Returns:
+#             dict: A response object containing:
+#                 - status (int): HTTP status code
+#                 - message (str): Success message
+#                 - data (dict): Newly created model version details
 
-        Response Includes:
-            - model_version_id
-            - version_name
+#         Response Includes:
+#             - model_version_id
+#             - version_name
 
-        Raises:
-            HTTPException:
-                - 400 Bad Request: If the model does not exist or version name is invalid.
-    """
-    try:
-        return new_model_version(model_id, payload)
-    except ValueError as e:
-        logger.warning("[new_model_version] Error: %s", str(e), exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "status": "error",
-                "message": str(e),
-            })
+#         Raises:
+#             HTTPException:
+#                 - 400 Bad Request: If the model does not exist or version name is invalid.
+#     """
+#     try:
+#         return new_model_version(model_id, payload)
+#     except ValueError as e:
+#         logger.warning("[new_model_version] Error: %s", str(e), exc_info=True)
+#         raise HTTPException(
+#             status_code=status.HTTP_400_BAD_REQUEST,
+#             detail={
+#                 "status": "error",
+#                 "message": str(e),
+#             })
 
 @router.post("/model_config/")
 # def get_model_config(payload: Dict[str, Any], admin_id):

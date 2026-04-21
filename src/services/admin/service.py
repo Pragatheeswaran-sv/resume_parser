@@ -1008,27 +1008,49 @@ def create_model(payload):
         model_name = (payload.get("model_name") or "").strip()
 
         if not model_name:
-            raise ValueError("Model name must be provided")
+            raise ValueError("Provided model name")
 
         existing_model = (
             db.query(AiModel)
             .filter(AiModel.model_name == model_name, AiModel.is_active == True)
             .first()
         )
-        if existing_model:
-            raise ValueError("Model with this name already exists")
+        if not existing_model:
+            new_model = AiModel(model_name=model_name)
+            db.add(new_model)
+            db.commit()
+            db.refresh(new_model)
+            model_id = new_model.ai_model_id
+            model_name = new_model.model_name
+        else:
+            model_id = existing_model.ai_model_id
+            model_name = existing_model.model_name
 
-        new_model = AiModel(model_name=model_name)
-        db.add(new_model)
+        version_name = payload.get("version_name") if payload.get("version_name") else None
+        
+        version = db.query(AiModelversion).filter_by(version_name = version_name, is_active = True).first()
+        if version:
+            raise ValueError("Model version with this name already exists")
+        
+        if not version_name or version_name.strip() == "" or version_name == None:
+            raise ValueError("Provided version name")
+        
+        new_version = AiModelversion(
+            ai_model_id = model_id,
+            version_name = version_name,
+        )
+        db.add(new_version)
         db.commit()
-        db.refresh(new_model)
+        db.refresh(new_version)
 
         return {
             "status": status.HTTP_201_CREATED,
             "message": "Model created successfully",
             "data": {
-                "model_id": str(new_model.ai_model_id),
-                "model_name": new_model.model_name,
+                "model_id": str(model_id),
+                "model_name": model_name,
+                "model_version_id": str(new_version.ai_model_version_id),
+                "version_name": new_version.version_name,
             },
         }
     except Exception as e:
@@ -1065,39 +1087,39 @@ def model_version(model_id):
     finally:
         db.close()
 
-def new_model_version(model_id, payload):
-    try:
-        db = SessionLocal()
-        model_id = str(model_id)
-        version_name = payload.get("version_name") if payload.get("version_name") else None
+# def new_model_version(model_id, payload):
+#     try:
+#         db = SessionLocal()
+#         model_id = str(model_id)
+#         version_name = payload.get("version_name") if payload.get("version_name") else None
         
-        model = db.query(AiModel).filter_by(ai_model_id=model_id, is_active=True).first()
-        if not model:
-            raise ValueError("No model found for the given model ID")
+#         model = db.query(AiModel).filter_by(ai_model_id=model_id, is_active=True).first()
+#         if not model:
+#             raise ValueError("No model found for the given model ID")
         
-        if not version_name or version_name.strip() == "" or version_name == None:
-            raise ValueError("Version name must be provided")
+#         if not version_name or version_name.strip() == "" or version_name == None:
+#             raise ValueError("Version name must be provided")
         
-        new_version = AiModelversion(
-            ai_model_id = model_id,
-            version_name = version_name,
-        )
-        db.add(new_version)
-        db.commit()
-        db.refresh(new_version)
-        return {
-            "status": status.HTTP_201_CREATED,
-            "message": "Model version created successfully",
-            "data": {
-                "model_version_id": str(new_version.ai_model_version_id),
-                "version_name": new_version.version_name,
-            }
-        }             
-    except Exception as e:
-        logger.warning("[new_model_version] Error: %s", str(e), exc_info=True)
-        raise ValueError(str(e))  
-    finally:
-        db.close()  
+#         new_version = AiModelversion(
+#             ai_model_id = model_id,
+#             version_name = version_name,
+#         )
+#         db.add(new_version)
+#         db.commit()
+#         db.refresh(new_version)
+#         return {
+#             "status": status.HTTP_201_CREATED,
+#             "message": "Model version created successfully",
+#             "data": {
+#                 "model_version_id": str(new_version.ai_model_version_id),
+#                 "version_name": new_version.version_name,
+#             }
+#         }             
+#     except Exception as e:
+#         logger.warning("[new_model_version] Error: %s", str(e), exc_info=True)
+#         raise ValueError(str(e))  
+#     finally:
+#         db.close()  
 
 # def model_config(payload, admin_id):
 def model_config(payload, admin_id):
