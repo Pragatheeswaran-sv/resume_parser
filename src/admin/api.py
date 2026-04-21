@@ -473,7 +473,7 @@ def list_models() :
 def add_model(payload: CreateModelValidate):
     """Create a new model with the provided ``model_name``."""
     try:
-        return create_model(payload)
+        return create_model(payload.model_dump())
     except ValueError as e:
         logger.warning("[create_model] Error: %s", str(e), exc_info=True)
         raise HTTPException(
