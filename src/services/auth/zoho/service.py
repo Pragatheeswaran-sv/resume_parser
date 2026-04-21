@@ -541,12 +541,8 @@ def process_oauth_zoho_token(token_data: Dict[str, str],db=SessionLocal(), timeo
             )
             response.raise_for_status()
             tokens = response.json()
-<<<<<<< zohoSsoChanges
-            logger.info(f"NAV----> Received Zoho token response from {token_url}: {tokens}")
-=======
 
-            logger.info(f"NAV---->Received response from {token_url}: {tokens}")
->>>>>>> develop
+            logger.info(f"NAV----> Received Zoho token response from {token_url}: {tokens}")
             if tokens.get("access_token") or tokens.get("api_domain"):
                 logger.info(
                     "Zoho OAuth token retrieved successfully from %s",
@@ -570,11 +566,7 @@ def process_oauth_zoho_token(token_data: Dict[str, str],db=SessionLocal(), timeo
 def zoho_callback(code: str, db=SessionLocal()):
     try:
         logger.info(f"NAV----> Received Zoho callback with code: {code}")
-<<<<<<< zohoSsoChanges
-        
-=======
 
->>>>>>> develop
         redirect_url = "http://localhost:3000/login"
         token_data = {
             "code": code,
@@ -656,21 +648,14 @@ def zoho_callback(code: str, db=SessionLocal()):
 
         db.commit()
 
-<<<<<<< zohoSsoChanges
         access_token = create_access_token({"email": email, "sub": email})
-=======
-        access_token = create_access_token({"mail": email})
->>>>>>> develop
 
         valid_mail = db.query(Users).filter(
             Users.is_blocked == False,
             Users.email_address == email,
             Users.is_active == True
         ).first()
-<<<<<<< zohoSsoChanges
 
-=======
->>>>>>> develop
         if not valid_mail:
             logger.warning(f"Email {email} is not authorized to connect")
             raise HTTPException(status_code=status.HTTP_200_OK, detail={"status": status.HTTP_401_UNAUTHORIZED, "message": "Email not authorized"})
@@ -685,15 +670,13 @@ def zoho_callback(code: str, db=SessionLocal()):
                     "is_admin": False,
                 }
         }
-<<<<<<< zohoSsoChanges
-=======
+
         # return {
         #     "status": "success",
         #     "email": email,
         #     "message": "Zoho OAuth connected successfully"
         # }
 
->>>>>>> develop
     except Exception as e:
         db.rollback()
         raise HTTPException(
