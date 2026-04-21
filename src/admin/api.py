@@ -22,6 +22,7 @@ from src.services.admin.service import (
     admin_check,
     delete_user,
     get_extraction_config,
+    get_user,
     get_user_by_id,
     is_within_extraction_window,
     list_email_accounts,
@@ -180,6 +181,18 @@ def new_user(payload: AuthorizedUserCreate, _admin=Depends(get_current_admin)):
             detail={"status": "error", "message": str(e)},
         )
 
+@router.get('/user_profile')
+def get_user_profile(_user = Depends(get_current_user)):
+    try:
+        user_id = _user.user_id
+        return get_user(user_id)
+    except ValueError as e:
+        logger.warning("[particular_user] Error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"status": "error", "message": str(e)},
+        )
+
 @router.get('/particular_user')
 def get_particular_user(user_id, _admin=Depends(get_current_admin)):
     try:
@@ -191,8 +204,6 @@ def get_particular_user(user_id, _admin=Depends(get_current_admin)):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"status": "error", "message": str(e)},
         )
-
-
 
 @router.patch("/delete_user/")
 def delete_auth(user_id, _admin=Depends(get_current_admin)):

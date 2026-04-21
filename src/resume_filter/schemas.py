@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 from typing import Any, Dict, List, Optional
 
 
-ALLOWED_SORT_FIELDS = {"name", "total_experience", "created_at", "updated_at", "location", "year_of_passed", "email_address", "percentage"}
+ALLOWED_SORT_FIELDS = {"name", "total_experience", "created_at", "updated_at", "location", "year_of_passed", "email", "percentage"}
 ALLOWED_SORT_ORDERS = {"asc", "desc"}
 MAX_PAGE_SIZE = 100
 MIN_YEAR = 1950
