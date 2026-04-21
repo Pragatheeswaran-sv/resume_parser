@@ -148,22 +148,19 @@ def sso_login(body: SSOLoginRequest):
             detail={"status": "error", "message": str(e)},
         )
 
-
 # ── Legacy auth-mail CRUD (kept for backward-compat) ────────────────────
 
 @router.get("/list_users")
-def get_users(page, page_size):
+def get_users(page, page_size, sort_by = None, sort_order = None):
     """List all active authorized email accounts."""
     try:
-        return list_mail(page, page_size)
+        return list_mail(page, page_size, sort_by, sort_order)
     except ValueError as e:
-        logger.warning("[list_users] Error: %s", str(e), exc_info=True)
         logger.warning("[list_users] Error: %s", str(e), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"status": "error", "message": str(e)},
         )
-
 
 @router.post("/create_user")
 def new_user(payload: AuthorizedUserCreate, _admin=Depends(get_current_admin)):
@@ -314,7 +311,7 @@ def get_config(_admin=Depends(get_current_admin)):
         )
 
 
-@router.put("/admin/extraction/config")
+@router.put("/admin/extraction/update_config")
 def update_config(
     body: ExtractionConfigUpdate,
     _admin=Depends(get_current_admin),
@@ -476,7 +473,7 @@ def list_models() :
 def add_model(payload: CreateModelValidate):
     """Create a new model with the provided ``model_name``."""
     try:
-        return create_model(payload.model_dump())
+        return create_model(payload)
     except ValueError as e:
         logger.warning("[create_model] Error: %s", str(e), exc_info=True)
         raise HTTPException(
@@ -632,7 +629,7 @@ def get_model_config(payload: Dict[str, Any], _admin=Depends(get_current_admin))
     
 @router.get("/get_model_config/")
 # def fetch_model_config(admin_id):
-def fetch_model_config(page, page_size, _admin=Depends(get_current_admin)):
+def fetch_model_config(page, page_size, sort_by = None, sort_order = None, _admin=Depends(get_current_admin)):
     """
         Fetch Model Configuration
 
@@ -667,7 +664,7 @@ def fetch_model_config(page, page_size, _admin=Depends(get_current_admin)):
     """
     try:
         admin_id = _admin.admin_id
-        return get_model(page, page_size, admin_id)
+        return get_model(page, page_size, sort_by, sort_order, admin_id)
     except ValueError as e:
         logger.warning("[fetch_model_config] Error: %s", str(e), exc_info=True)
         raise HTTPException(
