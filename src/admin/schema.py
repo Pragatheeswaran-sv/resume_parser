@@ -123,6 +123,9 @@ class Validate_new_job(BaseModel):
     schedule_type: str
     weekday: str
 
+class CreateModelValidate(BaseModel):
+    model_name : str
+    version_name : str 
 
 # ── Generic response helpers ─────────────────────────────────────────────
 
