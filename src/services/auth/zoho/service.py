@@ -17,6 +17,8 @@ from urllib.parse import urlparse
 from src.admin.models import Users
 from src.auth.jwt import create_access_token
 import base64
+from src.auth.jwt import create_access_token
+from src.admin.models import Users
 
 
 load_dotenv()
@@ -531,7 +533,7 @@ def process_oauth_zoho_token(token_data: Dict[str, str],db=SessionLocal(), timeo
 
     for token_url in ZOHO_OAUTH_ENDPOINTS:
         try:
-            logger.debug("Requesting Zoho OAuth token from %s", token_url)
+            logger.info(f"NAV---->Requesting Zoho OAuth token from {token_url}")
             response = requests.post(
                 token_url,
                 data=token_data,
@@ -539,7 +541,12 @@ def process_oauth_zoho_token(token_data: Dict[str, str],db=SessionLocal(), timeo
             )
             response.raise_for_status()
             tokens = response.json()
+<<<<<<< zohoSsoChanges
             logger.info(f"NAV----> Received Zoho token response from {token_url}: {tokens}")
+=======
+
+            logger.info(f"NAV---->Received response from {token_url}: {tokens}")
+>>>>>>> develop
             if tokens.get("access_token") or tokens.get("api_domain"):
                 logger.info(
                     "Zoho OAuth token retrieved successfully from %s",
@@ -563,7 +570,11 @@ def process_oauth_zoho_token(token_data: Dict[str, str],db=SessionLocal(), timeo
 def zoho_callback(code: str, db=SessionLocal()):
     try:
         logger.info(f"NAV----> Received Zoho callback with code: {code}")
+<<<<<<< zohoSsoChanges
         
+=======
+
+>>>>>>> develop
         redirect_url = "http://localhost:3000/login"
         token_data = {
             "code": code,
@@ -601,6 +612,20 @@ def zoho_callback(code: str, db=SessionLocal()):
         email = accounts_data["data"][0]["mailboxAddress"]
         logger.info(f"NAV----> Zoho account email: {email}")
 
+        source = db.query(OauthSource).filter(
+            OauthSource.source_name == "zoho"
+        ).first()
+
+        if not source:
+            logger.info("Creating new Zoho source entry")
+            source = OauthSource(
+                source_name="zoho",
+                created_by=email
+            )
+            db.add(source)
+            db.commit()
+            db.refresh(source)
+
         existing_cred = db.query(OauthCredentials).filter(
             OauthCredentials.email == email
         ).first()
@@ -623,21 +648,29 @@ def zoho_callback(code: str, db=SessionLocal()):
                 access_token=access_token,
                 refresh_token=refresh_token,
                 expires_in=expires_in,
-                api_domain=api_domain,   # 🔑 STORE THIS
+                source_id=source.source_id,
+                api_domain=api_domain,
                 created_by=email
             )
             db.add(new_cred)
 
         db.commit()
 
+<<<<<<< zohoSsoChanges
         access_token = create_access_token({"email": email, "sub": email})
+=======
+        access_token = create_access_token({"mail": email})
+>>>>>>> develop
 
         valid_mail = db.query(Users).filter(
             Users.is_blocked == False,
             Users.email_address == email,
             Users.is_active == True
         ).first()
+<<<<<<< zohoSsoChanges
 
+=======
+>>>>>>> develop
         if not valid_mail:
             logger.warning(f"Email {email} is not authorized to connect")
             raise HTTPException(status_code=status.HTTP_200_OK, detail={"status": status.HTTP_401_UNAUTHORIZED, "message": "Email not authorized"})
@@ -652,6 +685,15 @@ def zoho_callback(code: str, db=SessionLocal()):
                     "is_admin": False,
                 }
         }
+<<<<<<< zohoSsoChanges
+=======
+        # return {
+        #     "status": "success",
+        #     "email": email,
+        #     "message": "Zoho OAuth connected successfully"
+        # }
+
+>>>>>>> develop
     except Exception as e:
         db.rollback()
         raise HTTPException(

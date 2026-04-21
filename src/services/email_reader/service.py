@@ -51,7 +51,8 @@ def save_attachment(part, uid):
     path = os.path.join(attachment_dir, unique_name)
     with open(path, "wb") as f:
         f.write(part.get_payload(decode=True))
-
+    size = os.path.getsize(path)
+    logger.info(f'{path} saved in attachment with size of {size}')
     return unique_name, path
 
 def fetch_emails() -> dict:
