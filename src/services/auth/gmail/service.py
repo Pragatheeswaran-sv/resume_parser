@@ -182,7 +182,7 @@ def gmail_callback(code: str, db = SessionLocal()) -> dict:
 
         db.commit()
         logger.info(f"NAV----> Credentials stored for {email}, expires at {expires_at.isoformat()}")
-        access_token = create_access_token({"mail": email})
+        access_token = create_access_token({"email": email, "sub": email})
         logger.info(f"NAV----> Access token created for {email}")
         valid_mail = db.query(Users).filter(
             Users.email_address == email,
@@ -493,6 +493,118 @@ def fetch_emails_gmail(email_id: str) -> dict:
 #     return {"message": "Emails processed", "processed_count": len(messages)}
 
 
+<<<<<<< zohoSsoChanges
+def zoho_callback(code: str, db=SessionLocal()) -> dict:
+    try:
+        logger.info("Received Zoho auth code")
+        token_url = "https://accounts.zoho.in/oauth/v2/token"
+
+        token_data = {
+            "code": code,
+            "client_id": os.getenv("ZOHO_CLIENT_ID"),
+            "client_secret": os.getenv("ZOHO_CLIENT_SECRET"),
+            "redirect_uri": os.getenv("ZOHO_REDIRECT_URI"),
+            "grant_type": "authorization_code",
+        }
+
+        token_res = requests.post(token_url, data=token_data)
+        println("test123", token_res)
+        token_res.raise_for_status()
+        tokens = token_res.json()
+        println("test123", tokens)
+
+      
+        access_token = tokens.get("access_token")
+        refresh_token = tokens.get("refresh_token")
+        scope = tokens.get("scope")
+        logger.info(f"NAV----> Zoho access token: {access_token}")
+        logger.info(f"NAV----> refresh token: {refresh_token}")
+        logger.info(f"NAV----> scope: {scope}")
+        expires_in = tokens.get("expires_in")
+
+        if not access_token:
+            logger.error(f"Zoho token response invalid: {tokens}")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"status": "error", "message": "Failed to get access token"})
+
+        # 🔹 Step 2: Get user email
+        # userinfo_res = requests.get(
+        #     "https://accounts.zoho.in/oauth/user/info",
+        #     headers={"Authorization": f"Zoho-oauthtoken {access_token}"}
+        # )
+        # userinfo_res.raise_for_status()
+
+        # user_info = userinfo_res.json()
+        # email = user_info.get("Email")
+        accounts_res = requests.get(
+            "https://mail.zoho.in/api/accounts",
+            headers={"Authorization": f"Zoho-oauthtoken {access_token}"}
+        )
+        accounts_res.raise_for_status()
+
+        accounts_data = accounts_res.json()
+
+        email = accounts_data["data"][0]["mailboxAddress"]
+
+        if not email:
+            logger.error(f"Zoho user info invalid: {accounts_data}")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"status": "error", "message": "Unable to fetch user email"})
+
+        logger.info(f"Zoho OAuth success for email: {email}")
+        source = db.query(OauthSource).filter(
+            OauthSource.source_name == "zoho"
+        ).first()
+
+        if not source:
+            logger.info("Creating new Zoho source entry")
+            source = OauthSource(
+                source_name="zoho",
+                created_by=email
+            )
+            db.add(source)
+            db.commit()
+            db.refresh(source)
+
+        existing_cred = db.query(OauthCredentials).filter(
+            OauthCredentials.email == email,
+            OauthCredentials.source_id == source.source_id
+        ).first()
+
+        if existing_cred:
+            logger.info(f"Updating Zoho credentials for {email}")
+
+            existing_cred.access_token = access_token
+            if refresh_token:
+                existing_cred.refresh_token = refresh_token
+
+            existing_cred.expires_in = expires_in
+            existing_cred.updated_by = email
+
+        else:
+            logger.info(f"Creating new Zoho credentials for {email}")
+
+            new_cred = OauthCredentials(
+                email=email,
+                access_token=access_token,
+                refresh_token=refresh_token,
+                expires_in=expires_in,
+                source_id=source.source_id,
+                created_by=email
+            )
+            db.add(new_cred)
+
+        db.commit()
+
+        access_token = create_access_token({"mail": email})
+
+        valid_mail = db.query(Users).filter(
+            Users.is_blocked == False,
+            Users.email_address == email,
+            Users.is_active == True
+        ).first()
+        if not valid_mail:
+            logger.warning(f"Email {email} is not authorized to connect")
+            raise HTTPException(status_code=status.HTTP_200_OK, detail={"status": status.HTTP_401_UNAUTHORIZED, "message": "Email not authorized"})
+=======
 # def zoho_callback(code: str, db=SessionLocal()) -> dict:
     # try:
     #     logger.info("Received Zoho auth code")
@@ -601,6 +713,7 @@ def fetch_emails_gmail(email_id: str) -> dict:
     #     if not valid_mail:
     #         logger.warning(f"Email {email} is not authorized to connect")
     #         raise HTTPException(status_code=status.HTTP_200_OK, detail={"status": status.HTTP_401_UNAUTHORIZED, "message": "Email not authorized"})
+>>>>>>> develop
         
     #     return {
     #         "status": status.HTTP_200_OK,
