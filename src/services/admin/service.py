@@ -486,6 +486,7 @@ def delete_user(user_id: str, admin_id) -> Dict[str, Any]:
         users = session.query(Users).filter_by(user_id=user_id, is_active = True).first()
         if not users:
             raise Exception("User not found")
+        users.is_blocked = True
         users.is_active = False
         session.commit()
         return {
