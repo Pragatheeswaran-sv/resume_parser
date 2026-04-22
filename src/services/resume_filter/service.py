@@ -17,7 +17,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from db.connection import SessionLocal
 from src.resume_filter.models import Resume
-from sqlalchemy import JSON, select, and_, cast, String, text, func, or_
+from sqlalchemy import JSON, Float, Integer, select, and_, cast, String, text, func, or_
 from sqlalchemy.orm import aliased, joinedload
 from src.email_reader.models import EmailLogs, Attachment
 from src.candidate.models import (
@@ -139,7 +139,7 @@ def save_resumes_to_db(resumes):
                             db.add(skill)
                             db.flush()
                             logger.info("new skills added to db")
-                        is_skill = db.query(CandidateSkills).filter(CandidateSkills.skill_id == skill.skill_id).first()
+                        is_skill = db.query(CandidateSkills).filter(CandidateSkills.candidate_id == candidate.candidate_id ,CandidateSkills.skill_id == skill.skill_id).first()
                         
                         if not is_skill:
                             candidate_skill = CandidateSkills(
@@ -149,8 +149,8 @@ def save_resumes_to_db(resumes):
                             )
                             db.add(candidate_skill)
                             logger.info("candidate skills added to db")
-
-                        logger.info('candidate skill already exists')
+                        else:
+                            logger.info('candidate skill already exists')
             # Add education from new structure (objects with qualification, institution, percentage, passout_year)
             education_list = info.get("education", [])
             logger.info(f' the education {education_list}...')
@@ -188,7 +188,7 @@ def save_resumes_to_db(resumes):
                                 percentage_val = float(percentage) if percentage else None
                             except (ValueError, TypeError):
                                 percentage_val = None
-                            is_education = db.query(CandidateEducation).filter(CandidateEducation.education_id == education_type.education_id).first()
+                            is_education = db.query(CandidateEducation).filter(CandidateEducation.candidate_id == candidate.candidate_id, CandidateEducation.education_id == education_type.education_id).first()
                             if not is_education:
                                 candidate_edu = CandidateEducation(
                                     candidate_id=candidate.candidate_id,
@@ -200,8 +200,8 @@ def save_resumes_to_db(resumes):
                                 )
                                 db.add(candidate_edu)
                                 logger.info("candidate education added to db")
-
-                            logger.info("candidate education already exists")
+                            else:
+                                logger.info("candidate education already exists")
             
             # Add work experience from new structure (objects with company_name, role, start_date, end_date)
             work_experience_list = info.get("work_experience", [])
@@ -272,7 +272,7 @@ def save_resumes_to_db(resumes):
                             except (ValueError, TypeError):
                                 pass
                             
-                            is_work_exp = db.query(WorkExperience).filter(WorkExperience.company_id == company.company_id, WorkExperience.role_id == role_obj.role_id).first()
+                            is_work_exp = db.query(WorkExperience).filter(WorkExperience.candidate_id == candidate.candidate_id, WorkExperience.company_id == company.company_id, WorkExperience.role_id == role_obj.role_id).first()
                             if not is_work_exp:
                             # Create work experience record
                                 work_exp = WorkExperience(
@@ -285,8 +285,8 @@ def save_resumes_to_db(resumes):
                                 )
                                 db.add(work_exp)
                                 logger.info("candidate experience added to db")
-                            
-                            logger.info("candidate experience already exists")
+                            else:
+                                logger.info("candidate experience already exists")
                                       
             # Create Resume record linking to candidate and attachment
             is_resume_record = db.query(Resume).filter(Resume.candidate_id == candidate.candidate_id, Resume.candidate_role == extracted_role)
@@ -528,19 +528,10 @@ def extract_basic_info(resume_text):
 
         4. total_experience must be a NUMBER (years).
 
-        5. skills must be SHORT keywords (e.g., "Python", "SQL", "Communication").
+        5. SKILLS EXTRACTION (STRICT): If a skill entry contains separators like ":", "-", "–", "—", or "|", discard everything before the first separator and extract only the content after it, then split by "," and return each item as an individual skill (e.g., "Cloud: AWS, GCP", "Cloud - AWS, GCP" → ["AWS","GCP"]); if no separator is present, extract skills normally as individual keywords; always return a flat list with no prefixes, no grouping, no sentences, and no duplicates. 
         Do NOT return full sentences.
 
-        6. DATE NORMALIZATION (VERY IMPORTANT):
-        - Convert all dates to format:
-        YYYY-MM (e.g., 2016-06)
-        OR YYYY (e.g., 2016)
-        - Examples:
-        "June 2016" -> "2016-06"
-        "Feb 2017" -> "2017-02"
-        "2018" -> "2018"
-        - If only month/year given -> convert to YYYY-MM
-        - If invalid text like "Year 11" -> return ""
+        6. DATE NORMALIZATION (VERY IMPORTANT): Convert all dates to format YYYY-MM (e.g., 2016-06) OR YYYY (e.g., 2016); examples: "June 2016" -> "2016-06", "Feb 2017" -> "2017-02", "2018" -> "2018"; if only month/year given -> convert to YYYY-MM; if invalid text like "Year 11" -> return "".
 
         7. passout_year must be ONLY a YEAR (YYYY).
         - If not a valid year -> return ""
@@ -799,7 +790,6 @@ def search_resumes(filters: dict):
     import time as _time
     start_time = _time.time()
     logger.info("[search_resumes] Called with filters: %s", filters)
-
     if not filters or not isinstance(filters, dict):
         logger.warning("[search_resumes] Received empty or invalid filters dict")
         return [{"total_record": 0}]
@@ -864,8 +854,93 @@ def search_resumes(filters: dict):
             .group_by(WorkExperience.candidate_id)
             .subquery()
         )
-
         conditions = [Candidate.is_active == True]
+
+        name = filters.get("name")
+        if name:
+            conditions.append(Candidate.name.ilike(f"%{str(name).strip()}%"))
+
+        if filters.get("min_experience") not in (None, ""):
+            try:
+                conditions.append(Candidate.total_experience >= float(filters["min_experience"]))
+            except:
+                pass
+
+        if filters.get("max_experience") not in (None, ""):
+            try:
+                conditions.append(Candidate.total_experience <= float(filters["max_experience"]))
+            except:
+                pass
+
+        skills = filters.get("skills")
+        if isinstance(skills, list) and skills:
+            conditions.append(
+                Candidate.candidate_id.in_(
+                    db.query(CandidateSkills.candidate_id).filter(
+                        CandidateSkills.skill_id.in_(skills)
+                    )
+                )
+            )
+
+        companies = filters.get("companies")
+        if isinstance(companies, list) and companies:
+            company_ids = []
+            for comp in companies:
+                matched = db.query(Company).filter(
+                    Company.company_name.ilike(f"%{comp}%")
+                ).all()
+                company_ids.extend([c.company_id for c in matched])
+
+            if company_ids:
+                conditions.append(
+                    Candidate.candidate_id.in_(
+                        db.query(WorkExperience.candidate_id).filter(
+                            WorkExperience.company_id.in_(company_ids)
+                        )
+                    )
+                )
+
+        education = filters.get("education")
+        if isinstance(education, list) and education:
+            conditions.append(
+                Candidate.candidate_id.in_(
+                    db.query(CandidateEducation.candidate_id).filter(
+                        CandidateEducation.education_id.in_(education)
+                    )
+                )
+            )
+
+        year_conditions = []
+        if filters.get("passout_start_year") not in (None, ""):
+            try:
+                year_conditions.append(CandidateEducation.year_of_passed >= int(filters["passout_start_year"]))
+            except:
+                pass
+
+        if filters.get("passout_end_year") not in (None, ""):
+            try:
+                year_conditions.append(CandidateEducation.year_of_passed <= int(filters["passout_end_year"]))
+            except:
+                pass
+
+        if year_conditions:
+            conditions.append(
+                Candidate.candidate_id.in_(
+                    db.query(CandidateEducation.candidate_id).filter(and_(*year_conditions))
+                )
+            )
+
+        if filters.get("percentage") not in (None, ""):
+            try:
+                conditions.append(
+                    Candidate.candidate_id.in_(
+                        db.query(CandidateEducation.candidate_id).filter(
+                            CandidateEducation.percentage >= float(filters["percentage"])
+                        )
+                    )
+                )
+            except:
+                pass
 
         logger.info("[search_resumes] Total filter conditions built: %d", len(conditions))
 
@@ -896,39 +971,37 @@ def search_resumes(filters: dict):
             .filter(and_(*conditions))
         )
 
-        
-        sort_by = filters.get("sort_by")
-        sort_order = (filters.get("sort_order") or "asc").lower()
-
         sort_map = {
             "name": Candidate.name,
             "total_experience": Candidate.total_experience,
             "created_at": Candidate.created_at,
             "location": Candidate.location,
             "email": Candidate.email_address,
-            "year_of_passed": candidate_education.c.max_year_of_passed,
-            "percentage": candidate_education.c.max_percentage,
+            "year_of_passed": cast(candidate_education.c.max_year_of_passed, Integer),
+            "percentage": cast(candidate_education.c.max_percentage, Float),
         }
 
-        if sort_by and sort_by in sort_map:
-            sort_col = sort_map[sort_by]
-            query = query.order_by(
-                sort_col.desc() if sort_order == "desc" else sort_col.asc()
-            )
-            logger.debug("[search_resumes] Sorting by %s %s", sort_by, sort_order)
-        elif sort_by:
-            logger.warning("[search_resumes] Unknown sort_by field: '%s', ignoring", sort_by)
+        sort_by = filters.get("sort_by")
+        sort_order = (filters.get("sort_order") or "asc").lower()
 
-        
-        page = max(1, int(filters.get("page", 1) or 1))
-        page_size = max(1, min(100, int(filters.get("page_size", 20) or 20)))
-        offset = (page - 1) * page_size
+        if sort_by in sort_map:
+            col = sort_map[sort_by]
+            query = query.order_by(col.desc() if sort_order == "desc" else col.asc())
 
-        query = query.limit(page_size).offset(offset)
+        page = max(1, int(filters.get("page", 1)))
+        page_size = max(1, min(100, int(filters.get("page_size", 20))))
+        query = query.limit(page_size).offset((page - 1) * page_size)
+
         data = query.all()
-
         results = [row.candidate_info for row in data]
         results.append({"total_record": total_count})
+
+        logger.info(
+            "[search_resumes] Completed in %ss | returned %d candidates",
+            round(_time.time() - start_time, 3),
+            len(results) - 1
+        )
+        print('result-->', results)
         return results
 
     except Exception as e:
@@ -938,6 +1011,148 @@ def search_resumes(filters: dict):
         db.close()
 
 # def search_resumes(filters: dict):
+#     import time as _time
+#     start_time = _time.time()
+#     logger.info("[search_resumes] Called with filters: %s", filters)
+#     print('filtered=>',filters)
+#     if not filters or not isinstance(filters, dict):
+#         logger.warning("[search_resumes] Received empty or invalid filters dict")
+#         return [{"total_record": 0}]
+
+#     db = SessionLocal()
+#     try:
+#         candidate_education = (
+#             db.query(
+#                 CandidateEducation.candidate_id.label("candidate_id"),
+#                 func.json_agg(
+#                     func.json_build_object(
+#                         "education_id", Education.education_id,
+#                         "education", Education.education,
+#                         "institution", CandidateEducation.institution,
+#                         "percentage", CandidateEducation.percentage,
+#                         "year_of_passed", CandidateEducation.year_of_passed
+#                     )
+#                 ).label("education"),
+#                 func.max(CandidateEducation.year_of_passed).label("max_year_of_passed"),
+#                 func.max(CandidateEducation.percentage).label("max_percentage"),
+#             )
+#             .select_from(CandidateEducation)
+#             .join(Education, CandidateEducation.education_id == Education.education_id)
+#             .group_by(CandidateEducation.candidate_id)
+#             .subquery()
+#         )
+
+#         candidate_skills = (
+#             db.query(
+#                 CandidateSkills.candidate_id.label("candidate_id"),
+#                 func.json_agg(
+#                     func.json_build_object(
+#                         "skill_id", Skill.skill_id,
+#                         "skill", Skill.skill
+#                     )
+#                 ).label("skills")
+#             )
+#             .select_from(CandidateSkills)
+#             .join(Skill, CandidateSkills.skill_id == Skill.skill_id)
+#             .group_by(CandidateSkills.candidate_id)
+#             .subquery()
+#         )
+
+#         candidate_work_exp = (
+#             db.query(
+#                 WorkExperience.candidate_id.label("candidate_id"),
+#                 func.json_agg(
+#                     func.json_build_object(
+#                         "role_id", Role.role_id,
+#                         "role", Role.role,
+#                         "company_name", Company.company_name,
+#                         "company_location", Company.company_location,
+#                         "start_date", WorkExperience.start_date,
+#                         "end_date", WorkExperience.end_date,
+#                         "is_present", WorkExperience.is_active
+#                     )
+#                 ).label("work_experience")
+#             )
+#             .select_from(WorkExperience)
+#             .join(Role, WorkExperience.role_id == Role.role_id)
+#             .join(Company, WorkExperience.company_id == Company.company_id)
+#             .group_by(WorkExperience.candidate_id)
+#             .subquery()
+#         )
+
+#         conditions = [Candidate.is_active == True]
+
+#         logger.info("[search_resumes] Total filter conditions built: %d", len(conditions))
+
+#         total_count = (
+#             db.query(func.count(Candidate.candidate_id))
+#             .filter(and_(*conditions))
+#             .scalar()
+#         ) or 0
+
+#         query = (
+#             db.query(
+#                 func.json_build_object(
+#                     "candidate_id", Candidate.candidate_id,
+#                     "name", Candidate.name,
+#                     "email", Candidate.email_address,
+#                     "phone_number", Candidate.phone_number,
+#                     "location", Candidate.location,
+#                     "total_experience", Candidate.total_experience,
+#                     "education", func.coalesce(candidate_education.c.education, cast('[]', JSON)),
+#                     "skills", func.coalesce(candidate_skills.c.skills, cast('[]', JSON)),
+#                     "work_experience", func.coalesce(candidate_work_exp.c.work_experience, cast('[]', JSON))
+#                 ).label("candidate_info")
+#             )
+#             .select_from(Candidate)
+#             .outerjoin(candidate_education, Candidate.candidate_id == candidate_education.c.candidate_id)
+#             .outerjoin(candidate_skills, Candidate.candidate_id == candidate_skills.c.candidate_id)
+#             .outerjoin(candidate_work_exp, Candidate.candidate_id == candidate_work_exp.c.candidate_id)
+#             .filter(and_(*conditions))
+#         )
+
+        
+#         sort_by = filters.get("sort_by")
+#         sort_order = (filters.get("sort_order") or "asc").lower()
+
+#         sort_map = {
+#             "name": Candidate.name,
+#             "total_experience": Candidate.total_experience,
+#             "created_at": Candidate.created_at,
+#             "location": Candidate.location,
+#             "email": Candidate.email_address,
+#             "year_of_passed": candidate_education.c.max_year_of_passed,
+#             "percentage": candidate_education.c.max_percentage,
+#         }
+
+#         if sort_by and sort_by in sort_map:
+#             sort_col = sort_map[sort_by]
+#             query = query.order_by(
+#                 sort_col.desc() if sort_order == "desc" else sort_col.asc()
+#             )
+#             logger.debug("[search_resumes] Sorting by %s %s", sort_by, sort_order)
+#         elif sort_by:
+#             logger.warning("[search_resumes] Unknown sort_by field: '%s', ignoring", sort_by)
+
+        
+#         page = max(1, int(filters.get("page", 1) or 1))
+#         page_size = max(1, min(100, int(filters.get("page_size", 20) or 20)))
+#         offset = (page - 1) * page_size
+
+#         query = query.limit(page_size).offset(offset)
+#         data = query.all()
+
+#         results = [row.candidate_info for row in data]
+#         results.append({"total_record": total_count})
+#         return results
+
+#     except Exception as e:
+#         logger.error("[search_resumes] Unexpected error: %s", str(e), exc_info=True)
+#         raise
+#     finally:
+#         db.close()
+
+# # def search_resumes(filters: dict):
 #     """Search candidates based on dynamic filters using aggregation subqueries."""
 
 #     import time as _time

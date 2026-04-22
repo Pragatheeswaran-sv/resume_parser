@@ -120,7 +120,6 @@ def _execute_search(
     parsed["page_size"] = page_size
 
     rows = search_resumes(parsed)
-
     total_record = 0
     candidates = []
     if rows:

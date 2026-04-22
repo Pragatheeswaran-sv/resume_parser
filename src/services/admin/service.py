@@ -352,6 +352,32 @@ def list_mail(page, page_size, sort_by, sort_order) -> Dict[str, Any]:
     finally:
         session.close()
 
+def get_user(user_id):
+    db = SessionLocal()
+    try:
+        if not user_id:
+            raise ValueError("User ID not found")
+        
+        user  = db.query(Users).filter_by(user_id = user_id).first()
+        
+        return{
+            "status": status.HTTP_200_OK,
+            "message": "User profile retrieved successfully",
+            
+            "data" : {
+                'admin_name' : user.name,
+                'admin_email' : user.email_address,
+                'admin_phone_number' : user.phone_number,
+            }
+        }
+    except ValueError:
+        raise
+    except Exception as e:
+        logger.warning("[admin_check] Error: %s", str(e), exc_info=True)
+        raise ValueError(str(e))
+    finally:
+        db.close()
+
 def get_user_by_id(user_id, admin_id):
     try:
         db = SessionLocal()
