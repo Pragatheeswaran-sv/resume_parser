@@ -13,6 +13,7 @@ from typing import List, Tuple
 from sqlalchemy.orm import Session, load_only
 
 from db.connection import SessionLocal
+from src.resume_download.schemas import MultiDownloadRequest
 from src.email_reader.models import Attachment
 from src.resume_filter.models import Resume
 from src.candidate.models import Candidate
@@ -30,150 +31,150 @@ logger = logging.getLogger(__name__)
 # Resume fetching helpers
 # ---------------------------------------------------------------------------
 
-def get_resume_with_attachment(
-    resume_id: str,
-    db: Session,
-) -> Tuple[Resume, Attachment]:
-    """Load a resume and its linked attachment; raises ``LookupError`` if not found."""
-    resume = (
+# 
+
+import os
+import base64
+import mimetypes
+import zipfile
+from io import BytesIO
+from typing import List
+
+FILES_DIR = "attachments/"
+
+
+def get_file_path(filename: str) -> str:
+    path = os.path.join(FILES_DIR, filename)
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"{filename} not found")
+    return path
+
+
+# 🔹 1. Preview (Base64)
+def get_file_base64(resume_id) -> dict:
+    db = SessionLocal()
+    resume_details = db.query(Resume).filter_by(resume_id = resume_id).first()
+    attachment_id = resume_details.attachment_id
+
+    if not attachment_id:
+        raise Exception('attachment not found')
+    
+    Attachment_details = db.query(Attachment).filter_by(attachment_id = attachment_id).first()
+    filename = Attachment_details.file_name
+
+    if not filename:
+        raise Exception('file name not found')
+    path = get_file_path(filename)
+
+    with open(path, "rb") as f:
+        encoded = base64.b64encode(f.read()).decode()
+
+    mime_type, _ = mimetypes.guess_type(filename)
+    if mime_type != 'application/pdf':
+        mime_type = 'application/docx'
+        
+    return {
+        "name": filename,
+        "type": mime_type,
+        "content": encoded
+    }
+
+def get_file_for_download(filename: str) -> str:
+    return get_file_path(filename)
+
+# 🔹 3. Multiple files → ZIP
+# def create_zip(files: List[str]) -> BytesIO:
+#     zip_buffer = BytesIO()
+
+#     with zipfile.ZipFile(zip_buffer, "w") as zip_file:
+#         for file in files:
+#             path = get_file_path(file)
+#             zip_file.write(path, arcname=file)
+
+#     zip_buffer.seek(0)
+#     return zip_buffer
+
+
+import os
+from typing import List
+from sqlalchemy.orm import Session
+from fastapi import HTTPException
+from src.resume_filter.models import Resume, Attachment  # adjust import
+# from src.config import settings  # if you have base URL config
+
+
+BASE_DIR = "/app"   # inside docker
+UPLOAD_DIR = os.path.join(BASE_DIR, "attachments") # folder where files are stored
+
+
+def get_download_links(db: Session, resume_ids: List[str]) -> List[dict]:
+    # ✅ fetch resumes in one query
+    resumes = (
         db.query(Resume)
-        .options(load_only(
-            Resume.resume_id, Resume.attachment_id,
-            Resume.candidate_id, Resume.is_active,
-        ))
-        .filter(Resume.resume_id == resume_id, Resume.is_active.is_(True))
-        .first()
+        .filter(Resume.resume_id.in_(resume_ids))
+        .all()
     )
-    if not resume:
-        raise LookupError(f"Resume {resume_id} not found or inactive")
 
-    attachment = (
+    if not resumes:
+        raise HTTPException(status_code=404, detail="No resumes found")
+
+    attachment_ids = [r.attachment_id for r in resumes if r.attachment_id]
+
+    if not attachment_ids:
+        raise HTTPException(status_code=404, detail="No attachments found")
+
+    # ✅ fetch attachments
+    attachments = (
         db.query(Attachment)
-        .filter(Attachment.attachment_id == resume.attachment_id)
-        .first()
+        .filter(Attachment.attachment_id.in_(attachment_ids))
+        .all()
     )
-    if not attachment:
-        raise LookupError(
-            f"Attachment for resume {resume_id} not found in database"
-        )
-    return resume, attachment
 
+    if not attachments:
+        raise HTTPException(status_code=404, detail="No files found")
 
-def resolve_file_path(attachment: Attachment) -> str:
-    """Return the absolute on-disk path for an attachment, verifying it exists."""
-    file_path = os.path.join(ATTACHMENT_DIR, attachment.file_name)
-    if not os.path.isfile(file_path):
-        raise FileNotFoundError(
-            f"Resume file not found on disk: {attachment.file_name}"
-        )
-    return file_path
+    result = []
 
+    for att in attachments:
+        file_name = att.file_name
+        file_path = os.path.join(UPLOAD_DIR, file_name)
 
-def _candidate_display_name(db: Session, candidate_id) -> str:
-    """Best-effort candidate name for Content-Disposition filenames."""
-    if not candidate_id:
-        return "resume"
-    candidate = db.query(Candidate).filter(Candidate.candidate_id == candidate_id).first()
-    if candidate and candidate.name:
-        safe = "".join(
-            c if c.isalnum() or c in (" ", "-", "_") else "_"
-            for c in candidate.name
-        ).strip().replace(" ", "_")
-        return safe or "resume"
-    return "resume"
+        if not os.path.exists(file_path):
+            continue
 
+        result.append({
+            "file_name": file_name,
+            "download_url": f"/attachments/{file_name}"
+        })
+    
+    if not result:
+        raise HTTPException(status_code=404, detail="Files not found on server")
 
-# ---------------------------------------------------------------------------
-# Preview
-# ---------------------------------------------------------------------------
+    return result
 
-def preview_resume(resume_id: str) -> Tuple[str, str]:
-    """Return ``(file_path, content_type)`` suitable for streaming a PDF preview.
+# def create_zip_and_save(resume_ids) -> str:
+#     db = SessionLocal()
+#     files = []
+#     for resume_id in resume_ids:
+#         resume_details = db.query(Resume).filter_by(resume_id = resume_id).first()
+#         attachment_id = resume_details.attachment_id
 
-    DOCX files are converted to PDF on the fly (with caching).
-    """
-    db = SessionLocal()
-    try:
-        resume, attachment = get_resume_with_attachment(resume_id, db)
-        source_path = resolve_file_path(attachment)
-        file_type = detect_file_type(attachment.file_name)
+#         if not attachment_id:
+#             raise Exception('attachment not found')
+        
+#         Attachment_details = db.query(Attachment).filter_by(attachment_id = attachment_id).first()
+#         # return Attachment_details.file_name
+#         files.append(Attachment_details.file_name)
+#         return files
+#     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-        if file_type == "pdf":
-            return source_path, "application/pdf"
+#     # unique zip name
+#     zip_name = f"resumes_{datetime.utcnow().timestamp()}.zip"
+#     zip_path = os.path.join(DOWNLOAD_DIR, zip_name)
 
-        if file_type == "docx":
-            pdf_path = convert_docx_to_pdf(source_path)
-            return pdf_path, "application/pdf"
+#     with zipfile.ZipFile(zip_path, "w") as zipf:
+#         for file in files:
+#             file_path = get_file_path(file)
+#             zipf.write(file_path, arcname=file)
 
-        raise ValueError(
-            f"Unsupported file type for preview: {attachment.file_name}"
-        )
-    finally:
-        db.close()
-
-
-# ---------------------------------------------------------------------------
-# Download (single)
-# ---------------------------------------------------------------------------
-
-def download_resume(
-    resume_id: str,
-    fmt: str = "original",
-) -> Tuple[str, str, str]:
-    """Return ``(file_path, content_type, download_filename)`` for a single resume.
-
-    *fmt* is ``'original'`` (return as-is) or ``'pdf'`` (convert DOCX first).
-    """
-    db = SessionLocal()
-    try:
-        resume, attachment = get_resume_with_attachment(resume_id, db)
-        source_path = resolve_file_path(attachment)
-        file_type = detect_file_type(attachment.file_name)
-        display_name = _candidate_display_name(db, resume.candidate_id)
-
-        if fmt == "pdf" and file_type == "docx":
-            pdf_path = convert_docx_to_pdf(source_path)
-            return pdf_path, "application/pdf", f"{display_name}_resume.pdf"
-
-        ct = content_type_for(file_type)
-        ext = Path(attachment.file_name).suffix
-        return source_path, ct, f"{display_name}_resume{ext}"
-    finally:
-        db.close()
-
-
-# ---------------------------------------------------------------------------
-# Multi-download (URL list – no ZIP)
-# ---------------------------------------------------------------------------
-
-def multi_download_urls(
-    resume_ids: List[str],
-    fmt: str = "original",
-    base_url: str = "",
-) -> List[dict]:
-    """Validate that each resume exists and return per-resume download URLs.
-
-    The actual file transfer is handled by the single-download endpoint;
-    this helper only validates access and builds the URL list.
-    """
-    db = SessionLocal()
-    try:
-        results: List[dict] = []
-        for rid in resume_ids:
-            resume = (
-                db.query(Resume)
-                .options(load_only(Resume.resume_id, Resume.is_active))
-                .filter(Resume.resume_id == rid, Resume.is_active.is_(True))
-                .first()
-            )
-            if not resume:
-                logger.warning("Multi-download: resume %s not found, skipping", rid)
-                continue
-
-            path = f"/api/resumes/{rid}/download"
-            if fmt and fmt != "original":
-                path += f"?format={fmt}"
-            results.append({"resumeId": str(rid), "downloadUrl": f"{base_url}{path}"})
-        return results
-    finally:
-        db.close()
+#     return zip_name

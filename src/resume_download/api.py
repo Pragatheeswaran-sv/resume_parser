@@ -12,17 +12,20 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse
 
+from src.resume_download.schemas import MultiDownloadItem, MultiDownloadRequest
+from src.email_reader.models import Attachment
+from src.resume_filter.models import Resume
 from src.admin.dependencies import get_current_admin_or_user
-from src.resume_download.schemas import (
-    MultiDownloadRequest,
-    MultiDownloadResponse,
-    MultiDownloadItem,
-)
-from src.services.resume_download.service import (
-    download_resume,
-    multi_download_urls,
-    preview_resume,
-)
+# from src.resume_download.schemas import (
+#     MultiDownloadRequest,
+#     MultiDownloadResponse,
+#     MultiDownloadItem,
+# )
+# from src.services.resume_download.service import (
+#     download_resume,
+#     multi_download_urls,
+#     # preview_resume,
+# )
 
 logger = logging.getLogger(__name__)
 
@@ -36,130 +39,124 @@ router = APIRouter(
     },
 )
 
+# from fastapi import APIRouter, HTTPException
+# from fastapi.responses import FileResponse, StreamingResponse
+# from typing import List
 
-# ── 1. Preview ────────────────────────────────────────────────────────────
+# from src.services.resume_download.service import (
+#     # create_zip_and_save,
+#     get_file_base64,
+#     get_file_for_download,
+#     # create_zip
+# )
+from db.connection import SessionLocal
 
-@router.get("/resumes/{resume_id}/preview")
-def resume_preview(
-    resume_id: str,
-    _caller=Depends(get_current_admin_or_user),
+
+# 🔹 1. Preview API (Base64)
+# @router.get("/resume_preview/")
+# def preview_file(resume_id):
+#     try:
+#         return get_file_base64(resume_id)
+#     except FileNotFoundError as e:
+#         raise HTTPException(status_code=404, detail=str(e))
+
+# # 🔹 2. Single Download API
+# @router.get("/download/{filename}")
+# def download_file(filename: str):
+#     try:
+#         file_path = get_file_for_download(filename)
+#         return FileResponse(
+#             path=file_path,
+#             filename=filename,
+#             media_type="application/octet-stream"
+#         )
+#     except FileNotFoundError as e:
+#         raise HTTPException(status_code=404, detail=str(e))
+
+
+# 🔹 3. Multiple Download API (ZIP)
+# @router.post("/download-multiple")
+# def download_multiple(resume_ids : List):
+#     try:
+#         db = SessionLocal()
+#         files = []
+#         if not resume_ids:
+#             return Exception('resume IDs missing')
+        
+#         for resume_id in resume_ids:
+#             resume_details = db.query(Resume).filter_by(resume_id = resume_id).first()
+#             attachment_id = resume_details.attachment_id
+
+#             if not attachment_id:
+#                 raise Exception('attachment not found')
+            
+#             Attachment_details = db.query(Attachment).filter_by(attachment_id = attachment_id).first()
+#             files.append(Attachment_details.file_name)
+#         zip_buffer = create_zip(files)
+
+#         return StreamingResponse(
+#             zip_buffer,
+#             media_type="application/zip",
+#             headers={
+#                 "Content-Disposition": "attachment; filename=files.zip"
+#             }
+#         )
+#     except FileNotFoundError as e:
+#         raise HTTPException(status_code=404, detail=str(e))
+
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
+import os
+
+from db.connection import SessionLocal
+# from src.resume_download.schema import MultiDownloadRequest
+from src.services.resume_download.service import get_download_links
+
+
+BASE_DIR = "/app"   # inside docker
+UPLOAD_DIR = os.path.join(BASE_DIR, "attachments")
+
+# ✅ 1. Get download links (no zip)
+@router.post("/download-multiple")
+def download_multiple(
+    request: MultiDownloadRequest,
 ):
-    """Stream the resume as a PDF.  DOCX files are converted on the fly."""
-    try:
-        file_path, content_type = preview_resume(resume_id)
-        return FileResponse(
-            path=file_path,
-            media_type=content_type,
-            headers={"Content-Type": content_type},
-        )
-    except LookupError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"status": "error", "message": str(e)},
-        )
-    except (FileNotFoundError, ValueError) as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"status": "error", "message": str(e)},
-        )
-    except RuntimeError as e:
-        logger.error("Preview conversion failed: %s", e, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={
-                "status": "error",
-                "message": "Failed to convert resume for preview",
-            },
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("Unexpected error in preview: %s", e, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"status": "error", "message": "Failed to generate preview"},
-        )
+    db = SessionLocal()
+    files = get_download_links(db, request.resume_ids)
+
+    return {
+        "files": files
+    }
 
 
-# ── 2. Single download ───────────────────────────────────────────────────
+# ✅ 2. Actual download endpoint (auto download)
+@router.get("/download/{file_name}")
+def download_file(file_name: str):
+    file_path = os.path.join(UPLOAD_DIR, file_name)
 
-@router.get("/resumes/{resume_id}/download")
-def resume_download(
-    resume_id: str,
-    format: str = Query(default="original", pattern="^(pdf|original)$"),
-    _caller=Depends(get_current_admin_or_user),
-):
-    """Download the resume file in the requested format."""
-    try:
-        file_path, content_type, filename = download_resume(resume_id, format)
-        return FileResponse(
-            path=file_path,
-            media_type=content_type,
-            filename=filename,
-            headers={
-                "Content-Disposition": f'attachment; filename="{filename}"',
-            },
-        )
-    except LookupError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"status": "error", "message": str(e)},
-        )
-    except (FileNotFoundError, ValueError) as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"status": "error", "message": str(e)},
-        )
-    except RuntimeError as e:
-        logger.error("Download conversion failed: %s", e, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={
-                "status": "error",
-                "message": "Failed to convert resume for download",
-            },
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("Unexpected error in download: %s", e, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"status": "error", "message": "Failed to download resume"},
-        )
+    # 👇 ADD THIS LINE
+    print("Checking file:", file_path)
 
+    if not os.path.exists(file_path):
+        print("File NOT found!")  # optional but helpful
+        raise HTTPException(status_code=404, detail="File not found")
 
-# ── 3. Multi download (URL list, no ZIP) ─────────────────────────────────
+    return FileResponse(
+    path=file_path,
+    filename=file_name,
+    media_type="application/octet-stream",
+    headers={
+        "Content-Disposition": f"attachment; filename={file_name}"
+    }
+)
+# @router.post("/download-multiple")
+# def download_multiple(resume_ids: MultiDownloadRequest):
+#     try:
+#         zip_name = create_zip_and_save(resume_ids)
 
-@router.post("/resumes/multi-download", response_model=MultiDownloadResponse)
-def resume_multi_download(
-    request: Request,
-    body: MultiDownloadRequest,
-    _caller=Depends(get_current_admin_or_user),
-):
-    """Return per-resume download URLs for the frontend to trigger individually."""
-    base_url = str(request.base_url).rstrip("/")
-    try:
-        items = multi_download_urls(body.resumeIds, body.format, base_url)
-        if not items:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={
-                    "status": "error",
-                    "message": "No valid resumes found for the given IDs",
-                },
-            )
-        return MultiDownloadResponse(
-            data=[MultiDownloadItem(**item) for item in items],
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("Multi-download error: %s", e, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={
-                "status": "error",
-                "message": "Failed to prepare multi-download",
-            },
-        )
+#         return {
+#             "download_url": f"/downloads/{zip_name}"
+#         }
+
+#     except FileNotFoundError as e:
+#         raise HTTPException(status_code=404, detail=str(e))
