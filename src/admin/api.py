@@ -152,10 +152,13 @@ def sso_login(body: SSOLoginRequest):
 # ── Legacy auth-mail CRUD (kept for backward-compat) ────────────────────
 
 @router.get("/list_users")
-def get_users(page, page_size, sort_by = None, sort_order = None):
+def get_users(page, page_size, sort_by = None, sort_order = None, filter_column = None, filter_value = None, _admin = Depends(get_current_admin)):
     """List all active authorized email accounts."""
     try:
-        return list_mail(page, page_size, sort_by, sort_order)
+        admin = _admin.admin_id
+        if not admin:
+            raise ValueError("Admin authentication required")
+        return list_mail(page, page_size, sort_by, sort_order, filter_column, filter_value)
     except ValueError as e:
         logger.warning("[list_users] Error: %s", str(e), exc_info=True)
         raise HTTPException(
@@ -640,7 +643,7 @@ def get_model_config(payload: Dict[str, Any], _admin=Depends(get_current_admin))
     
 @router.get("/get_model_config/")
 # def fetch_model_config(admin_id):
-def fetch_model_config(page, page_size, sort_by = None, sort_order = None, _admin=Depends(get_current_admin)):
+def fetch_model_config(page, page_size, sort_by = None, sort_order = None, filter_column = None, filter_value = None, _admin=Depends(get_current_admin)):
     """
         Fetch Model Configuration
 
@@ -675,7 +678,7 @@ def fetch_model_config(page, page_size, sort_by = None, sort_order = None, _admi
     """
     try:
         admin_id = _admin.admin_id
-        return get_model(page, page_size, sort_by, sort_order, admin_id)
+        return get_model(page, page_size, sort_by, sort_order, filter_column, filter_value, admin_id)
     except ValueError as e:
         logger.warning("[fetch_model_config] Error: %s", str(e), exc_info=True)
         raise HTTPException(

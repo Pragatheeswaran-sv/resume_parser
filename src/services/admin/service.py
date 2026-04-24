@@ -15,7 +15,7 @@ import json
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from db.connection import SessionLocal
-from sqlalchemy import UUID, func, cast
+from sqlalchemy import UUID, String, func, cast, inspect
 from sqlalchemy.dialects.postgresql import JSON, aggregate_order_by
 from src.admin.models import Admin, Users, ExtractionConfig, ist_now
 from src.auth.jwt import create_access_token, hash_password, verify_password
@@ -294,7 +294,7 @@ def new_admin(payload: dict) -> Dict[str, Any]:
     finally:
         session.close()
 
-def list_mail(page, page_size, sort_by, sort_order) -> Dict[str, Any]:
+def list_mail(page, page_size, sort_by, sort_order, filter_column, filter_value) -> Dict[str, Any]:
     session = SessionLocal()
     try:
         page = int(page)
@@ -302,6 +302,19 @@ def list_mail(page, page_size, sort_by, sort_order) -> Dict[str, Any]:
         offset = (page - 1) * page_size
 
         query = session.query(Users).filter(Users.is_active == True)
+
+        filterable_columns = {
+            "name": Users.name,
+            "email": Users.email_address,
+            "phone_number": Users.phone_number,
+        }
+
+        if filter_column and filter_value:
+            if filter_column in filterable_columns:
+                column = filterable_columns[filter_column]
+                query = query.filter(column.ilike(f"%{filter_value}%"))
+            else:
+                raise ValueError(f"Invalid filter column: {filter_column}")
 
         sort_map = {
             "name": Users.name,
@@ -325,7 +338,6 @@ def list_mail(page, page_size, sort_by, sort_order) -> Dict[str, Any]:
         if offset >= total_users:
             raise ValueError("Invalid page number")
 
-       
         users = query.limit(page_size).offset(offset).all()
 
         return {
@@ -1214,7 +1226,7 @@ def model_config(payload, admin_id):
     finally:
         db.close()
     
-def get_model(page, page_size, sort_by, sort_order, admin_id):
+def get_model(page, page_size, sort_by, sort_order, filter_column, filter_value, admin_id):
     db = SessionLocal()
     try:
         page = int(page)
@@ -1244,6 +1256,33 @@ def get_model(page, page_size, sort_by, sort_order, admin_id):
             .join(AiModelversion, AiModelversion.ai_model_version_id == AiModelConfig.ai_model_version_id)
             .filter(AiModelConfig.admin_id == admin_id)
         )
+
+        filterable_columns = {
+            "model_config_id": AiModelConfig.ai_model_config_id,
+            "model_id": AiModelConfig.ai_model_id,
+            "model_name": AiModel.model_name,
+            "model_version_id": AiModelConfig.ai_model_version_id,
+            "model_version_name": AiModelversion.version_name,
+            "admin_id": AiModelConfig.admin_id,
+            "apikey": AiModelConfig.apikey,
+            "max_tokens": AiModelConfig.max_tokens,
+            "temperature": AiModelConfig.temparature,
+            "is_active": AiModelConfig.is_active
+        }
+
+        if filter_column and filter_value:
+            column = filterable_columns.get(filter_column)
+
+            if column is None:
+                raise ValueError(f"Invalid filter column: {filter_column}")
+
+            if hasattr(column.type, "python_type") and column.type.python_type == str:
+                query = query.filter(column.ilike(f"%{filter_value}%"))
+            else:
+                query = query.filter(cast(column, String).ilike(f"%{filter_value}%"))
+
+            if query.count() == 0:
+                raise ValueError(f"No config model found")
 
         sort_map = {
             "name": AiModel.model_name,
