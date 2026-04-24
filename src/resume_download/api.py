@@ -37,9 +37,9 @@ BASE_DIR = "/app"   # inside docker
 UPLOAD_DIR = os.path.join(BASE_DIR, "attachments")
 
 @router.get("/resume_preview/")
-def preview_file(resume_id : str = ""):
+def preview_file(resume_id : str | None = None):
     try:
-        if resume_id or resume_id.strip() == "" or resume_id == None:
+        if resume_id.strip() == "" or resume_id == None:
             raise HTTPException(status_code=400, detail="Resume ID is required")
 
         return get_file_base64(resume_id)
