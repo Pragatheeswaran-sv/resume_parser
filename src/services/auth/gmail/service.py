@@ -199,6 +199,7 @@ def gmail_callback(code: str, db = SessionLocal()) -> dict:
             "message": "OAuth connected successfully",
             "data":
                 {
+                    "name": valid_mail.name,
                     "email": email,
                     "access_token": access_token,
                     "is_admin": False,
