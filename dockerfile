@@ -19,6 +19,10 @@ RUN poetry install --no-root --no-interaction --no-ansi \
 # ---- Stage 2: Final runtime image ----
 FROM python:3.13-slim
 
+RUN apt-get update -qq \
+    && apt-get install -y -qq --no-install-recommends libreoffice-writer \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 COPY --from=builder /usr/local/lib/python3.13/site-packages /usr/local/lib/python3.13/site-packages

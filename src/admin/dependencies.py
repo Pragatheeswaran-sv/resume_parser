@@ -37,7 +37,8 @@ OPEN_PATHS = {
     "/api/oauth/login/zoho",
     "/api/auth/gmail/callback",
     "/api/auth/zoho/callback",
-    "/api/emails"
+    "/api/emails",
+    "/api/download/{file_name}"
 }
 
 ADMIN_PREFIX = "/api/admin"
