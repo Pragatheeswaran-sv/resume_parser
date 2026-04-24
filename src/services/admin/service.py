@@ -22,6 +22,7 @@ from src.auth.jwt import create_access_token, hash_password, verify_password
 from fastapi import status
 from src.admin.models import Admin, AiModel, AiModelConfig, AiModelversion, Users
 from fastapi import  status
+from src.utils.helper import encrypt_data, decrypt_data
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -307,6 +308,7 @@ def list_mail(page, page_size, sort_by, sort_order, filter_column, filter_value)
             "name": Users.name,
             "email": Users.email_address,
             "phone_number": Users.phone_number,
+            "is_blocked": Users.is_blocked,
         }
 
         if filter_column and filter_value:
@@ -315,6 +317,13 @@ def list_mail(page, page_size, sort_by, sort_order, filter_column, filter_value)
                 query = query.filter(column.ilike(f"%{filter_value}%"))
             else:
                 raise ValueError(f"Invalid filter column: {filter_column}")
+            
+        if query.count() == 0:
+            return{
+                "status": status.HTTP_200_OK,
+                "message": "No users found",
+                "data": [],
+            }
 
         sort_map = {
             "name": Users.name,
@@ -1111,7 +1120,6 @@ def model_version(model_id):
     try:
         db = SessionLocal()
         id = str(model_id)
-        # print(type())
         model = db.query(AiModel).filter_by(ai_model_id=id, is_active=True).all()
         if not model:
             raise ValueError("No model found for the given model ID")
@@ -1194,11 +1202,15 @@ def model_config(payload, admin_id):
         if duplicate_config:
             raise ValueError("Model with APIKEY is already exist")
         
+        encrtyped_key = encrypt_data(apikey)
+        if not encrtyped_key:
+            raise ValueError("Error encrypting API key")
+        
         new_config = AiModelConfig(
             ai_model_version_id = model_version_id,
             ai_model_id = ai_model_id,
             admin_id = admin_id,
-            apikey = apikey,
+            apikey = encrtyped_key,
             version = version,
             max_tokens = max_tokens,
             is_active = False
@@ -1216,7 +1228,7 @@ def model_config(payload, admin_id):
                 "model_version_id": str(new_config.ai_model_version_id),
                 "model_version_name": model_version.version_name,
                 "admin_id": str(new_config.admin_id),
-                "apikey": new_config.apikey,
+                "apikey": decrypt_data(new_config.apikey),
                 "max_tokens": new_config.max_tokens,
             }
         }             
@@ -1235,6 +1247,22 @@ def get_model(page, page_size, sort_by, sort_order, filter_column, filter_value,
 
         if not admin_id:
             raise ValueError("Admin ID must be provided")
+
+        def _mask_apikey(raw_apikey):
+            if not raw_apikey:
+                return None
+
+            normalized_key = decrypt_data(raw_apikey)
+            if normalized_key is None:
+                normalized_key = raw_apikey
+
+            normalized_key = str(normalized_key)
+            if not normalized_key:
+                return None
+
+            if len(normalized_key) <= 4:
+                return "*" * len(normalized_key)
+            return normalized_key[:2] + "******" + normalized_key[-2:]
 
         query = (
             db.query(
@@ -1282,16 +1310,20 @@ def get_model(page, page_size, sort_by, sort_order, filter_column, filter_value,
                 query = query.filter(cast(column, String).ilike(f"%{filter_value}%"))
 
             if query.count() == 0:
-                raise ValueError(f"No config model found")
+                return {
+                    "status": status.HTTP_200_OK,
+                    "message": "No config model found",
+                    "data": []
+                }
 
         sort_map = {
             "name": AiModel.model_name,
             "version_name": AiModelversion.version_name,
-            "api_key" : AiModelConfig.apikey,
+            "api_key": AiModelConfig.apikey,
             "max_tokens": AiModelConfig.max_tokens,
             "temperature": AiModelConfig.temparature,
             "created_at": AiModelConfig.created_at,
-            "updated_at" : AiModelConfig.updated_by,
+            "updated_at": AiModelConfig.updated_by,
         }
 
         if sort_by and sort_by in sort_map:
@@ -1311,11 +1343,27 @@ def get_model(page, page_size, sort_by, sort_order, filter_column, filter_value,
             raise ValueError("Invalid page number")
 
         model_config = query.limit(page_size).offset(offset).all()
+        data = []
+
+        for config in model_config:
+            masked_api_key = _mask_apikey(config[0]['apikey'])
+
+            data.append({
+                "config_id": config[0]['model_config_id'],
+                "model_id": config[0]['model_id'],
+                "model_name": config[0]['model_name'],
+                "version_id": config[0]['model_version_id'],
+                "version_name": config[0]['model_version_name'],
+                "apikey": masked_api_key,
+                "max_tokens": config[0]['max_tokens'],
+                "admin_id": config[0]['admin_id'],
+                "is_active": config[0]['is_active'],
+            })
 
         return {
             "status": status.HTTP_200_OK,
             "message": "Model config retrieved successfully",
-            "data": [row[0] for row in model_config],
+            "data": data,
             "total_record": total_record
         }
 
@@ -1328,7 +1376,6 @@ def get_model(page, page_size, sort_by, sort_order, filter_column, filter_value,
 def toggle_model(model_config_id, admin_id):
     try:
         db = SessionLocal()
-        # return admin_id
         if not admin_id:
             raise ValueError("Admin ID must be provided")
         
@@ -1348,27 +1395,41 @@ def toggle_model(model_config_id, admin_id):
         db.commit()
 
         active_model = db.query(AiModelConfig).all()
+        data = []
+        for active in active_model:
+            decrypted_key = None
+            masked_api_key = None
 
-        
+            if active.apikey:
+                try:
+                    decrypted_key = decrypt_data(active.apikey)
+                except Exception:
+                    decrypted_key = str(active.apikey)  # fallback (plain text or invalid)
 
+            if decrypted_key and isinstance(decrypted_key, str):
+                if len(decrypted_key) > 4:
+                    masked_api_key = (
+                        decrypted_key[:2] + "******" + decrypted_key[-2:]
+                    )
+                else:
+                    masked_api_key = "******"
+            else:
+                masked_api_key = None
+
+            data.append({
+                "config_id": active.ai_model_config_id,
+                "model_id": active.ai_model_id,
+                "version_id": active.ai_model_version_id,
+                "apikey": masked_api_key,
+                "max_tokens": active.max_tokens,
+                "admin_id": active.admin_id,
+                "is_active": active.is_active,
+            })
         return {
             "status": status.HTTP_200_OK,
             "message": "Model enabled successfully",
-            "data": [
-                {
-                    "config_id": active.ai_model_config_id,
-                    "model_id": active.ai_model_id,
-                    "version_id": active.ai_model_version_id,
-                    "apikey": active.apikey,
-                    "max_tokens": active.max_tokens,
-                    "admin_id": active.admin_id,
-                    "is_active": active.is_active,
-                }
-                for active in active_model
-            ]
-        }  
-
-
+            "data": data
+        }
     except Exception as e:
         logger.warning("[enable/disable model] Error: %s", str(e), exc_info=True)
         raise ValueError(str(e))
