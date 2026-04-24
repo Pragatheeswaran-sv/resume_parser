@@ -43,3 +43,6 @@ class MultiDownloadItem(BaseModel):
 class MultiDownloadResponse(BaseModel):
     status: str = "success"
     data: List[MultiDownloadItem]
+
+class previewResumeRequest(BaseModel):
+    resume_id: str

@@ -7,174 +7,150 @@ LibreOffice invocations.
 
 import logging
 import os
+import base64
+import mimetypes
+import zipfile
+from io import BytesIO
 from pathlib import Path
 from typing import List, Tuple
-
+from fastapi import HTTPException, status
 from sqlalchemy.orm import Session, load_only
-
 from db.connection import SessionLocal
 from src.resume_download.schemas import MultiDownloadRequest
 from src.email_reader.models import Attachment
 from src.resume_filter.models import Resume
 from src.candidate.models import Candidate
-from src.utils.file_conversion import (
-    ATTACHMENT_DIR,
-    convert_docx_to_pdf,
-    content_type_for,
-    detect_file_type,
-)
-
+from fastapi import HTTPException  
 logger = logging.getLogger(__name__)
 
-
-# ---------------------------------------------------------------------------
-# Resume fetching helpers
-# ---------------------------------------------------------------------------
-
-# 
-
-import os
-import base64
-import mimetypes
-import zipfile
-from io import BytesIO
-from typing import List
-
+BASE_DIR = "/app"  
+UPLOAD_DIR = os.path.join(BASE_DIR, "attachments")
 FILES_DIR = "attachments/"
 
 
 def get_file_path(filename: str) -> str:
-    path = os.path.join(FILES_DIR, filename)
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"{filename} not found")
-    return path
+    try:
+        path = os.path.join(FILES_DIR, filename)
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"{filename} not found")
+        return path
+    except FileNotFoundError as e:
+        raise e
+    except Exception as e:
+        logger.error(f"Error in get_file_path: {str(e)}")
+        raise Exception("An error occurred while retrieving the file path")
 
-
-# 🔹 1. Preview (Base64)
 def get_file_base64(resume_id) -> dict:
-    db = SessionLocal()
-    resume_details = db.query(Resume).filter_by(resume_id = resume_id).first()
-    attachment_id = resume_details.attachment_id
+    try:
+        db = SessionLocal()
+        resume_details = db.query(Resume).filter_by(resume_id = resume_id).first()
+        attachment_id = resume_details.attachment_id
 
-    if not attachment_id:
-        raise Exception('attachment not found')
-    
-    Attachment_details = db.query(Attachment).filter_by(attachment_id = attachment_id).first()
-    filename = Attachment_details.file_name
-
-    if not filename:
-        raise Exception('file name not found')
-    path = get_file_path(filename)
-
-    with open(path, "rb") as f:
-        encoded = base64.b64encode(f.read()).decode()
-
-    mime_type, _ = mimetypes.guess_type(filename)
-    if mime_type != 'application/pdf':
-        mime_type = 'application/docx'
+        if not attachment_id:
+            raise Exception('attachment not found')
         
-    return {
-        "name": filename,
-        "type": mime_type,
-        "content": encoded
-    }
+        Attachment_details = db.query(Attachment).filter_by(attachment_id = attachment_id).first()
+        filename = Attachment_details.file_name
+
+        if not filename:
+            raise Exception('file name not found')
+        path = get_file_path(filename)
+
+        with open(path, "rb") as f:
+            encoded = base64.b64encode(f.read()).decode()
+
+        mime_type, _ = mimetypes.guess_type(filename)
+        if mime_type != 'application/pdf':
+            mime_type = 'application/docx'
+            file_path = os.path.join(FILES_DIR, filename)
+
+            if not os.path.exists(file_path):
+                raise FileNotFoundError(f"{file_path} not found")
+            return {
+                "status": status.HTTP_200_OK,
+                "message": "File previewed successfully",
+                "data":
+                    {
+                        "name": filename,
+                        "type": mime_type,
+                        "content": file_path
+                    }
+                }
+
+        return {
+                "status": status.HTTP_200_OK,
+                "message": "File previewed successfully",
+                "data":
+                    {
+                        "name": filename,
+                        "type": mime_type,
+                        "content": encoded
+                    }
+                }
+    except FileNotFoundError as e:
+        raise e
+    except Exception as e:
+        logger.error(f"Error in get_file_base64: {str(e)}")
+        raise HTTPException(status_code=404, detail=str(e))
 
 def get_file_for_download(filename: str) -> str:
-    return get_file_path(filename)
-
-# 🔹 3. Multiple files → ZIP
-# def create_zip(files: List[str]) -> BytesIO:
-#     zip_buffer = BytesIO()
-
-#     with zipfile.ZipFile(zip_buffer, "w") as zip_file:
-#         for file in files:
-#             path = get_file_path(file)
-#             zip_file.write(path, arcname=file)
-
-#     zip_buffer.seek(0)
-#     return zip_buffer
-
-
-import os
-from typing import List
-from sqlalchemy.orm import Session
-from fastapi import HTTPException
-from src.resume_filter.models import Resume, Attachment  # adjust import
-# from src.config import settings  # if you have base URL config
-
-
-BASE_DIR = "/app"   # inside docker
-UPLOAD_DIR = os.path.join(BASE_DIR, "attachments") # folder where files are stored
-
+    try:
+        return get_file_path(filename)
+    except FileNotFoundError as e:
+        raise e
+    except Exception as e:
+        logger.error(f"Error in get_file_for_download: {str(e)}")
+        raise HTTPException(status_code=404, detail=str(e))
 
 def get_download_links(db: Session, resume_ids: List[str]) -> List[dict]:
-    # ✅ fetch resumes in one query
-    resumes = (
-        db.query(Resume)
-        .filter(Resume.resume_id.in_(resume_ids))
-        .all()
-    )
+    try:
 
-    if not resumes:
-        raise HTTPException(status_code=404, detail="No resumes found")
+        resumes = (
+            db.query(Resume)
+            .filter(Resume.resume_id.in_(resume_ids))
+            .all()
+        )
 
-    attachment_ids = [r.attachment_id for r in resumes if r.attachment_id]
+        if not resumes:
+            raise HTTPException(status_code=404, detail="No resumes found")
 
-    if not attachment_ids:
-        raise HTTPException(status_code=404, detail="No attachments found")
+        attachment_ids = [r.attachment_id for r in resumes if r.attachment_id]
 
-    # ✅ fetch attachments
-    attachments = (
-        db.query(Attachment)
-        .filter(Attachment.attachment_id.in_(attachment_ids))
-        .all()
-    )
+        if not attachment_ids:
+            raise HTTPException(status_code=404, detail="No attachments found")
 
-    if not attachments:
-        raise HTTPException(status_code=404, detail="No files found")
+        attachments = (
+            db.query(Attachment)
+            .filter(Attachment.attachment_id.in_(attachment_ids))
+            .all()
+        )
 
-    result = []
+        if not attachments:
+            raise HTTPException(status_code=404, detail="No files found")
 
-    for att in attachments:
-        file_name = att.file_name
-        file_path = os.path.join(UPLOAD_DIR, file_name)
+        result = []
 
-        if not os.path.exists(file_path):
-            continue
+        for att in attachments:
+            file_name = att.file_name
+            file_path = os.path.join(UPLOAD_DIR, file_name)
 
-        result.append({
-            "file_name": file_name,
-            "download_url": f"/attachments/{file_name}"
-        })
-    
-    if not result:
-        raise HTTPException(status_code=404, detail="Files not found on server")
+            if not os.path.exists(file_path):
+                continue
 
-    return result
-
-# def create_zip_and_save(resume_ids) -> str:
-#     db = SessionLocal()
-#     files = []
-#     for resume_id in resume_ids:
-#         resume_details = db.query(Resume).filter_by(resume_id = resume_id).first()
-#         attachment_id = resume_details.attachment_id
-
-#         if not attachment_id:
-#             raise Exception('attachment not found')
+            result.append({
+                "file_name": file_name,
+                "download_url": f"/attachments/{file_name}"
+            })
         
-#         Attachment_details = db.query(Attachment).filter_by(attachment_id = attachment_id).first()
-#         # return Attachment_details.file_name
-#         files.append(Attachment_details.file_name)
-#         return files
-#     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-
-#     # unique zip name
-#     zip_name = f"resumes_{datetime.utcnow().timestamp()}.zip"
-#     zip_path = os.path.join(DOWNLOAD_DIR, zip_name)
-
-#     with zipfile.ZipFile(zip_path, "w") as zipf:
-#         for file in files:
-#             file_path = get_file_path(file)
-#             zipf.write(file_path, arcname=file)
-
-#     return zip_name
+        if not result:
+            raise HTTPException(status_code=404, detail="Files not found on server")
+        return {
+                    "status": status.HTTP_200_OK,
+                    "message": "File downloaded successfully",
+                    "data": result
+                    }
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logger.error(f"Error in get_download_links: {str(e)}")
+        raise HTTPException(status_code=500, detail="An error occurred while processing the download links request")

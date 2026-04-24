@@ -959,6 +959,7 @@ def search_resumes(filters: dict):
                     "phone_number", Candidate.phone_number,
                     "location", Candidate.location,
                     "total_experience", Candidate.total_experience,
+                    "resume_id", Resume.resume_id,
                     "education", func.coalesce(candidate_education.c.education, cast('[]', JSON)),
                     "skills", func.coalesce(candidate_skills.c.skills, cast('[]', JSON)),
                     "work_experience", func.coalesce(candidate_work_exp.c.work_experience, cast('[]', JSON))
@@ -968,6 +969,7 @@ def search_resumes(filters: dict):
             .outerjoin(candidate_education, Candidate.candidate_id == candidate_education.c.candidate_id)
             .outerjoin(candidate_skills, Candidate.candidate_id == candidate_skills.c.candidate_id)
             .outerjoin(candidate_work_exp, Candidate.candidate_id == candidate_work_exp.c.candidate_id)
+            .outerjoin(Resume, Candidate.candidate_id == Resume.candidate_id)
             .filter(and_(*conditions))
         )
 
