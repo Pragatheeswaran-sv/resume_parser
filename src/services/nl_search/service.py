@@ -103,6 +103,7 @@ def _execute_search(
     page_size: int,
     sort_by: str | None,
     sort_order: str,
+    export: bool = False,
 ) -> tuple[list, int]:
     """Validate, inject pagination, and delegate to the existing ``search_resumes``."""
     filter_dict = dict(resolved_filters)
@@ -119,7 +120,7 @@ def _execute_search(
     parsed["page"] = page
     parsed["page_size"] = page_size
 
-    rows = search_resumes(parsed)
+    rows = search_resumes(parsed, export)
     total_record = 0
     candidates = []
     if rows:
@@ -140,6 +141,7 @@ def nl_search_initial(
     page_size: int | None = 20,
     sort_by: str | None = None,
     sort_order: str | None = "asc",
+    export: bool = False,
 ) -> dict:
     """First-time NL search: LLM → resolve → cache → query → respond."""
     _page = page or 1
@@ -152,7 +154,7 @@ def nl_search_initial(
     _store_search_session(search_id, raw_filters, resolved_filters, user_query)
 
     candidates, total_record = _execute_search(
-        resolved_filters, _page, _page_size, sort_by, _sort_order,
+        resolved_filters, _page, _page_size, sort_by, _sort_order, export
     )
 
     return {
@@ -173,6 +175,7 @@ def nl_search_paginate(
     page_size: int | None = 20,
     sort_by: str | None = None,
     sort_order: str | None = "asc",
+    export: bool = False,
 ) -> dict:
     """Follow-up request: load cached filters → query → respond (no LLM call)."""
     _page = page or 1
@@ -191,7 +194,7 @@ def nl_search_paginate(
     user_query = session.get("user_query")
 
     candidates, total_record = _execute_search(
-        resolved_filters, _page, _page_size, sort_by, _sort_order,
+        resolved_filters, _page, _page_size, sort_by, _sort_order, export
     )
 
     return {

@@ -4,6 +4,7 @@ import json
 import logging
 from uuid import UUID
 import datetime as dt
+import pandas as pd
 from alembic.util import status
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
@@ -31,7 +32,8 @@ from openai import OpenAI
 from anthropic import Anthropic
 
 from src.utils.helper import compress_file
-
+BASE_DIR = "/app"  
+EXPORT_PATH = os.path.join(BASE_DIR, "export_files")
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -786,7 +788,7 @@ def process_resumes(email_id: UUID) -> dict:
     finally:
         db.close()
 
-def search_resumes(filters: dict):
+def search_resumes(filters: dict, export: bool = False) -> list:
     import time as _time
     start_time = _time.time()
     logger.info("[search_resumes] Called with filters: %s", filters)
@@ -989,6 +991,21 @@ def search_resumes(filters: dict):
         if sort_by in sort_map:
             col = sort_map[sort_by]
             query = query.order_by(col.desc() if sort_order == "desc" else col.asc())
+        
+        if not os.path.exists(EXPORT_PATH):
+            logger.info(f"Export directory does not exist, creating: {EXPORT_PATH}")
+            os.makedirs(EXPORT_PATH)
+
+        if export:
+            export_file = os.path.join(EXPORT_PATH, f"exported_resumes_{str(dt.datetime.now().strftime('%Y-%m-%d_%H-%M-%S'))}.csv")
+            logger.info(f"Exporting results to {export_file}")
+            all_data = query.all()
+            if all_data:
+                df = pd.DataFrame([row.candidate_info for row in all_data])
+                df.to_csv(export_file, index=False)
+                logger.info(f"Export completed successfully: {export_file}")
+            else:
+                logger.info("No data to export")
 
         page = max(1, int(filters.get("page", 1)))
         page_size = max(1, min(100, int(filters.get("page_size", 20))))
@@ -1003,7 +1020,7 @@ def search_resumes(filters: dict):
             round(_time.time() - start_time, 3),
             len(results) - 1
         )
-        print('result-->', results)
+        # print('result-->', results)
         return results
 
     except Exception as e:

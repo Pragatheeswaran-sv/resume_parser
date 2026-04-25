@@ -310,14 +310,18 @@ def list_mail(page, page_size, sort_by, sort_order, filter_column, filter_value)
             "phone_number": Users.phone_number,
             "is_blocked": Users.is_blocked,
         }
-
+        
         if filter_column and filter_value:
-            if filter_column in filterable_columns:
-                column = filterable_columns[filter_column]
+            column = filterable_columns.get(filter_column)
+
+            if column is None:
+                raise ValueError(f"Invalid filter column: {filter_column}")
+
+            if hasattr(column.type, "python_type") and column.type.python_type == str:
                 query = query.filter(column.ilike(f"%{filter_value}%"))
             else:
-                raise ValueError(f"Invalid filter column: {filter_column}")
-            
+                query = query.filter(cast(column, String).ilike(f"%{filter_value}%"))
+
         if query.count() == 0:
             return{
                 "status": status.HTTP_200_OK,
