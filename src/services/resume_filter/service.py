@@ -25,7 +25,7 @@ from src.candidate.models import (
 	Candidate, CandidateSkills, CandidateEducation, 
 	WorkExperience, Skill, Education, Company, Role
 )
-from src.services.admin.service import get_model
+# from src.services.admin.service import get_model
 from src.admin.models import Admin, AiModel, AiModelConfig, AiModelversion
 
 from openai import OpenAI
@@ -1004,8 +1004,14 @@ def search_resumes(filters: dict, export: bool = False) -> list:
                 df = pd.DataFrame([row.candidate_info for row in all_data])
                 df.to_csv(export_file, index=False)
                 logger.info(f"Export completed successfully: {export_file}")
+                result = {"file_path": export_file, 'export': True}
+                return result
             else:
                 logger.info("No data to export")
+                return {
+                    "status": status.HTTP_404_NOT_FOUND,
+                    "message": "No data to export"
+                }
 
         page = max(1, int(filters.get("page", 1)))
         page_size = max(1, min(100, int(filters.get("page_size", 20))))

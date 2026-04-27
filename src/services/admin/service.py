@@ -18,11 +18,11 @@ from dotenv import load_dotenv
 from db.connection import SessionLocal
 from sqlalchemy import UUID, String, func, cast, inspect
 from sqlalchemy.dialects.postgresql import JSON, aggregate_order_by
+from src.services.nl_search.service import _execute_search, _load_search_session
 from src.admin.models import Admin, Users, ExtractionConfig, ist_now
 from src.auth.jwt import create_access_token, hash_password, verify_password
 from fastapi import status
 from src.admin.models import Admin, AiModel, AiModelConfig, AiModelversion, Users
-from fastapi import  status
 from src.utils.helper import encrypt_data, decrypt_data
 
 load_dotenv()
@@ -1462,3 +1462,19 @@ def toggle_model(model_config_id, admin_id):
         raise ValueError(str(e))
     finally:
         db.close()
+
+def export_candidate(search_id, page, page_size, export):
+    try:
+        result = _load_search_session(search_id)
+        resolved_filters = result["filters"]
+        return _execute_search(
+            resolved_filters, 
+            page, 
+            page_size, 
+            sort_by = None, 
+            sort_order =None,
+            export = export)
+    except Exception as e:
+        logger.warning("[export_candidate] Error: %s", str(e), exc_info=True)
+        raise ValueError(str(e))
+
