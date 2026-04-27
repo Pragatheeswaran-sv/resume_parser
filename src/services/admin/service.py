@@ -581,9 +581,9 @@ def update_user(payload: dict, user_id: str, admin_id) -> Dict[str, Any]:
                 }
             
         if users:
-            duplicate = session.query(Users).filter_by(email_address=email_address, imap_password=imap_password).first()
+            duplicate = session.query(Users).filter_by(email_address=email_address, phone_number=phone_number).first()
             if duplicate and str(duplicate.user_id) != user_id:
-                raise ValueError("User with this email and IMAP password already exists, nothing to update")
+                raise ValueError("User with this email and phone number already exists, nothing to update")
             users.name = name
             users.email_address = email_address
             users.imap_password = imap_password
@@ -592,7 +592,7 @@ def update_user(payload: dict, user_id: str, admin_id) -> Dict[str, Any]:
             session.commit()
             return {
                 "status": status.HTTP_200_OK,
-                "message": "User mail updated successfully",
+                "message": "User updated successfully",
             }
     except ValueError:
         raise
