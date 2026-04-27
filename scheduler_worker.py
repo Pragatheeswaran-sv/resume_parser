@@ -53,7 +53,7 @@ def _load_config():
 
             return {
                 "is_paused": cfg.is_paused,
-                "interval_minutes": cfg.interval_minutes or 3,
+                "interval_minutes": cfg.interval_minutes or 15,
                 "schedule_type": cfg.schedule_type or "hourly",
                 "window_start_time": start_time,
                 "weekday": cfg.weekday or "mon",
@@ -61,7 +61,7 @@ def _load_config():
 
         return {
             "is_paused": False,
-            "interval_minutes": 3,
+            "interval_minutes": 15,
             "schedule_type": "hourly",
             "window_start_time": None,
             "weekday": "mon",
@@ -71,7 +71,7 @@ def _load_config():
         logger.exception("DB read failed")
         return {
             "is_paused": False,
-            "interval_minutes": 3,
+            "interval_minutes": 15,
             "schedule_type": "hourly",
             "window_start_time": None,
             "weekday": "mon",
@@ -151,7 +151,7 @@ def apply_schedule():
         logger.warning("Invalid schedule_type → default hourly")
         trigger_args = {
             "trigger": "interval",
-            "minutes": 3,
+            "minutes": 15,
         }
 
     # -------- Create or Update -------- #

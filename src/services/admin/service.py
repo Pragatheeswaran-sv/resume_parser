@@ -120,22 +120,10 @@ def update_admin_profile(admin_id, payload):
         
         name = payload.get("name") if payload.get("name") else admin.name
         phone_number = payload.get("phone_number") if payload.get("phone_number") else admin.phone_number
-        old_password = payload.get("old_password")
-
+        
         if name == admin.name and phone_number == admin.phone_number and not payload.get("new_password"):
             raise ValueError("No changes detected in the profile update")
         
-        if not old_password or old_password.strip() == "":
-            raise ValueError("Old password is required to update profile")
-        new_password = payload.get("new_password") if payload.get("new_password") else None
-        is_password = verify_password(old_password, admin.password) if admin.password else False
-
-        if not is_password:
-            raise ValueError("Old password is incorrect")
-        
-        if new_password:
-            admin.password = hash_password(new_password)
-
         admin.name = name
         admin.phone_number = phone_number
         db.commit()
