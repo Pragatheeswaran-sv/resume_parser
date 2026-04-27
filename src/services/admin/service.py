@@ -9,9 +9,10 @@ API layer can translate them into appropriate HTTP responses.
 from typing import Any, Dict, List, Optional
 import logging
 import datetime
-
-import json
-
+from datetime import timezone
+from zoneinfo import ZoneInfo
+from src.auth.models import OauthCredentials
+from datetime import timezone
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from db.connection import SessionLocal
@@ -352,20 +353,41 @@ def list_mail(page, page_size, sort_by, sort_order, filter_column, filter_value)
             raise ValueError("Invalid page number")
 
         users = query.limit(page_size).offset(offset).all()
-
+        
+        
+        data = []
+        for user in users:
+            # Fetch OAuth credentials for this user
+            cred = session.query(OauthCredentials).filter(
+                OauthCredentials.email == user.email_address,
+                OauthCredentials.is_active == True
+            ).first()
+            
+            # Get last_processed_at from OauthCredentials
+            last_sync_time = cred.last_processed_at if cred and cred.last_processed_at else None
+            
+            # Convert UTC to IST
+            if last_sync_time:
+                if last_sync_time.tzinfo is None:
+                    last_sync_time = last_sync_time.replace(tzinfo=timezone.utc)
+                ist_time = last_sync_time.astimezone(ZoneInfo("Asia/Kolkata"))
+                last_sync_at = ist_time.isoformat()
+            else:
+                last_sync_at = None
+            
+            data.append({
+                "user_id": str(user.user_id),
+                "name": user.name,
+                "email_address": user.email_address,
+                "phone_number": user.phone_number,
+                "is_blocked": user.is_blocked,
+                "last_sync_at": last_sync_at,
+            })
+        
         return {
             "status": status.HTTP_200_OK,
             "message": "Users retrieved successfully",
-            "data": [
-                {
-                    "user_id": str(user.user_id),
-                    "name": user.name,
-                    "email_address": user.email_address,
-                    "phone_number": user.phone_number,
-                    "is_blocked": user.is_blocked,
-                }
-                for user in users
-            ],
+            "data": data,
             "total_records": total_users,
         }
 
@@ -617,21 +639,33 @@ def list_email_accounts() -> Dict[str, Any]:
     session = SessionLocal()
     try:
         accounts = session.query(Users).all()
+        
+        from src.auth.models import OauthCredentials
+        
+        data = []
+        for a in accounts:
+            # Fetch OAuth credentials for this user
+            cred = session.query(OauthCredentials).filter(
+                OauthCredentials.email == a.email_address,
+                OauthCredentials.is_active == True
+            ).first()
+            
+            # Get last_processed_at from OauthCredentials
+            last_sync_time = cred.last_processed_at if cred and cred.last_processed_at else None
+            
+            data.append({
+                "user_id": str(a.user_id),
+                "name": a.name,
+                "email_address": a.email_address,
+                "phone_number": a.phone_number,
+                "is_blocked": a.is_blocked,
+                "last_sync_at": last_sync_time.isoformat() if last_sync_time else None,
+            })
+        
         return {
             "status": status.HTTP_200_OK,
             "message": "Email accounts retrieved",
-            "data": [
-                {
-                    "user_id": str(a.user_id),
-                    "email_address": a.email_address,
-                    "is_active": a.is_active,
-                    "is_blocked": a.is_blocked,
-                    "extraction_enabled": a.extraction_enabled,
-                    "last_extraction_at": a.last_extraction_at.isoformat() if a.last_extraction_at else None,
-                    "connect_with": a.connect_with,
-                }
-                for a in accounts
-            ],
+            "data": data,
         }
     finally:
         session.close()

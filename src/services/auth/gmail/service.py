@@ -89,6 +89,8 @@ def gmail_callback(code: str, db = SessionLocal()) -> dict:
         }
 
         token_res = requests.post(TOKEN_URL, data=token_data)
+        if token_res.status_code != 200:
+            logger.error(f"Google Token Error: {token_res.text}")
         token_res.raise_for_status()
 
         tokens = token_res.json()
@@ -301,6 +303,7 @@ ALLOWED_MIME_TYPES = {
     "application/pdf",
     "application/msword",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/msword",
 }
 
 def process_parts(payload, message_id, email_obj, access_token, db: SessionLocal()):
@@ -346,11 +349,29 @@ def fetch_emails_gmail(email_id: str) -> dict:
     db = SessionLocal()
     gmail_list_url = os.getenv("GMAIL_LIST_URL", "https://gmail.googleapis.com/gmail/v1/users/me/messages")
     try:
+        # 1. Get credentials and last sync time
+        cred = db.query(OauthCredentials).filter(
+            OauthCredentials.email == email_id.strip()
+        ).first()
+
+        if not cred:
+            logger.error(f"No credentials found for {email_id}")
+            return {"status": "error", "message": "Credentials not found"}
+
         access_token = get_valid_access_token(email_id, db)
         headers = {"Authorization": f"Bearer {access_token}"}
+
+        # 2. Build the query (Logic for last_processed_at)
+        # Gmail 'after' search uses Unix timestamps
+        query = "has:attachment"
+        if cred.last_processed_at:
+            # We add a 1-second buffer to avoid missing emails arriving exactly at the same time
+            ts = int(cred.last_processed_at.timestamp())
+            query += f" after:{ts}"
+        
+        logger.info(f"NAV----> Gmail Query: {query}")
         params = {
-            # "q": "is:unread has:attachment",
-            "q": "has:attachment"
+            "q": query
         }
 
         resp = requests.get(gmail_list_url, headers=headers, params=params)
@@ -359,7 +380,11 @@ def fetch_emails_gmail(email_id: str) -> dict:
         data = resp.json()
         messages = data.get("messages", [])
         if not messages:
-            return {"message": "No new emails"}
+            # Even if no messages, update the sync time to now
+            cred.last_processed_at = datetime.utcnow()
+            db.commit()
+            return {"status": "success", "message": "No new emails found"}
+
         processed_count = 0
         for msg in messages:
             message_id = msg["id"]
@@ -410,14 +435,18 @@ def fetch_emails_gmail(email_id: str) -> dict:
 
             celery_task = resume_track.delay(str(email_obj.email_id))
 
-            logger.info(f"Processed email: {subject}, task: {celery_task.id}")
+            logger.info(f"Processed email: {subject}, task id: {celery_task.id}")
 
             processed_count += 1
 
+        # 4. Update the sync timestamp to current time after successful batch
+        cred.last_processed_at = datetime.utcnow()
+        db.commit()
+        
         logger.info(f"Total emails processed for {email_id}: {processed_count}")
         return {
             "status": "success",
-            "message": "Gmail emails processed",
+            "message": f"Gmail emails processed: {processed_count}",
             "processed_count": processed_count
         }
 

@@ -179,7 +179,7 @@ def logout_user(email: str) -> dict:
             errors.append(f"Failed to revoke {provider} token")
 
         # Always delete credentials from DB regardless of revocation result
-        db.delete(oauth_cred)
+        # db.delete(oauth_cred)
         db.commit()
         logger.info(f"OAuth credentials deleted from DB for {email}")
 

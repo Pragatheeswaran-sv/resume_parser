@@ -601,7 +601,13 @@ def zoho_callback(code: str, db=SessionLocal()):
 
         accounts_data = accounts_res.json()
         logger.info(f"NAV----> Zoho accounts response: {accounts_data}")
-        email = accounts_data["data"][0]["mailboxAddress"]
+        
+        if not accounts_data.get("data") or not accounts_data["data"]:
+            raise Exception("No account data returned from Zoho")
+        
+        email = accounts_data["data"][0].get("mailboxAddress")
+        if not email:
+            raise Exception("No mailboxAddress in Zoho account data")
         logger.info(f"NAV----> Zoho account email: {email}")
 
         source = db.query(OauthSource).filter(
@@ -876,16 +882,40 @@ def fetch_emails_zoho(email_id: str) -> dict:
             raise Exception("Inbox not found")
 
         messages = get_messages(api_domain, account_id, inbox_id, headers)
+        
+        if not messages:
+            messages = []
+
+        logger.info(f"NAV----> Zoho messages response: {messages}")
+
+        # Skip last_processed_at filtering for now - comment out to debug
+        # if cred.last_processed_at:
+        #     filtered_messages = []
+        #     for m in messages:
+        #         received_time = m.get("receivedTime") if m else None
+        #         if received_time:
+        #             try:
+        #                 msg_time = datetime.strptime(received_time, "%Y-%m-%d %H:%M:%S")
+        #                 if msg_time > cred.last_processed_at:
+        #                     filtered_messages.append(m)
+        #             except (ValueError, TypeError):
+        #                 continue
+        #     messages = filtered_messages
+
+        if not messages:
+            cred.last_processed_at = datetime.utcnow()
+            db.commit()
+            return {"status": "success", "processed_count": 0, "message": "No new emails"}
 
         processed_count = 0
 
         for msg in messages:
-            message_id = msg["messageId"]
+            msg_id = msg["messageId"]
 
-            logger.info(f"NAV----> Processing Zoho email: {message_id}")
+            logger.info(f"NAV----> Processing Zoho email: {msg_id}")
 
             if db.query(EmailLogs).filter(
-                EmailLogs.message_id == message_id
+                EmailLogs.message_id == msg_id
             ).first():
                 continue
 
@@ -900,7 +930,7 @@ def fetch_emails_zoho(email_id: str) -> dict:
             # db.refresh(email_log)
             try:
                 email_log = EmailLogs(
-                    message_id=message_id,
+                    message_id=msg_id,
                     subject=msg.get("subject", ""),
                     sender=msg.get("fromAddress", ""),
                     source_mail=email_id
@@ -912,14 +942,14 @@ def fetch_emails_zoho(email_id: str) -> dict:
             except Exception as e:
                 # Another worker already inserted this message_id
                 db.rollback()
-                logger.warning(f"Duplicate message_id skipped: {message_id}")
+                logger.warning(f"Duplicate message_id skipped: {msg_id}")
                 continue
 
             attachments = get_attachments(
                 api_domain,
                 account_id,
                 inbox_id,
-                message_id,
+                msg_id,
                 headers
             )
 
@@ -931,7 +961,7 @@ def fetch_emails_zoho(email_id: str) -> dict:
                     api_domain,
                     account_id,
                     inbox_id,
-                    message_id,
+                    msg_id,
                     att,
                     headers
                 )
@@ -948,6 +978,10 @@ def fetch_emails_zoho(email_id: str) -> dict:
             processed_count += 1
         
         logger.info(f'Processed_mail zoho count for {email_id}: {processed_count}')
+        
+        cred.last_processed_at = datetime.utcnow()
+        db.commit()
+        
         return {
             "status": "success",
             "processed_count": processed_count

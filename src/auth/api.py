@@ -15,12 +15,13 @@ from src.services.auth.gmail.service import gmail_callback
 from src.services.auth.zoho.service import zoho_callback
 from src.services.auth.gmail.service import fetch_emails_gmail
 from src.services.auth.zoho.service import fetch_emails_zoho
-from src.auth.schemas import EmailRequest, EmailFetchResponse, EmailFetchResult
+from src.auth.schemas import EmailRequest, EmailFetchResponse
 from src.services.auth.zoho.service import zoho_login
 from src.auth.models import OauthCredentials, OauthSource
 from src.admin.models import Users
 from src.services.auth.service import fetch_emails_oauth
-
+from src.services.auth.service import fetch_oauth_email_by_id
+from src.auth.schemas import EmailFetchResult
 from src.services.auth.logout_service import logout_user
 from src.auth.jwt import decode_access_token
 from jose import JWTError
@@ -120,6 +121,10 @@ def fetch_oauth_emails() -> EmailFetchResponse:
         - Calls Zoho service if source is `zoho`
     4. Aggregates results for all processed emails
 
+    ### Request Body (optional):
+    - emails: Single email or comma-separated emails (e.g., "a@gmail.com,b@zoho.com")
+      If not provided, fetches for all active users.
+
     ### Returns:
     - message: Status of the operation
     - results: List of processed emails with provider and status
@@ -134,8 +139,8 @@ def fetch_oauth_emails() -> EmailFetchResponse:
     results = []
 
     try:
-        # 1. Get all active email
-        respone = fetch_emails_oauth()
+        emails_param = request.emails if request else None
+        respone = fetch_emails_oauth(emails=emails_param)
         return respone
     except Exception as e:
         logger.error(f"Error occurred while initiating Zoho OAuth: {e}")
@@ -143,6 +148,48 @@ def fetch_oauth_emails() -> EmailFetchResponse:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"status": "error", "message": str(e)},
         )
+
+
+from pydantic import BaseModel, EmailStr
+
+
+@router.post("/emails/process")
+def process_single_email(request: EmailRequest) -> dict:
+    """
+    Fetch emails for a specific email address.
+    
+    This endpoint processes emails for a single user by their email address.
+    
+    ### Request Body:
+    - email: The email address to fetch emails for (e.g., "user@domain.com")
+    
+    ### Returns:
+    - status: "success" or "error"
+    - message: Status message
+    - source: Email provider (gmail/zoho)
+    - processed_count: Number of emails processed
+    
+    ### Validations:
+    - Email must be registered and active in Users table
+    - OAuth credentials must exist for the email
+    - Source must be gmail or zoho
+    
+    ### Possible Errors:
+    - 400: Invalid email, user not found, or no OAuth credentials
+    - 500: Internal server error
+    """
+    logger.info(f"NAV----> Processing email: {request.email_id}")
+    
+    result = fetch_oauth_email_by_id(email_id=request.email_id)
+    
+    if result["status"] == "error":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=result
+        )
+    
+    return result
+
 
 @router.post("/auth/logout")
 def logout_endpoint(request: Request) -> dict:

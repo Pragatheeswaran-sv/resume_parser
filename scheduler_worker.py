@@ -4,6 +4,7 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from dotenv import load_dotenv
 
 from db.connection import SessionLocal
+from src.services.auth.service import fetch_emails_oauth
 from src.admin.models import ExtractionConfig
 from src.services.admin.service import is_within_extraction_window
 from src.services.email_reader.service import fetch_emails
@@ -52,7 +53,7 @@ def _load_config():
 
             return {
                 "is_paused": cfg.is_paused,
-                "interval_minutes": cfg.interval_minutes or 15,
+                "interval_minutes": cfg.interval_minutes or 3,
                 "schedule_type": cfg.schedule_type or "hourly",
                 "window_start_time": start_time,
                 "weekday": cfg.weekday or "mon",
@@ -60,7 +61,7 @@ def _load_config():
 
         return {
             "is_paused": False,
-            "interval_minutes": 15,
+            "interval_minutes": 3,
             "schedule_type": "hourly",
             "window_start_time": None,
             "weekday": "mon",
@@ -70,7 +71,7 @@ def _load_config():
         logger.exception("DB read failed")
         return {
             "is_paused": False,
-            "interval_minutes": 15,
+            "interval_minutes": 3,
             "schedule_type": "hourly",
             "window_start_time": None,
             "weekday": "mon",
@@ -94,7 +95,7 @@ def trigger_email_processing():
 
     logger.info("Processing emails...")
     try:
-        result = fetch_emails()
+        result = fetch_emails_oauth()
         logger.info("Done: %s", result)
     except Exception:
         logger.exception("Job failed")
@@ -150,7 +151,7 @@ def apply_schedule():
         logger.warning("Invalid schedule_type → default hourly")
         trigger_args = {
             "trigger": "interval",
-            "minutes": 15,
+            "minutes": 3,
         }
 
     # -------- Create or Update -------- #
