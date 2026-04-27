@@ -1021,7 +1021,10 @@ def search_resumes(filters: dict, export: bool = False) -> list:
             len(results) - 1
         )
         # print('result-->', results)
+        if results[0].get('total_record') == 0:
+            return []
         return results
+        
 
     except Exception as e:
         logger.error("[search_resumes] Unexpected error: %s", str(e), exc_info=True)

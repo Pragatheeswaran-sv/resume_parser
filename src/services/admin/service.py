@@ -415,7 +415,7 @@ def get_user_by_id(user_id, admin_id):
             raise Exception("User not found")
         
         return{
-            "status": status.HTTP_200_CREATED,
+            "status": status.HTTP_200_OK,
             "message": "User retrieved successfully",
             "data": {
                 "user_id": str(user.user_id),
