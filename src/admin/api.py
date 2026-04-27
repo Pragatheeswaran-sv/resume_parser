@@ -133,6 +133,19 @@ def update_admin(payload: AdminUpdate, _admin=Depends(get_current_admin)):
             detail={"status": "error", "message": str(e)},
         )
 
+@router.patch("/update_admin")
+def update_admin_phone(payload: AdminUpdate, _admin=Depends(get_current_admin)):
+    """Update admin's phone number."""
+    try:
+        admin_id = _admin.admin_id
+        return update_admin_profile(admin_id, {"phone_number": payload.phone_number})
+    except ValueError as e:
+        logger.warning("[update_admin_phone] Error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"status": "error", "message": str(e)},
+        )
+
 @router.post("/auth/sso/login")
 def sso_login(body: SSOLoginRequest):
     """Accept an SSO-verified email and return a JWT for the user.
