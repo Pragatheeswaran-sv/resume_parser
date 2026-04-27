@@ -88,24 +88,27 @@ def fetch_emails_oauth() -> EmailFetchResponse:
             logger.info(f"Source detected: {source_name}")
 
             # 4. Call respective service
+            service_response = None
+            status = "unknown"
             try:
                 if source_name == "gmail":
                     service_response = fetch_emails_gmail(email_id=email_id)
+                    status = "success"
 
                 elif source_name == "zoho":
                     service_response = fetch_emails_zoho(email_id=email_id)
+                    status = "success"
 
                 else:
                     logger.warning(f"Unsupported source: {source_name}")
-                    continue
-
-                status = "success"
 
             except Exception as service_error:
                 logger.error(f"Error processing {email_id}: {str(service_error)}")
                 status = f"failed: {str(service_error)}"
+            
+            if service_response is None:
+                service_response = {"processed_count": 0}
 
-            service_response = service_response 
             results.append(
                 EmailFetchResult(
                     email=email_id,

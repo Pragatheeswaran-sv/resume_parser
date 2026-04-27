@@ -9,9 +9,10 @@ API layer can translate them into appropriate HTTP responses.
 from typing import Any, Dict, List, Optional
 import logging
 import datetime
-
-import json
-
+from datetime import timezone
+from zoneinfo import ZoneInfo
+from src.auth.models import OauthCredentials
+from datetime import timezone
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from db.connection import SessionLocal
@@ -328,7 +329,6 @@ def list_mail(page, page_size, sort_by, sort_order) -> Dict[str, Any]:
        
         users = query.limit(page_size).offset(offset).all()
         
-        from src.auth.models import OauthCredentials
         
         data = []
         for user in users:
@@ -341,13 +341,22 @@ def list_mail(page, page_size, sort_by, sort_order) -> Dict[str, Any]:
             # Get last_processed_at from OauthCredentials
             last_sync_time = cred.last_processed_at if cred and cred.last_processed_at else None
             
+            # Convert UTC to IST
+            if last_sync_time:
+                if last_sync_time.tzinfo is None:
+                    last_sync_time = last_sync_time.replace(tzinfo=timezone.utc)
+                ist_time = last_sync_time.astimezone(ZoneInfo("Asia/Kolkata"))
+                last_sync_at = ist_time.isoformat()
+            else:
+                last_sync_at = None
+            
             data.append({
                 "user_id": str(user.user_id),
                 "name": user.name,
                 "email_address": user.email_address,
                 "phone_number": user.phone_number,
                 "is_blocked": user.is_blocked,
-                "last_sync_at": last_sync_time.isoformat() if last_sync_time else None,
+                "last_sync_at": last_sync_at,
             })
         
         return {
