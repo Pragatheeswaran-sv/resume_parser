@@ -562,6 +562,7 @@ class NLSearchRequest(BaseModel):
     page_size: Optional[int] = 20
     sort_by: Optional[str] = None
     sort_order: Optional[str] = "asc"
+    export: bool = False
 
     @field_validator("user_query", mode="before")
     @classmethod

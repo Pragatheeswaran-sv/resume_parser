@@ -33,7 +33,8 @@ dependencies = [
     "openai (>=2.30.0,<3.0.0)",
     "anthropic (>=0.89.0,<0.90.0)",
     "requests",
-    "pikepdf (>=10.5.1,<11.0.0)"
+    "pikepdf (>=10.5.1,<11.0.0)",
+    "pandas (>=3.0.2,<4.0.0)"
 ]
 
 
