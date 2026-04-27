@@ -62,20 +62,20 @@ def get_file_base64(resume_id) -> dict:
         mime_type, _ = mimetypes.guess_type(filename)
         if mime_type != 'application/pdf':
             mime_type = 'application/docx'
-            file_path = os.path.join(FILES_DIR, filename)
+            # file_path = os.path.join(FILES_DIR, filename)
 
-            if not os.path.exists(file_path):
-                raise FileNotFoundError(f"{file_path} not found")
-            return {
-                "status": status.HTTP_200_OK,
-                "message": "File previewed successfully",
-                "data":
-                    {
-                        "name": filename,
-                        "type": mime_type,
-                        "content": file_path
-                    }
-                }
+            # if not os.path.exists(file_path):
+            #     raise FileNotFoundError(f"{file_path} not found")
+            # return {
+            #     "status": status.HTTP_200_OK,
+            #     "message": "File previewed successfully",
+            #     "data":
+            #         {
+            #             "name": filename,
+            #             "type": mime_type,
+            #             "content": file_path
+            #         }
+            #     }
 
         return {
                 "status": status.HTTP_200_OK,

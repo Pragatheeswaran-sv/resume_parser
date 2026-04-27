@@ -89,10 +89,11 @@ def _extract_and_resolve(user_query: str) -> tuple[dict, dict]:
     logger.info("[nl_search] Resolved filters: %s", resolved)
 
     if not resolved:
-        raise ValueError(
-            "None of the LLM-extracted filter values matched known data. "
-            "Extracted: " + ", ".join(f"{k}={v}" for k, v in raw_filters.items())
-        )
+        raise ValueError("Candidate not found for the given query.")
+        # raise ValueError(
+        #     "None of the LLM-extracted filter values matched known data. "
+        #     "Extracted: " + ", ".join(f"{k}={v}" for k, v in raw_filters.items())
+        # )
 
     return raw_filters, resolved
 
