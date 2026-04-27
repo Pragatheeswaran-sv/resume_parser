@@ -67,6 +67,7 @@ class AuthorizedUserUpdate(BaseModel):
     name: str | None = None
     email: Optional[str] = None
     imap_password: Optional[str] = None
+    phone_number: Optional[str] = None
     connect_with: Optional[dict] = None
     is_blocked : Optional[bool] = None
 
