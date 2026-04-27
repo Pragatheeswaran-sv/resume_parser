@@ -559,7 +559,7 @@ def update_user(payload: dict, user_id: str, admin_id) -> Dict[str, Any]:
         imap_password = payload.get("imap_password") if payload.get("imap_password") else users.imap_password
         connect_with = payload.get("connect_with") if payload.get("connect_with") else users.connect_with
         blocked = payload.get("is_blocked") if payload.get("is_blocked") is not None else users.is_blocked
-
+        phone_number = payload.get("phone_number") if payload.get("phone_number") else users.phone_number
         admin = session.query(Admin).filter(admin_id == admin_id).first()
 
         if not admin:
@@ -587,6 +587,7 @@ def update_user(payload: dict, user_id: str, admin_id) -> Dict[str, Any]:
             users.name = name
             users.email_address = email_address
             users.imap_password = imap_password
+            users.phone_number = phone_number
             users.connect_with = connect_with
             session.commit()
             return {
