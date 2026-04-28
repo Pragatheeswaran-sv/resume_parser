@@ -22,7 +22,6 @@ from src.admin.models import Admin, Users, ExtractionConfig, ist_now
 from src.auth.jwt import create_access_token, hash_password, verify_password
 from fastapi import status
 from src.admin.models import Admin, AiModel, AiModelConfig, AiModelversion, Users
-from fastapi import  status
 from src.utils.helper import encrypt_data, decrypt_data
 
 load_dotenv()

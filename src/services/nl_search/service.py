@@ -11,7 +11,7 @@ import json
 import uuid
 import logging
 import datetime as dt
-
+from fastapi import status
 from src.services.redis_client import get_redis, NL_SEARCH_TTL
 from src.services.resume_filter.service import (
     extract_filters_from_query,
@@ -122,6 +122,15 @@ def _execute_search(
     parsed["page_size"] = page_size
 
     rows = search_resumes(parsed, export)
+    if export:
+        response = {
+             "status": status.HTTP_200_OK,
+             "message": 'Export completed successfully',
+             "data": {
+                 "file_path": rows["file_path"],},
+        }
+        return response
+   
     total_record = 0
     candidates = []
     if rows:

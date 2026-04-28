@@ -414,7 +414,6 @@ def nl_search(body: dict) -> Dict[str, Any]:
                 page_size=req.page_size,
                 sort_by=req.sort_by,
                 sort_order=req.sort_order,
-                export=req.export,
             )
 
         result["candidates"] = serialize_response(result.get("candidates", []))

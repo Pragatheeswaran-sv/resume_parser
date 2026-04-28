@@ -8,7 +8,7 @@ from src.candidate.models import (
     Education, Role, WorkExperience, Company,
 )
 from src.resume_filter.models import Resume
-
+from src.services.nl_search.service import _execute_search, _load_search_session
 load_dotenv()
 logger = logging.getLogger(__name__)
 
@@ -289,4 +289,17 @@ def _sort_by_percentage(db, sort_type, candidate_education, candidate_skills, ca
     _validate_data(data)
     return _extract_results(data, total_count)
 
-
+def export_candidate(search_id, page, page_size, export):
+    try:
+        result = _load_search_session(search_id)
+        resolved_filters = result["filters"]
+        return _execute_search(
+            resolved_filters, 
+            page, 
+            page_size, 
+            sort_by = None, 
+            sort_order =None,
+            export = export)
+    except Exception as e:
+        logger.warning("[export_candidate] Error: %s", str(e), exc_info=True)
+        raise ValueError(str(e))
