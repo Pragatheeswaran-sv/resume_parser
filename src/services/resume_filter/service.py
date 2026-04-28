@@ -4,6 +4,8 @@ import json
 import logging
 from uuid import UUID
 import datetime as dt
+import zipfile
+from lxml import etree
 import pandas as pd
 from alembic.util import status
 from fastapi import HTTPException
@@ -79,7 +81,7 @@ def save_resumes_to_db(resumes):
             if not info_email and sender_email:
                 logger.info(f' using sender email fallback: {sender_email}')
                 info_email = sender_email
-                info["email"] = sender_email
+                # info["email"] = sender_email
 
             vector = embedding_model.embed_query(raw_text)
 
@@ -291,8 +293,29 @@ def save_resumes_to_db(resumes):
                                 logger.info("candidate experience already exists")
                                       
             # Create Resume record linking to candidate and attachment
-            is_resume_record = db.query(Resume).filter(Resume.candidate_id == candidate.candidate_id, Resume.candidate_role == extracted_role)
-            if not is_resume_record:
+            # is_resume_record = db.query(Resume).filter(Resume.candidate_id == candidate.candidate_id, Resume.candidate_role == extracted_role).first()
+            # if not is_resume_record:
+            #     resume_record = Resume(
+            #         embedding=vector,
+            #         candidate_id=candidate.candidate_id,
+            #         attachment_id=attachment_id,
+            #         candidate_role=extracted_role,
+            #         created_by="resume_parser"
+            #     )
+            #     db.add(resume_record)
+            #     db.flush()
+                
+            #     logger.info(f'Successfully saved resume for {info.get("name", "Unknown")}')
+            
+            # logger.info('Resume of candidate is already exists')
+            is_resume_record = db.query(Resume).filter(
+                Resume.candidate_id == candidate.candidate_id,
+                Resume.candidate_role == extracted_role
+            ).first()
+
+            if is_resume_record:
+                logger.info('Resume of candidate already exists')
+            else:
                 resume_record = Resume(
                     embedding=vector,
                     candidate_id=candidate.candidate_id,
@@ -302,10 +325,8 @@ def save_resumes_to_db(resumes):
                 )
                 db.add(resume_record)
                 db.flush()
-                
-                logger.info(f'Successfully saved resume for {info.get("name", "Unknown")}')
-            
-            logger.info('Resume of candidate is already exists')
+
+                logger.info(f'Successfully saved resume for {candidate.name}')
             
         except Exception as e:
             logger.error(f"Error saving resume: {e}")
@@ -339,15 +360,76 @@ def extract_text_from_pdf(path):
         reader = PdfReader(path)
         for page in reader.pages:
             text += page.extract_text() or ""
+        print(f"Extracted text from PDF: {text}")  # Print first 200 chars for verification
     except Exception as e:
         logger.info(f"[ERROR] PDF read failed: {path} -> {e}")
     return text
+
+def extract_docx_text(path):
+    """
+    Extract text from:
+    - paragraphs
+    - tables
+    - textboxes
+    - colored sections
+    - shapes XML
+    """
+
+    full_text = []
+
+    doc = Document(path)
+
+    # Paragraphs
+    for para in doc.paragraphs:
+        text = para.text.strip()
+
+        if text:
+            full_text.append(text)
+
+    # Tables
+    for table in doc.tables:
+        for row in table.rows:
+            row_text = []
+
+            for cell in row.cells:
+                cell_text = cell.text.strip()
+
+                if cell_text:
+                    row_text.append(cell_text)
+
+            if row_text:
+                full_text.append(" | ".join(row_text))
+
+    
+    with zipfile.ZipFile(path) as z:
+        xml_content = z.read("word/document.xml")
+
+    tree = etree.XML(xml_content)
+
+    namespaces = {
+        "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    }
+
+    xml_texts = tree.xpath("//w:t/text()", namespaces=namespaces)
+
+    for text in xml_texts:
+        cleaned = text.strip()
+
+        if cleaned and cleaned not in full_text:
+            full_text.append(cleaned)
+
+    # Remove duplicates while preserving order
+    unique_text = list(dict.fromkeys(full_text))
+
+    # return "\n".join(unique_text)
+    return preprocess_resume_text("\n".join(unique_text))
 
 def extract_text_from_docx(path):
     text = ""
     try:
         doc = Document(path)
         text = "\n".join(p.text for p in doc.paragraphs)
+        print(f"Extracted text from DOCX: {text}")  # Print first 100 chars for verification
     except Exception as e:
         logger.info(f"[ERROR] DOCX read failed: {path} -> {e}")
     return text
@@ -474,6 +556,150 @@ def is_resume(text: str) -> bool:
     finally:
         db.close()
 
+import re
+from collections import OrderedDict
+
+
+def preprocess_resume_text(resume_text: str, max_chars: int = 12000) -> str:
+    """
+    Clean and structure resume text before sending to LLM.
+
+    Goals:
+    - Remove noise
+    - Preserve important resume structure
+    - Reduce token usage
+    - Improve extraction accuracy
+    """
+
+    if not resume_text:
+        return ""
+
+    # ----------------------------------------
+    # STEP 1: Normalize line breaks
+    # ----------------------------------------
+    text = resume_text.replace("\r", "\n")
+
+    # Remove tabs
+    text = text.replace("\t", " ")
+
+    # ----------------------------------------
+    # STEP 2: Remove invisible/control chars
+    # ----------------------------------------
+    text = re.sub(r"[\x00-\x1F\x7F-\x9F]", "", text)
+
+    # ----------------------------------------
+    # STEP 3: Split into lines
+    # ----------------------------------------
+    raw_lines = text.split("\n")
+
+    cleaned_lines = []
+
+    for line in raw_lines:
+
+        # Remove extra spaces
+        line = re.sub(r"\s+", " ", line).strip()
+
+        # Skip empty lines
+        if not line:
+            continue
+
+        # Skip useless separators
+        if re.fullmatch(r"[-_=|.]{3,}", line):
+            continue
+
+        # Skip page numbers
+        if re.fullmatch(r"page\s*\d+", line.lower()):
+            continue
+
+        # Skip repeated single symbols
+        if len(set(line)) == 1:
+            continue
+
+        cleaned_lines.append(line)
+
+    # ----------------------------------------
+    # STEP 4: Remove duplicate lines
+    # ----------------------------------------
+    unique_lines = list(OrderedDict.fromkeys(cleaned_lines))
+
+    # ----------------------------------------
+    # STEP 5: Merge broken lines
+    # Example:
+    # Python
+    # Developer
+    # -> Python Developer
+    # ----------------------------------------
+    merged_lines = []
+
+    i = 0
+
+    while i < len(unique_lines):
+
+        current = unique_lines[i]
+
+        if i + 1 < len(unique_lines):
+
+            next_line = unique_lines[i + 1]
+
+            # Merge short broken lines
+            if (
+                len(current.split()) <= 3
+                and len(next_line.split()) <= 5
+                and not current.endswith((".", ":"))
+            ):
+                merged = f"{current} {next_line}"
+
+                if len(merged.split()) <= 8:
+                    merged_lines.append(merged)
+                    i += 2
+                    continue
+
+        merged_lines.append(current)
+        i += 1
+
+    # ----------------------------------------
+    # STEP 6: Detect sections
+    # ----------------------------------------
+    SECTION_HEADERS = {
+        "summary",
+        "profile",
+        "experience",
+        "work experience",
+        "employment",
+        "skills",
+        "technical skills",
+        "education",
+        "projects",
+        "certifications",
+        "contact",
+        "achievements",
+    }
+
+    structured_lines = []
+
+    for line in merged_lines:
+
+        normalized = line.lower().strip()
+
+        if normalized in SECTION_HEADERS:
+            structured_lines.append(f"\n### {line.upper()} ###")
+        else:
+            structured_lines.append(line)
+
+    # ----------------------------------------
+    # STEP 7: Join text cleanly
+    # ----------------------------------------
+    final_text = "\n".join(structured_lines)
+
+    # Remove excessive blank lines
+    final_text = re.sub(r"\n{3,}", "\n\n", final_text)
+
+    # ----------------------------------------
+    # STEP 8: Limit size for LLM
+    # ----------------------------------------
+    final_text = final_text[:max_chars]
+
+    return final_text.strip()
 
 def extract_basic_info(resume_text):
     """Use local Ollama LLM to extract structured info from resume text."""
@@ -571,7 +797,7 @@ def extract_basic_info(resume_text):
             raise Exception("No admin found")
         
         admin_id = admin.admin_id
-        model_info = get_model(admin_id)
+        model_info = get_model(page = 1, page_size = 100, sort_by = None, sort_order = None, filter_column = None, filter_value = None, admin_id = admin_id)
 
         model_info =( db.query(
             func.json_build_object(
@@ -705,6 +931,22 @@ def extract_basic_info(resume_text):
 #     logger.info(f"\n[TIME] {round(time.time()-start,2)} sec")
 #     return os.listdir()
 
+def clean_json_response(content):
+    """
+    Extract valid JSON from LLM response
+    """
+    if isinstance(content, dict):
+        return content
+
+    match = re.search(r"\{.*\}", content, re.DOTALL)
+
+    if not match:
+        raise ValueError("No valid JSON found in response")
+
+    json_text = match.group(0)
+
+    return json.loads(json_text)
+
 def process_resumes(email_id: UUID) -> dict:
     """
     Classify and process resume attachments for a given email.
@@ -732,12 +974,14 @@ def process_resumes(email_id: UUID) -> dict:
         logger.info("Fetched %d attachments for classification", len(all_attachments))
 
         results = []
+        file_path = ""
         for att in all_attachments:
             file_path = f"attachments/{att.file_name}"
             if file_path.endswith(".pdf"):
                 text = extract_text_from_pdf(file_path)
             elif file_path.endswith(".docx"):
-                text = extract_text_from_docx(file_path)
+                # text = extract_text_from_docx(file_path)
+                text = extract_docx_text(file_path)
             else:
                 continue
 

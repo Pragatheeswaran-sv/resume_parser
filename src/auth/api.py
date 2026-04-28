@@ -139,8 +139,8 @@ def fetch_oauth_emails() -> EmailFetchResponse:
     results = []
 
     try:
-        emails_param = request.emails if request else None
-        respone = fetch_emails_oauth(emails=emails_param)
+        # emails_param = request.emails if request else None
+        respone = fetch_emails_oauth()
         return respone
     except Exception as e:
         logger.error(f"Error occurred while initiating Zoho OAuth: {e}")
