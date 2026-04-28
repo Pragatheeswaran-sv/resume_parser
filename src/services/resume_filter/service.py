@@ -25,7 +25,7 @@ from src.candidate.models import (
 	Candidate, CandidateSkills, CandidateEducation, 
 	WorkExperience, Skill, Education, Company, Role
 )
-# from src.services.admin.service import get_model
+from src.services.admin.service import get_model
 from src.admin.models import Admin, AiModel, AiModelConfig, AiModelversion
 
 from openai import OpenAI
@@ -571,7 +571,7 @@ def extract_basic_info(resume_text):
             raise Exception("No admin found")
         
         admin_id = admin.admin_id
-        # model_info = get_model(admin_id)
+        model_info = get_model(admin_id)
 
         model_info =( db.query(
             func.json_build_object(
@@ -798,6 +798,7 @@ def search_resumes(filters: dict, export: bool = False) -> list:
 
     db = SessionLocal()
     try:
+        results = []
         candidate_education = (
             db.query(
                 CandidateEducation.candidate_id.label("candidate_id"),
@@ -1004,15 +1005,13 @@ def search_resumes(filters: dict, export: bool = False) -> list:
                 df = pd.DataFrame([row.candidate_info for row in all_data])
                 df.to_csv(export_file, index=False)
                 logger.info(f"Export completed successfully: {export_file}")
-                result = {"file_path": export_file, 'export': True}
+                result = {"file_path": export_file[4:]} 
+                print('export result-->', result)
                 return result
             else:
                 logger.info("No data to export")
-                return {
-                    "status": status.HTTP_404_NOT_FOUND,
-                    "message": "No data to export"
-                }
-
+                return {"file_path": "No data to export"}
+        
         page = max(1, int(filters.get("page", 1)))
         page_size = max(1, min(100, int(filters.get("page_size", 20))))
         query = query.limit(page_size).offset((page - 1) * page_size)
@@ -1026,9 +1025,9 @@ def search_resumes(filters: dict, export: bool = False) -> list:
             round(_time.time() - start_time, 3),
             len(results) - 1
         )
-        # print('result-->', results)
         if results[0].get('total_record') == 0:
             return []
+        # print('results-->', results)
         return results
         
 

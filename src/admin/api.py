@@ -22,7 +22,6 @@ from src.admin.schema import (
 from src.services.admin.service import (
     admin_check,
     delete_user,
-    export_candidate,
     get_extraction_config,
     get_user,
     get_user_by_id,
@@ -746,45 +745,7 @@ def enable_model(model_config_id, _admin=Depends(get_current_admin)):
         admin_id = _admin.admin_id
         return toggle_model(model_config_id, admin_id)
     except ValueError as e:
-        logger.warning("[fetch_model_config] Error: %s", str(e), exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "status": "error",
-                "message": str(e),
-            })
-
-@router.get("/export_data/")
-def export_data(search_id: str, page: int, page_size: int, export: bool = False):
-    """
-        Export Data
-
-        Exports all relevant data for the authenticated admin, including connected
-        email accounts, extraction logs, and AI model configurations.
-
-        This endpoint compiles the admin's data into a structured format (e.g., JSON or CSV)
-        and returns it as a downloadable file. The exported data can be used for backup,
-        analysis, or migration purposes.
-
-        Endpoint:
-            GET /export_data
-        Args:
-            _admin (Admin):
-                The currently authenticated admin user (injected via dependency).
-        Returns:
-            dict: A response object containing:
-                - status (str): "success" or "error"
-                - message (str): Description of the operation result
-                - data (dict, optional): Details about the exported file (e.g., download URL)
-        Raises:
-            HTTPException:
-                - 400 Bad Request: If data export fails or admin ID is invalid. 
-    """
-    try:
-        # admin_id = _admin.admin_id
-        return serialize_response(export_candidate(search_id, page, page_size, export))
-    except ValueError as e:
-        logger.warning("[export_data] Error: %s", str(e), exc_info=True)
+        logger.warning("[enable_model] Error: %s", str(e), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={

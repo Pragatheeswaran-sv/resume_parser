@@ -122,15 +122,15 @@ def _execute_search(
     parsed["page_size"] = page_size
 
     rows = search_resumes(parsed, export)
-    if rows['export'] == True:
+    if export:
         response = {
-            "status": status.HTTP_200_OK,
-            "message": 'Export completed successfully',
-            "data": {
-                "file_path": rows["file_path"],},
+             "status": status.HTTP_200_OK,
+             "message": 'Export completed successfully',
+             "data": {
+                 "file_path": rows["file_path"],},
         }
         return response
-
+   
     total_record = 0
     candidates = []
     if rows:

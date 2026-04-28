@@ -1,11 +1,13 @@
 import logging
 from dotenv import load_dotenv
-from fastapi import APIRouter, HTTPException, status, Query
+from fastapi import APIRouter, HTTPException, status, Query, Depends
+from src.admin.dependencies import get_current_admin
 from typing import List, Dict, Any
 from src.services.candidate.service import candidate_datails, CandidateServiceError
 from src.resume_filter.schemas import ResumeFilterRequest, SemanticSearchRequest
 from pydantic import ValidationError
 from src.utils.response import serialize_response
+from src.services.candidate.service import export_candidate
 from src.services.resume_filter.service import (
     search_resumes
 )
@@ -162,3 +164,41 @@ def get_candidates(
             status_code=500,
             detail={"status": "error", "message": "Failed to fetch candidates"},
         )
+
+@router.get("/export_data/")
+def export_data(search_id: str, page: int, page_size: int, export: bool = False):
+    """
+        Export Data
+
+        Exports all relevant data for the authenticated admin, including connected
+        email accounts, extraction logs, and AI model configurations.
+
+        This endpoint compiles the admin's data into a structured format (e.g., JSON or CSV)
+        and returns it as a downloadable file. The exported data can be used for backup,
+        analysis, or migration purposes.
+
+        Endpoint:
+            GET /export_data
+        Args:
+            _admin (Admin):
+                The currently authenticated admin user (injected via dependency).
+        Returns:
+            dict: A response object containing:
+                - status (str): "success" or "error"
+                - message (str): Description of the operation result
+                - data (dict, optional): Details about the exported file (e.g., download URL)
+        Raises:
+            HTTPException:
+                - 400 Bad Request: If data export fails or admin ID is invalid. 
+    """
+    try:
+        # admin_id = _admin.admin_id
+        return serialize_response(export_candidate(search_id, page, page_size, export))
+    except ValueError as e:
+        logger.warning("[export_data] Error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "status": "error",
+                "message": str(e),
+            })
