@@ -121,12 +121,41 @@ def update_admin_profile(admin_id, payload):
         
         name = payload.get("name") if payload.get("name") else admin.name
         phone_number = payload.get("phone_number") if payload.get("phone_number") else admin.phone_number
+        new_password = payload.get("new_password")
+        if new_password is None and payload.get("new_paswword") is not None:
+            new_password = payload.get("new_paswword")
+        old_password = payload.get("old_password")
         
-        if name == admin.name and phone_number == admin.phone_number and not payload.get("new_password"):
+        # Check if any changes are being made
+        has_profile_changes = (name != admin.name or phone_number != admin.phone_number)
+        has_password_change = bool(new_password)
+        
+        if not has_profile_changes and not has_password_change:
             raise ValueError("No changes detected in the profile update")
         
-        admin.name = name
-        admin.phone_number = phone_number
+        if old_password and not has_password_change:
+            raise ValueError("New password must be provided to change password")
+        
+        # Handle password update
+        if has_password_change:
+            if not old_password:
+                raise ValueError("Old password is required to change password")
+            
+            if not admin.password:
+                raise ValueError("Admin account does not have a password set")
+            
+            # Verify old password
+            if not verify_password(old_password, admin.password):
+                raise ValueError("Invalid old password")
+            
+            # Hash and update new password
+            admin.password = hash_password(new_password)
+        
+        # Update profile fields if they changed
+        if has_profile_changes:
+            admin.name = name
+            admin.phone_number = phone_number
+        
         db.commit()
         return{
             "status": status.HTTP_200_OK,
