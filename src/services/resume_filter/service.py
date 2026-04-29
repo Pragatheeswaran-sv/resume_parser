@@ -4,6 +4,8 @@ import json
 import logging
 from uuid import UUID
 import datetime as dt
+import zipfile
+from lxml import etree
 import pandas as pd
 from alembic.util import status
 from fastapi import HTTPException
@@ -31,7 +33,7 @@ from src.admin.models import Admin, AiModel, AiModelConfig, AiModelversion
 from openai import OpenAI
 from anthropic import Anthropic
 
-from src.utils.helper import compress_file
+from src.utils.helper import clean_mobile_number, compress_file
 BASE_DIR = "/app"  
 EXPORT_PATH = os.path.join(BASE_DIR, "export_files")
 
@@ -79,12 +81,13 @@ def save_resumes_to_db(resumes):
             if not info_email and sender_email:
                 logger.info(f' using sender email fallback: {sender_email}')
                 info_email = sender_email
-                info["email"] = sender_email
+                # info["email"] = sender_email
 
             vector = embedding_model.embed_query(raw_text)
 
             email_address = info_email or sender_email or ""
             phone_number = (info.get("phone_number") or "").strip()
+            phone_number = clean_mobile_number(phone_number)
 
             candidate = None
             if email_address:
@@ -291,8 +294,29 @@ def save_resumes_to_db(resumes):
                                 logger.info("candidate experience already exists")
                                       
             # Create Resume record linking to candidate and attachment
-            is_resume_record = db.query(Resume).filter(Resume.candidate_id == candidate.candidate_id, Resume.candidate_role == extracted_role)
-            if not is_resume_record:
+            # is_resume_record = db.query(Resume).filter(Resume.candidate_id == candidate.candidate_id, Resume.candidate_role == extracted_role).first()
+            # if not is_resume_record:
+            #     resume_record = Resume(
+            #         embedding=vector,
+            #         candidate_id=candidate.candidate_id,
+            #         attachment_id=attachment_id,
+            #         candidate_role=extracted_role,
+            #         created_by="resume_parser"
+            #     )
+            #     db.add(resume_record)
+            #     db.flush()
+                
+            #     logger.info(f'Successfully saved resume for {info.get("name", "Unknown")}')
+            
+            # logger.info('Resume of candidate is already exists')
+            is_resume_record = db.query(Resume).filter(
+                Resume.candidate_id == candidate.candidate_id,
+                Resume.candidate_role == extracted_role
+            ).first()
+
+            if is_resume_record:
+                logger.info('Resume of candidate already exists')
+            else:
                 resume_record = Resume(
                     embedding=vector,
                     candidate_id=candidate.candidate_id,
@@ -302,10 +326,8 @@ def save_resumes_to_db(resumes):
                 )
                 db.add(resume_record)
                 db.flush()
-                
-                logger.info(f'Successfully saved resume for {info.get("name", "Unknown")}')
-            
-            logger.info('Resume of candidate is already exists')
+
+                logger.info(f'Successfully saved resume for {candidate.name}')
             
         except Exception as e:
             logger.error(f"Error saving resume: {e}")
@@ -339,15 +361,76 @@ def extract_text_from_pdf(path):
         reader = PdfReader(path)
         for page in reader.pages:
             text += page.extract_text() or ""
+        print(f"Extracted text from PDF: {text}")  # Print first 200 chars for verification
     except Exception as e:
         logger.info(f"[ERROR] PDF read failed: {path} -> {e}")
     return text
+
+def extract_docx_text(path):
+    """
+    Extract text from:
+    - paragraphs
+    - tables
+    - textboxes
+    - colored sections
+    - shapes XML
+    """
+
+    full_text = []
+
+    doc = Document(path)
+
+    # Paragraphs
+    for para in doc.paragraphs:
+        text = para.text.strip()
+
+        if text:
+            full_text.append(text)
+
+    # Tables
+    for table in doc.tables:
+        for row in table.rows:
+            row_text = []
+
+            for cell in row.cells:
+                cell_text = cell.text.strip()
+
+                if cell_text:
+                    row_text.append(cell_text)
+
+            if row_text:
+                full_text.append(" | ".join(row_text))
+
+    
+    with zipfile.ZipFile(path) as z:
+        xml_content = z.read("word/document.xml")
+
+    tree = etree.XML(xml_content)
+
+    namespaces = {
+        "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    }
+
+    xml_texts = tree.xpath("//w:t/text()", namespaces=namespaces)
+
+    for text in xml_texts:
+        cleaned = text.strip()
+
+        if cleaned and cleaned not in full_text:
+            full_text.append(cleaned)
+
+    # Remove duplicates while preserving order
+    unique_text = list(dict.fromkeys(full_text))
+    print(f"Extracted text from DOCX: {' '.join(unique_text[:20])}...")  # Print first 20 unique pieces for verification
+    return "\n".join(unique_text)
+    # return preprocess_resume_text("\n".join(unique_text))
 
 def extract_text_from_docx(path):
     text = ""
     try:
         doc = Document(path)
         text = "\n".join(p.text for p in doc.paragraphs)
+        print(f"Extracted text from DOCX: {text}")  # Print first 100 chars for verification
     except Exception as e:
         logger.info(f"[ERROR] DOCX read failed: {path} -> {e}")
     return text
@@ -412,7 +495,7 @@ def is_resume(text: str) -> bool:
 
         message = [
                     {"role": "system", "content": "You only return JSON"},
-                    {"role": "user", "content": prompt + "\n\nDocument:\n" + text[:2000]}
+                    {"role": "user", "content": prompt + "\n\nDocument:\n" + text[:12000]}
                 ]
         
         if model == "openai":
@@ -438,7 +521,7 @@ def is_resume(text: str) -> bool:
                 max_tokens=1000,
                 system="You only return JSON",
                 messages=[
-                    {"role": "user", "content": prompt + "\n\nDocument:\n" + text[:2000]}
+                    {"role": "user", "content": prompt + "\n\nDocument:\n" + text[:12000]}
                 ]
             )
             content = response.content[0].text.strip()
@@ -473,7 +556,6 @@ def is_resume(text: str) -> bool:
         return False
     finally:
         db.close()
-
 
 def extract_basic_info(resume_text):
     """Use local Ollama LLM to extract structured info from resume text."""
@@ -571,7 +653,7 @@ def extract_basic_info(resume_text):
             raise Exception("No admin found")
         
         admin_id = admin.admin_id
-        model_info = get_model(admin_id)
+        model_info = get_model(page = 1, page_size = 100, sort_by = None, sort_order = None, filter_column = None, filter_value = None, admin_id = admin_id)
 
         model_info =( db.query(
             func.json_build_object(
@@ -601,7 +683,7 @@ def extract_basic_info(resume_text):
         
         message = [
                     {"role": "system", "content": "You only return JSON"},
-                    {"role": "user", "content": prompt + "\n\nDocument:\n" + resume_text[:2000]}
+                    {"role": "user", "content": prompt + "\n\nDocument:\n" + resume_text[:12000]}
                 ]
 
         if model == "openai":
@@ -627,7 +709,7 @@ def extract_basic_info(resume_text):
                 max_tokens=1000,
                 system="You only return JSON",
                 messages=[
-                    {"role": "user", "content": prompt + "\n\nDocument:\n" + resume_text[:2000]}
+                    {"role": "user", "content": prompt + "\n\nDocument:\n" + resume_text[:12000]}
                 ]
             )
             content = response.content[0].text.strip()
@@ -705,6 +787,22 @@ def extract_basic_info(resume_text):
 #     logger.info(f"\n[TIME] {round(time.time()-start,2)} sec")
 #     return os.listdir()
 
+def clean_json_response(content):
+    """
+    Extract valid JSON from LLM response
+    """
+    if isinstance(content, dict):
+        return content
+
+    match = re.search(r"\{.*\}", content, re.DOTALL)
+
+    if not match:
+        raise ValueError("No valid JSON found in response")
+
+    json_text = match.group(0)
+
+    return json.loads(json_text)
+
 def process_resumes(email_id: UUID) -> dict:
     """
     Classify and process resume attachments for a given email.
@@ -732,12 +830,14 @@ def process_resumes(email_id: UUID) -> dict:
         logger.info("Fetched %d attachments for classification", len(all_attachments))
 
         results = []
+        file_path = ""
         for att in all_attachments:
             file_path = f"attachments/{att.file_name}"
             if file_path.endswith(".pdf"):
                 text = extract_text_from_pdf(file_path)
             elif file_path.endswith(".docx"):
-                text = extract_text_from_docx(file_path)
+                # text = extract_text_from_docx(file_path)
+                text = extract_docx_text(file_path)
             else:
                 continue
 

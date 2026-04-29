@@ -167,7 +167,11 @@ def get_current_admin_or_user(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={"status": "error", "message": "Account not found or deactivated"},
             )
-        return role, obj
+        result = {
+            "role": role,
+            "data": obj
+        }
+        return result
     finally:
         db.close()
 
