@@ -113,34 +113,63 @@ def update_admin_profile(admin_id, payload):
     try:
         if not admin_id:
             raise ValueError("Admin ID must be provided")
-        
-        admin  = db.query(Admin).filter_by(admin_id = admin_id ).first()
+        admin = db.query(Admin).filter_by(admin_id=admin_id).first()
         if not admin:
             raise ValueError("Admin not found")
-        
-        name = payload.get("name") if payload.get("name") else admin.name
-        phone_number = payload.get("phone_number") if payload.get("phone_number") else admin.phone_number
-        
-        if name == admin.name and phone_number == admin.phone_number and not payload.get("new_password"):
-            raise ValueError("No changes detected in the profile update")
-        
-        admin.name = name
-        admin.phone_number = phone_number
+
+        # ── Extract payload fields ───────────────────────
+        name         = payload.get("name",         admin.name)
+        phone_number = payload.get("phone_number", admin.phone_number)
+        new_password = payload.get("new_password")
+        old_password = payload.get("old_password")
+
+        # ── Detect what is changing ──────────────────────
+        has_profile_changes = (name != admin.name or phone_number != admin.phone_number)
+        has_password_change = bool(new_password)
+
+        if not has_profile_changes and not has_password_change:
+            raise ValueError("No changes detected. Nothing to update")
+
+        # ── Password change logic ────────────────────────
+        if has_password_change:
+            if not old_password:
+                raise ValueError("Old password is required to change password")
+
+            if not admin.password:
+                raise ValueError("This account has no password. Use SSO login")
+
+            if not verify_password(old_password, admin.password):
+                raise ValueError("Old password is incorrect")
+
+            if verify_password(new_password, admin.password):
+                raise ValueError("New password must be different from the old password")
+
+            admin.password = hash_password(new_password)   
+
+        if old_password and not new_password:
+            raise ValueError("You provided old password but no new password")
+
+        # ── Profile field update ─────────────────────────
+        if has_profile_changes:
+            admin.name         = name
+            admin.phone_number = phone_number
+
+        # ── Commit & return ──────────────────────────────
         db.commit()
-        return{
-            "status": status.HTTP_200_OK,
-            "message": "Admin profile updated successfully",
-            
-            "data" : {
-                'admin_name' : admin.name,
-                'admin_email' : admin.email_address,
-                'admin_phone_number' : admin.phone_number,
+        db.refresh(admin)
+
+        return {
+            "status"  : status.HTTP_200_OK,
+            "message" : "Admin profile updated successfully",
+            "data"    : {
+                "admin_name"         : admin.name,
+                "admin_email"        : admin.email_address,
+                "admin_phone_number" : admin.phone_number,
             }
         }
-    except ValueError:
-        raise
     except Exception as e:
-        logger.warning("[update_admin_profile] Error: %s", str(e), exc_info=True)
+        db.rollback()
+        logger.warning("[update_admin_profile] Unexpected error: %s", str(e), exc_info=True)
         raise ValueError(str(e))
     finally:
         db.close()
