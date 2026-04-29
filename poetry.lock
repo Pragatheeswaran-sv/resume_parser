@@ -3000,6 +3000,18 @@ files = [
 numpy = "*"
 
 [[package]]
+name = "phonenumbers"
+version = "9.0.29"
+description = "Python version of Google's common library for parsing, formatting, storing and validating international phone numbers."
+optional = false
+python-versions = ">=2.5"
+groups = ["main"]
+files = [
+    {file = "phonenumbers-9.0.29-py2.py3-none-any.whl", hash = "sha256:0eb26e0c578aa2d56428330d5b4a0a07dac9a452c4387bf76a76a88b1e839ab7"},
+    {file = "phonenumbers-9.0.29.tar.gz", hash = "sha256:66455e5c5ca4197aca5a4217d0dc82717a22038292cfa322d5d5e7c46934a214"},
+]
+
+[[package]]
 name = "pikepdf"
 version = "10.5.1"
 description = "Read, write, repair, and transform PDFs in Python, powered by qpdf"
@@ -5295,4 +5307,4 @@ cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and pyt
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "6ae48d27343ccbb5eda8b6ebca75d37ff8d2b41497a7670bb043de2ff14ddd2b"
+content-hash = "b58c150bfe3315f1c67e4eb9b611d80486fa66f36a461f386e916dec1629430c"

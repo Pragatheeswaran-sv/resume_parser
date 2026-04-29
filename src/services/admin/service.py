@@ -537,7 +537,7 @@ def delete_user(user_id: str, admin_id) -> Dict[str, Any]:
         session.close()
 
 
-def update_user(payload: dict, user_id: str, admin_id) -> Dict[str, Any]:
+def update_user(payload: dict, user_id: str, current_user_id: str, role: str) -> Dict[str, Any]:
     """Update fields on an existing authorized email account.
 
     Only non-``None`` values in *payload* are applied.  Raises if the
@@ -556,48 +556,69 @@ def update_user(payload: dict, user_id: str, admin_id) -> Dict[str, Any]:
     """
     session = SessionLocal()
     try:
-        if not user_id:
-            raise ValueError("user_id is required")
+        if not current_user_id:
+            return {
+                        "status": status.HTTP_401_UNAUTHORIZED,
+                        "message": f"{role} id is required",
+                    }
 
+        if role == 'admin':
+            users = session.query(Users).filter_by(user_id=user_id).first()
+            admin = session.query(Admin).filter(Admin.admin_id == current_user_id).first()
+            blocked = payload.get("is_blocked") if payload.get("is_blocked") is not None else users.is_blocked
+            
+            if "is_blocked" in payload:
+                if blocked == True:
+                    users.is_blocked = blocked
+                    session.commit()
+                    return {
+                        "status": status.HTTP_200_OK,
+                        "message": "User deactivated successfully",
+                    }
+                elif blocked == False:
+                    users.is_blocked = blocked
+                    session.commit()
+                    return {
+                        "status": status.HTTP_200_OK,
+                        "message": "User activated successfully",
+                    }
+        # else:
         users = session.query(Users).filter_by(user_id=user_id).first()
-        if not users:
-            raise ValueError("User not found")
+        if "is_blocked" in payload:
+            return {
+                    "status": status.HTTP_401_UNAUTHORIZED,
+                    "message": "Only admin can block or unblock a user",
+                }
 
         name = payload.get("name") or users.name
         email_address = payload.get("email") if payload.get("email") else users.email_address
-        imap_password = payload.get("imap_password") if payload.get("imap_password") else users.imap_password
+        old_password = payload.get("old_password")
+        new_password = payload.get("new_password")
         connect_with = payload.get("connect_with") if payload.get("connect_with") else users.connect_with
-        blocked = payload.get("is_blocked") if payload.get("is_blocked") is not None else users.is_blocked
         phone_number = payload.get("phone_number") if payload.get("phone_number") else users.phone_number
-        admin = session.query(Admin).filter(admin_id == admin_id).first()
 
-        if not admin:
-            raise Exception("user has no access to enable/disable account")
-        if "is_blocked" in payload:
-            if blocked == True:
-                users.is_blocked = blocked
-                session.commit()
-                return {
-                    "status": status.HTTP_200_OK,
-                    "message": "User deactivated successfully",
+        if not users:
+            return {
+                    "status": status.HTTP_404_NOT_FOUND,
+                    "message": "User not found",
                 }
-            elif blocked == False:
-                users.is_blocked = blocked
-                session.commit()
-                return {
-                    "status": status.HTTP_200_OK,
-                    "message": "User activated successfully",
-                }
-            
+
         if users:
-            duplicate = session.query(Users).filter_by(email_address=email_address, phone_number=phone_number).first()
+            duplicate = session.query(Users).filter_by(email_address=email_address, phone_number=phone_number, name=name).first()
             if duplicate and str(duplicate.user_id) != user_id:
                 raise ValueError("User with this email and phone number already exists, nothing to update")
             users.name = name
             users.email_address = email_address
-            users.imap_password = imap_password
             users.phone_number = phone_number
             users.connect_with = connect_with
+            if old_password and new_password:
+                if old_password == decrypt_data(users.imap_password):
+                    users.imap_password = encrypt_data(new_password)
+                else:
+                    return {
+                    "status": status.HTTP_406_NOT_ACCEPTABLE,
+                    "message": "user password not matched, password not updated",
+                }
             session.commit()
             return {
                 "status": status.HTTP_200_OK,

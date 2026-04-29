@@ -4,7 +4,7 @@ import logging
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from src.admin.dependencies import get_current_admin, get_current_user
+from src.admin.dependencies import get_current_admin, get_current_admin_or_user, get_current_user
 from src.admin.schema import (
     AdminCreate,
     AdminLoginRequest,
@@ -248,7 +248,7 @@ def delete_auth(user_id, _admin=Depends(get_current_admin)):
 
 @router.patch("/update_user/")
 # def update_auth(user_id: str, payload: AuthorizedUserUpdate):
-def update_auth(payload: AuthorizedUserUpdate, user_id, _admin=Depends(get_current_admin)):
+def update_auth(payload: AuthorizedUserUpdate, user_id, _role=Depends(get_current_admin_or_user)):
     """Update fields on an existing authorized email account.
 
     Args:
@@ -262,8 +262,12 @@ def update_auth(payload: AuthorizedUserUpdate, user_id, _admin=Depends(get_curre
     #     )
     try:
         # return update_user(user_id, payload.model_dump(exclude_unset=True))
-        admin_id = _admin.admin_id
-        return update_user(payload.model_dump(exclude_unset=True), user_id, admin_id)
+        role = _role['role']
+        if role == 'admin':
+            current_user_id = _role['data'].admin_id
+        else:
+            current_user_id = _role['data'].user_id
+        return update_user(payload.model_dump(exclude_unset=True), user_id, current_user_id, role)
     except ValueError as e:
         logger.warning("[update_user] Error: %s", str(e), exc_info=True)
         raise HTTPException(

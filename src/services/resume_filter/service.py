@@ -33,7 +33,7 @@ from src.admin.models import Admin, AiModel, AiModelConfig, AiModelversion
 from openai import OpenAI
 from anthropic import Anthropic
 
-from src.utils.helper import compress_file
+from src.utils.helper import clean_mobile_number, compress_file
 BASE_DIR = "/app"  
 EXPORT_PATH = os.path.join(BASE_DIR, "export_files")
 
@@ -87,6 +87,7 @@ def save_resumes_to_db(resumes):
 
             email_address = info_email or sender_email or ""
             phone_number = (info.get("phone_number") or "").strip()
+            phone_number = clean_mobile_number(phone_number)
 
             candidate = None
             if email_address:
@@ -420,9 +421,9 @@ def extract_docx_text(path):
 
     # Remove duplicates while preserving order
     unique_text = list(dict.fromkeys(full_text))
-
-    # return "\n".join(unique_text)
-    return preprocess_resume_text("\n".join(unique_text))
+    print(f"Extracted text from DOCX: {' '.join(unique_text[:20])}...")  # Print first 20 unique pieces for verification
+    return "\n".join(unique_text)
+    # return preprocess_resume_text("\n".join(unique_text))
 
 def extract_text_from_docx(path):
     text = ""
@@ -494,7 +495,7 @@ def is_resume(text: str) -> bool:
 
         message = [
                     {"role": "system", "content": "You only return JSON"},
-                    {"role": "user", "content": prompt + "\n\nDocument:\n" + text[:2000]}
+                    {"role": "user", "content": prompt + "\n\nDocument:\n" + text[:12000]}
                 ]
         
         if model == "openai":
@@ -520,7 +521,7 @@ def is_resume(text: str) -> bool:
                 max_tokens=1000,
                 system="You only return JSON",
                 messages=[
-                    {"role": "user", "content": prompt + "\n\nDocument:\n" + text[:2000]}
+                    {"role": "user", "content": prompt + "\n\nDocument:\n" + text[:12000]}
                 ]
             )
             content = response.content[0].text.strip()
@@ -555,151 +556,6 @@ def is_resume(text: str) -> bool:
         return False
     finally:
         db.close()
-
-import re
-from collections import OrderedDict
-
-
-def preprocess_resume_text(resume_text: str, max_chars: int = 12000) -> str:
-    """
-    Clean and structure resume text before sending to LLM.
-
-    Goals:
-    - Remove noise
-    - Preserve important resume structure
-    - Reduce token usage
-    - Improve extraction accuracy
-    """
-
-    if not resume_text:
-        return ""
-
-    # ----------------------------------------
-    # STEP 1: Normalize line breaks
-    # ----------------------------------------
-    text = resume_text.replace("\r", "\n")
-
-    # Remove tabs
-    text = text.replace("\t", " ")
-
-    # ----------------------------------------
-    # STEP 2: Remove invisible/control chars
-    # ----------------------------------------
-    text = re.sub(r"[\x00-\x1F\x7F-\x9F]", "", text)
-
-    # ----------------------------------------
-    # STEP 3: Split into lines
-    # ----------------------------------------
-    raw_lines = text.split("\n")
-
-    cleaned_lines = []
-
-    for line in raw_lines:
-
-        # Remove extra spaces
-        line = re.sub(r"\s+", " ", line).strip()
-
-        # Skip empty lines
-        if not line:
-            continue
-
-        # Skip useless separators
-        if re.fullmatch(r"[-_=|.]{3,}", line):
-            continue
-
-        # Skip page numbers
-        if re.fullmatch(r"page\s*\d+", line.lower()):
-            continue
-
-        # Skip repeated single symbols
-        if len(set(line)) == 1:
-            continue
-
-        cleaned_lines.append(line)
-
-    # ----------------------------------------
-    # STEP 4: Remove duplicate lines
-    # ----------------------------------------
-    unique_lines = list(OrderedDict.fromkeys(cleaned_lines))
-
-    # ----------------------------------------
-    # STEP 5: Merge broken lines
-    # Example:
-    # Python
-    # Developer
-    # -> Python Developer
-    # ----------------------------------------
-    merged_lines = []
-
-    i = 0
-
-    while i < len(unique_lines):
-
-        current = unique_lines[i]
-
-        if i + 1 < len(unique_lines):
-
-            next_line = unique_lines[i + 1]
-
-            # Merge short broken lines
-            if (
-                len(current.split()) <= 3
-                and len(next_line.split()) <= 5
-                and not current.endswith((".", ":"))
-            ):
-                merged = f"{current} {next_line}"
-
-                if len(merged.split()) <= 8:
-                    merged_lines.append(merged)
-                    i += 2
-                    continue
-
-        merged_lines.append(current)
-        i += 1
-
-    # ----------------------------------------
-    # STEP 6: Detect sections
-    # ----------------------------------------
-    SECTION_HEADERS = {
-        "summary",
-        "profile",
-        "experience",
-        "work experience",
-        "employment",
-        "skills",
-        "technical skills",
-        "education",
-        "projects",
-        "certifications",
-        "contact",
-        "achievements",
-    }
-
-    structured_lines = []
-
-    for line in merged_lines:
-
-        normalized = line.lower().strip()
-
-        if normalized in SECTION_HEADERS:
-            structured_lines.append(f"\n### {line.upper()} ###")
-        else:
-            structured_lines.append(line)
-
-    # ----------------------------------------
-    # STEP 7: Join text cleanly
-    # ----------------------------------------
-    final_text = "\n".join(structured_lines)
-
-    # Remove excessive blank lines
-    final_text = re.sub(r"\n{3,}", "\n\n", final_text)
-
-    # ----------------------------------------
-    # STEP 8: Limit size for LLM
-    # ----------------------------------------
-    final_text = final_text[:max_chars]
-
-    return final_text.strip()
 
 def extract_basic_info(resume_text):
     """Use local Ollama LLM to extract structured info from resume text."""
@@ -827,7 +683,7 @@ def extract_basic_info(resume_text):
         
         message = [
                     {"role": "system", "content": "You only return JSON"},
-                    {"role": "user", "content": prompt + "\n\nDocument:\n" + resume_text[:2000]}
+                    {"role": "user", "content": prompt + "\n\nDocument:\n" + resume_text[:12000]}
                 ]
 
         if model == "openai":
@@ -853,7 +709,7 @@ def extract_basic_info(resume_text):
                 max_tokens=1000,
                 system="You only return JSON",
                 messages=[
-                    {"role": "user", "content": prompt + "\n\nDocument:\n" + resume_text[:2000]}
+                    {"role": "user", "content": prompt + "\n\nDocument:\n" + resume_text[:12000]}
                 ]
             )
             content = response.content[0].text.strip()

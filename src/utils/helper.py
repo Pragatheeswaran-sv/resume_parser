@@ -4,6 +4,8 @@ import pikepdf
 from dotenv import load_dotenv
 import logging
 import cryptography.fernet as fernet
+import re
+import phonenumbers
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -79,3 +81,15 @@ def decrypt_data(encrypted_value):
 
     except Exception:
         return None
+
+def clean_mobile_number(phone_number):
+    try:
+        # Remove spaces/dashes/brackets
+        cleaned = re.sub(r"[^\d+]", "", phone_number)
+
+        parsed = phonenumbers.parse(cleaned)
+
+        return str(parsed.national_number)
+
+    except Exception:
+        return phone_number
