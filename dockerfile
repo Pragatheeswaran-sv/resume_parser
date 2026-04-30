@@ -16,6 +16,8 @@ RUN poetry install --no-root --no-interaction --no-ansi \
     && pip cache purge \
     && rm -rf /root/.cache /tmp/*
 
+RUN pip install --no-cache-dir email-validator
+
 # ---- Stage 2: Final runtime image ----
 FROM python:3.13-slim
 
