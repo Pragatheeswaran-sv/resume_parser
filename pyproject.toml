@@ -34,7 +34,9 @@ dependencies = [
     "anthropic (>=0.89.0,<0.90.0)",
     "requests",
     "pikepdf (>=10.5.1,<11.0.0)",
-    "pandas (>=3.0.2,<4.0.0)"
+    "pandas (>=3.0.2,<4.0.0)",
+    "lxml (>=6.1.0,<7.0.0)",
+    "phonenumbers (>=9.0.29,<10.0.0)"
 ]
 
 
