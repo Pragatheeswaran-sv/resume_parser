@@ -959,9 +959,20 @@ def search_resumes(filters: dict, export: bool = False) -> list:
         )
         conditions = [Candidate.is_active == True]
 
-        name = filters.get("name")
-        if name:
-            conditions.append(Candidate.name.ilike(f"%{str(name).strip()}%"))
+        name_list = filters.get("name")
+        if name_list and isinstance(name_list, list):
+            # LIKE pattern search: match names containing the pattern (case-insensitive like %name%)
+            name_conditions = []
+            for name in name_list:
+                name = str(name).strip()
+                if name:
+                    # Use LIKE with wildcards for partial match (e.g., %Ramesh%)
+                    name_conditions.append(Candidate.name.ilike(f"%{name}%"))
+            if name_conditions:
+                conditions.append(or_(*name_conditions))
+        elif name_list and isinstance(name_list, str):
+            # Single name - LIKE pattern match (case-insensitive)
+            conditions.append(Candidate.name.ilike(f"%{name_list.strip()}%"))
 
         if filters.get("min_experience") not in (None, ""):
             try:
@@ -985,23 +996,38 @@ def search_resumes(filters: dict, export: bool = False) -> list:
                 )
             )
 
+        roles = filters.get("roles")
+        if isinstance(roles, list) and roles:
+            conditions.append(
+                Candidate.candidate_id.in_(
+                    db.query(WorkExperience.candidate_id).filter(
+                        WorkExperience.role_id.in_(roles)
+                    )
+                )
+            )
+
         companies = filters.get("companies")
         if isinstance(companies, list) and companies:
             company_ids = []
             for comp in companies:
+                # LIKE pattern search: match company names containing the pattern (case-insensitive like %company%)
                 matched = db.query(Company).filter(
-                    Company.company_name.ilike(f"%{comp}%")
+                    Company.company_name.ilike(f"%{comp.strip()}%")
                 ).all()
                 company_ids.extend([c.company_id for c in matched])
 
-            if company_ids:
-                conditions.append(
-                    Candidate.candidate_id.in_(
-                        db.query(WorkExperience.candidate_id).filter(
-                            WorkExperience.company_id.in_(company_ids)
-                        )
+            if not company_ids:
+                logger.warning("[search_resumes] No companies matched filter: %s", companies)
+                db.close()
+                return [{"total_record": 0}]
+            
+            conditions.append(
+                Candidate.candidate_id.in_(
+                    db.query(WorkExperience.candidate_id).filter(
+                        WorkExperience.company_id.in_(company_ids)
                     )
                 )
+            )
 
         education = filters.get("education")
         if isinstance(education, list) and education:
@@ -1053,6 +1079,20 @@ def search_resumes(filters: dict, export: bool = False) -> list:
             .scalar()
         ) or 0
 
+        # Subquery to get the most recent resume for each candidate
+        recent_resume_subq = (
+            db.query(
+                Resume.candidate_id,
+                Resume.resume_id,
+                func.row_number().over(
+                    partition_by=Resume.candidate_id,
+                    order_by=Resume.created_at.desc()
+                ).label("rn")
+            )
+            .subquery()
+        )
+
+# Build candidate info JSON - handle resume_id properly
         query = (
             db.query(
                 func.json_build_object(
@@ -1062,7 +1102,7 @@ def search_resumes(filters: dict, export: bool = False) -> list:
                     "phone_number", Candidate.phone_number,
                     "location", Candidate.location,
                     "total_experience", Candidate.total_experience,
-                    "resume_id", Resume.resume_id,
+                    "resume_id", recent_resume_subq.c.resume_id,
                     "education", func.coalesce(candidate_education.c.education, cast('[]', JSON)),
                     "skills", func.coalesce(candidate_skills.c.skills, cast('[]', JSON)),
                     "work_experience", func.coalesce(candidate_work_exp.c.work_experience, cast('[]', JSON))
@@ -1072,7 +1112,13 @@ def search_resumes(filters: dict, export: bool = False) -> list:
             .outerjoin(candidate_education, Candidate.candidate_id == candidate_education.c.candidate_id)
             .outerjoin(candidate_skills, Candidate.candidate_id == candidate_skills.c.candidate_id)
             .outerjoin(candidate_work_exp, Candidate.candidate_id == candidate_work_exp.c.candidate_id)
-            .outerjoin(Resume, Candidate.candidate_id == Resume.candidate_id)
+            .outerjoin(
+                recent_resume_subq,
+                and_(
+                    Candidate.candidate_id == recent_resume_subq.c.candidate_id,
+                    recent_resume_subq.c.rn == 1
+                )
+            )
             .filter(and_(*conditions))
         )
 
@@ -1752,6 +1798,7 @@ def extract_filters_from_query(query: str) -> dict:
     """Use Ollama LLM to convert a natural-language hiring query into a structured filter payload."""
 
     OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+    OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3")
     prompt = """
 You are a hiring-query parser.
 
@@ -1787,7 +1834,7 @@ RULES:
 """
     try:
         response = ollama.chat(
-            model="llama3",
+            model=OLLAMA_MODEL,
             messages=[
                 {"role": "system", "content": "You output only JSON."},
                 {"role": "user", "content": prompt + "\n\nQuery:\n" + query[:1000]},
@@ -1829,47 +1876,42 @@ def resolve_dynamic_filters(dynamic_filters: dict) -> dict:
     db = SessionLocal()
     resolved: dict = {}
     try:
+        def _match_ids(model, id_attr, name_attr, values: list) -> list[str]:
+            ids = []
+            for value in values:
+                if not value or not isinstance(value, str):
+                    continue
+                clean_value = value.strip()
+                if not clean_value:
+                    continue
+
+                matches = db.query(model).filter(name_attr.ilike(clean_value)).all()
+                if not matches:
+                    matches = db.query(model).filter(name_attr.ilike(f"%{clean_value}%")).all()
+
+                if matches:
+                    ids.extend(str(getattr(match, id_attr)) for match in matches)
+                else:
+                    logger.debug("[resolve_dynamic_filters] No match for '%s'", clean_value)
+            return list(dict.fromkeys(ids))
+
         skill_names = dynamic_filters.get("skills")
         if skill_names and isinstance(skill_names, list):
-            skill_ids = []
-            for name in skill_names:
-                if not name or not isinstance(name, str):
-                    continue
-                matches = db.query(Skill).filter(Skill.skill.ilike(f"%{name.strip()}%")).all()
-                if matches:
-                    skill_ids.extend(str(m.skill_id) for m in matches)
-                else:
-                    logger.debug("[resolve_dynamic_filters] No skill match for '%s'", name)
+            skill_ids = _match_ids(Skill, "skill_id", Skill.skill, skill_names)
             if skill_ids:
-                resolved["skills"] = list(dict.fromkeys(skill_ids))
+                resolved["skills"] = skill_ids
 
         edu_names = dynamic_filters.get("education")
         if edu_names and isinstance(edu_names, list):
-            edu_ids = []
-            for name in edu_names:
-                if not name or not isinstance(name, str):
-                    continue
-                matches = db.query(Education).filter(Education.education.ilike(f"%{name.strip()}%")).all()
-                if matches:
-                    edu_ids.extend(str(m.education_id) for m in matches)
-                else:
-                    logger.debug("[resolve_dynamic_filters] No education match for '%s'", name)
+            edu_ids = _match_ids(Education, "education_id", Education.education, edu_names)
             if edu_ids:
-                resolved["education"] = list(dict.fromkeys(edu_ids))
+                resolved["education"] = edu_ids
 
         role_names = dynamic_filters.get("roles")
         if role_names and isinstance(role_names, list):
-            role_ids = []
-            for name in role_names:
-                if not name or not isinstance(name, str):
-                    continue
-                matches = db.query(Role).filter(Role.role.ilike(f"%{name.strip()}%")).all()
-                if matches:
-                    role_ids.extend(str(m.role_id) for m in matches)
-                else:
-                    logger.debug("[resolve_dynamic_filters] No role match for '%s'", name)
+            role_ids = _match_ids(Role, "role_id", Role.role, role_names)
             if role_ids:
-                resolved["roles"] = list(dict.fromkeys(role_ids))
+                resolved["roles"] = role_ids
 
         companies = dynamic_filters.get("companies")
         if companies and isinstance(companies, list):

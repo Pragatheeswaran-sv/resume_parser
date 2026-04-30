@@ -11,6 +11,7 @@ import json
 import uuid
 import logging
 import datetime as dt
+import re
 from fastapi import status
 from src.services.redis_client import get_redis, NL_SEARCH_TTL
 from src.services.resume_filter.service import (
@@ -27,6 +28,12 @@ from pydantic import ValidationError
 logger = logging.getLogger(__name__)
 
 REDIS_KEY_PREFIX = "search:"
+
+KEYWORD_STOP_WORDS = {
+    "a", "an", "and", "as", "at", "candidate", "candidates", "developer",
+    "developers", "engineer", "engineers", "for", "from", "in", "of", "or",
+    "profile", "profiles", "resume", "resumes", "the", "with",
+}
 
 
 def _build_redis_key(search_id: str) -> str:
@@ -67,6 +74,36 @@ def _load_search_session(search_id: str) -> dict | None:
         return None
 
 
+def _keyword_filter_attempts(user_query: str) -> list[dict]:
+    """Build deterministic fallback filters when LLM extraction is unavailable."""
+    cleaned = re.sub(r"\s+", " ", user_query or "").strip()
+    if not cleaned:
+        return []
+
+    tokens = [
+        token
+        for token in re.findall(r"[A-Za-z0-9+#.]+", cleaned)
+        if len(token) > 1 and token.lower() not in KEYWORD_STOP_WORDS
+    ]
+    terms = list(dict.fromkeys([cleaned] + tokens))
+
+    attempts: list[dict] = []
+    for field in ("skills", "roles", "companies", "education"):
+        attempts.extend({field: [term]} for term in terms)
+    attempts.append({"name": cleaned})
+    return attempts
+
+
+def _fallback_extract_and_resolve(user_query: str) -> tuple[dict, dict]:
+    """Try keyword-based filters so simple searches work without the LLM."""
+    for raw_filters in _keyword_filter_attempts(user_query):
+        resolved = resolve_dynamic_filters(raw_filters)
+        if resolved:
+            logger.info("[nl_search] Keyword fallback matched: %s -> %s", raw_filters, resolved)
+            return raw_filters, resolved
+    return {}, {}
+
+
 def _extract_and_resolve(user_query: str) -> tuple[dict, dict]:
     """Run the LLM extraction → UUID resolution pipeline.
 
@@ -78,7 +115,10 @@ def _extract_and_resolve(user_query: str) -> tuple[dict, dict]:
     logger.info("[nl_search] LLM raw output: %s", raw_filters)
 
     if not raw_filters:
-        raise ValueError("LLM could not extract any filters from the query")
+        raw_filters, resolved = _fallback_extract_and_resolve(user_query)
+        if not resolved:
+            raise ValueError("Could not extract any filters from the query. Please rephrase and try again.")
+        return raw_filters, resolved
 
     try:
         DynamicFilterResponse(**raw_filters)
@@ -89,6 +129,9 @@ def _extract_and_resolve(user_query: str) -> tuple[dict, dict]:
     logger.info("[nl_search] Resolved filters: %s", resolved)
 
     if not resolved:
+        fallback_raw, fallback_resolved = _fallback_extract_and_resolve(user_query)
+        if fallback_resolved:
+            return fallback_raw, fallback_resolved
         raise ValueError("Candidate not found for the given query.")
         # raise ValueError(
         #     "None of the LLM-extracted filter values matched known data. "
