@@ -1513,3 +1513,73 @@ def toggle_model(model_config_id, admin_id):
         raise ValueError(str(e))
     finally:
         db.close()
+
+def active_model(admin_id):
+    try:
+        db = SessionLocal()
+        if not admin_id:
+            return {
+                "status": status.HTTP_401_UNAUTHORIZED,
+                "message": "Admin ID must be provided",
+            }
+        active_model = (
+            db.query(
+                func.json_build_object(
+                    "model_config_id", AiModelConfig.ai_model_config_id,
+                    "model_id", AiModelConfig.ai_model_id,
+                    "model_name", AiModel.model_name,
+                    "model_version_id", AiModelversion.ai_model_version_id,
+                    "model_version_name", AiModelversion.version_name,
+                    "apikey", AiModelConfig.apikey,
+                    "max_tokens", AiModelConfig.max_tokens,
+                    "admin_id", AiModelConfig.admin_id,
+                    "is_active", AiModelConfig.is_active
+                )
+            )
+            .select_from(AiModelConfig)
+            .join(
+                AiModel,
+                AiModel.ai_model_id == AiModelConfig.ai_model_id
+            )
+            .join(
+                AiModelversion,
+                AiModelversion.ai_model_version_id == AiModelConfig.ai_model_version_id
+            )
+            .filter(
+                AiModelConfig.admin_id == admin_id,
+                AiModelConfig.is_active == True
+            )
+            .first()
+        )
+        masked_api_key = None
+        if active_model and active_model[0]['apikey']:
+            try:
+                decrypted_key = decrypt_data(active_model[0]['apikey'])
+            except Exception:
+                decrypted_key = str(active_model[0]['apikey'])  
+
+            if decrypted_key and isinstance(decrypted_key, str):
+                if len(decrypted_key) > 4:
+                    masked_api_key = decrypted_key[:2] + "******" + decrypted_key[-2:]
+                else:
+                    masked_api_key = "******"
+            else:
+                masked_api_key = None
+
+        return {
+            "status": status.HTTP_200_OK,
+            "message": "Active model retrieved successfully",
+            "data": {
+                "model_config_id": active_model[0]['model_config_id'],
+                "model_id": active_model[0]['model_id'],
+                "model_name": active_model[0]['model_name'],
+                "version_id": active_model[0]['model_version_id'],
+                "version_name": active_model[0]['model_version_name'],
+                "apikey": masked_api_key,
+                "max_tokens": active_model[0]['max_tokens'],
+                "admin_id": active_model[0]['admin_id'],
+                "is_active": active_model[0]['is_active']}   
+        }
+    except Exception as e:
+        logger.warning("[active_model] Error: %s", str(e), exc_info=True)
+        raise ValueError(str(e))
