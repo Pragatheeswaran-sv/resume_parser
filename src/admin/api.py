@@ -20,6 +20,7 @@ from src.admin.schema import (
 )
 # from src.services.resume_filter.service import export
 from src.services.admin.service import (
+    active_model,
     admin_check,
     delete_user,
     get_extraction_config,
@@ -738,6 +739,43 @@ def enable_model(model_config_id, _admin=Depends(get_current_admin)):
         return toggle_model(model_config_id, admin_id)
     except ValueError as e:
         logger.warning("[enable_model] Error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "status": "error",
+                "message": str(e),
+            })
+
+@router.get("/show_active_model")
+def show_active_model(_admin=Depends(get_current_admin)):
+    """
+        Show Active AI Model Configuration
+
+        Retrieves the currently active AI model configuration for the authenticated admin.
+
+        This endpoint returns the details of the active model configuration, including
+        the associated model, model version, API key, token settings, and other relevant
+        information.
+
+        Endpoint:
+            GET /show_active_model
+        Args:
+            _admin (Admin):
+                The currently authenticated admin user (injected via dependency).
+        Returns:
+            dict: A response object containing:
+                - status (str): "success" or "error"
+                - message (str): Description of the operation result
+                - data (dict, optional): Details of the active model configuration
+        Raises:
+            HTTPException:
+                - 400 Bad Request: If no active model configuration is found for the admin.
+    """
+    try:
+        admin_id = _admin.admin_id
+        return active_model(admin_id)
+    except ValueError as e:
+        logger.warning("[show_active_model] Error: %s", str(e), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
