@@ -95,6 +95,7 @@ def profile(admin_id):
             "message": "Admin profile retrieved successfully",
             
             "data" : {
+                'admin_id' : str(admin.admin_id), 
                 'admin_name' : admin.name,
                 'admin_email' : admin.email_address,
                 'admin_phone_number' : admin.phone_number,
@@ -312,7 +313,7 @@ def new_admin(payload: dict) -> Dict[str, Any]:
     finally:
         session.close()
 
-def list_mail(page, page_size, sort_by, sort_order, filter_column, filter_value) -> Dict[str, Any]:
+def list_user(page, page_size, sort_by, sort_order, filter_column, filter_value) -> Dict[str, Any]:
     session = SessionLocal()
     try:
         page = int(page)
@@ -428,9 +429,10 @@ def get_user(user_id):
             "message": "User profile retrieved successfully",
             
             "data" : {
-                'admin_name' : user.name,
-                'admin_email' : user.email_address,
-                'admin_phone_number' : user.phone_number,
+                'user_id' : str(user.user_id), 
+                'user_name' : user.name,
+                'user_email' : user.email_address,
+                'user_phone_number' : user.phone_number,
             }
         }
     except ValueError:
