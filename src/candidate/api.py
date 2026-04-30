@@ -1,7 +1,7 @@
 import logging
 from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException, status, Query, Depends
-from src.admin.dependencies import get_current_admin
+from src.admin.dependencies import get_current_admin, get_current_admin_or_user
 from typing import List, Dict, Any
 from src.services.candidate.service import candidate_datails, CandidateServiceError
 from src.resume_filter.schemas import ResumeFilterRequest, SemanticSearchRequest
@@ -166,7 +166,7 @@ def get_candidates(
         )
 
 @router.get("/export_data/")
-def export_data(search_id: str, page: int, page_size: int, export: bool = False):
+def export_data(search_id: str, page: int, page_size: int, export: bool = False, _current_admin_or_user = Depends(get_current_admin_or_user)):
     """
         Export Data
 
@@ -180,8 +180,8 @@ def export_data(search_id: str, page: int, page_size: int, export: bool = False)
         Endpoint:
             GET /export_data
         Args:
-            _admin (Admin):
-                The currently authenticated admin user (injected via dependency).
+            _current_admin_or_user (dict):
+                The currently authenticated admin or user (injected via dependency).
         Returns:
             dict: A response object containing:
                 - status (str): "success" or "error"
