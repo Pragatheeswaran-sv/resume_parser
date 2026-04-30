@@ -27,7 +27,8 @@ from src.services.admin.service import (
     get_user_by_id,
     is_within_extraction_window,
     list_email_accounts,
-    list_mail,
+    # list_mail,
+    list_user,
     new_admin,
     new_auth,
     new_job,
@@ -159,7 +160,7 @@ def get_users(page, page_size, sort_by = None, sort_order = None, filter_column 
         admin = _admin.admin_id
         if not admin:
             raise ValueError("Admin authentication required")
-        return list_mail(page, page_size, sort_by, sort_order, filter_column, filter_value)
+        return list_user(page, page_size, sort_by, sort_order, filter_column, filter_value)
     except ValueError as e:
         logger.warning("[list_users] Error: %s", str(e), exc_info=True)
         raise HTTPException(
