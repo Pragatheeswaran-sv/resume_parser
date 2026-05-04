@@ -137,7 +137,6 @@ def _extract_and_resolve(user_query: str) -> tuple[dict, dict]:
         #     "None of the LLM-extracted filter values matched known data. "
         #     "Extracted: " + ", ".join(f"{k}={v}" for k, v in raw_filters.items())
         # )
-
     return raw_filters, resolved
 
 
