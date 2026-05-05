@@ -73,10 +73,10 @@ def download_file(file_name: str):
     try:
         file_path = os.path.join(UPLOAD_DIR, file_name)
 
-        print("Checking file:", file_path)
+        logger.info("Checking file:", file_path)
 
         if not os.path.exists(file_path):
-            print("File NOT found!")  
+            logger.info("File NOT found!")  
             raise HTTPException(status_code=404, detail="File not found")
 
         return FileResponse(

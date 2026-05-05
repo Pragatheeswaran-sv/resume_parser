@@ -361,7 +361,7 @@ def extract_text_from_pdf(path):
         reader = PdfReader(path)
         for page in reader.pages:
             text += page.extract_text() or ""
-        print(f"Extracted text from PDF: {text}")  # Print first 200 chars for verification
+        logger.info(f"Extracted text from PDF: {text}")  # Print first 200 chars for verification
     except Exception as e:
         logger.info(f"[ERROR] PDF read failed: {path} -> {e}")
     return text
@@ -421,7 +421,7 @@ def extract_docx_text(path):
 
     # Remove duplicates while preserving order
     unique_text = list(dict.fromkeys(full_text))
-    print(f"Extracted text from DOCX: {' '.join(unique_text[:20])}...")  # Print first 20 unique pieces for verification
+    logger.info(f"Extracted text from DOCX: {' '.join(unique_text[:20])}...")  # Print first 20 unique pieces for verification
     return "\n".join(unique_text)
     # return preprocess_resume_text("\n".join(unique_text))
 
@@ -430,7 +430,7 @@ def extract_text_from_docx(path):
     try:
         doc = Document(path)
         text = "\n".join(p.text for p in doc.paragraphs)
-        print(f"Extracted text from DOCX: {text}")  # Print first 100 chars for verification
+        logger.info(f"Extracted text from DOCX: {text}")  # Print first 100 chars for verification
     except Exception as e:
         logger.info(f"[ERROR] DOCX read failed: {path} -> {e}")
     return text
@@ -831,8 +831,10 @@ def process_resumes(email_id: UUID) -> dict:
 
         results = []
         file_path = ""
+        attachment_ids = []
         for att in all_attachments:
             file_path = f"attachments/{att.file_name}"
+            attachment_ids.append(att.attachment_id)
             if file_path.endswith(".pdf"):
                 text = extract_text_from_pdf(file_path)
             elif file_path.endswith(".docx"):
@@ -876,11 +878,17 @@ def process_resumes(email_id: UUID) -> dict:
             save_resumes_to_db(results)
 
         file_compress = compress_file(file_path)
+        for att_id in attachment_ids:
+            attachment = db.query(Attachment).filter(Attachment.attachment_id == att_id).first()
+            attachment.file_name = file_compress
+            db.commit()
+            db.refresh(attachment)
+        
         if os.path.exists(file_path):
             os.remove(file_path)
             logger.info(f"{file_path} removed successfully")
         logger.info(f'{file_compress}')
-
+        
         return {
             "message_id": str(email_id),
             "processed_files": len(results)
@@ -895,7 +903,6 @@ def search_resumes(filters: dict, export: bool = False) -> list:
     if not filters or not isinstance(filters, dict):
         logger.warning("[search_resumes] Received empty or invalid filters dict")
         return [{"total_record": 0}]
-
     db = SessionLocal()
     try:
         results = []
@@ -1016,18 +1023,33 @@ def search_resumes(filters: dict, export: bool = False) -> list:
                 ).all()
                 company_ids.extend([c.company_id for c in matched])
 
-            if not company_ids:
-                logger.warning("[search_resumes] No companies matched filter: %s", companies)
-                db.close()
-                return [{"total_record": 0}]
-            
-            conditions.append(
-                Candidate.candidate_id.in_(
-                    db.query(WorkExperience.candidate_id).filter(
-                        WorkExperience.company_id.in_(company_ids)
+            if company_ids:
+                conditions.append(
+                    Candidate.candidate_id.in_(
+                        db.query(WorkExperience.candidate_id).filter(
+                            WorkExperience.company_id.in_(company_ids)
+                        )
                     )
                 )
-            )
+
+        roles = filters.get("roles")
+        if isinstance(roles, list) and roles:
+            role_ids = []
+            for rol in roles:
+                matched = db.query(Role).filter(
+                    # Role.role_id.in_(rol)
+                    Role.role_id == rol
+                ).all()
+                role_ids.extend([c.role_id for c in matched])
+
+            if role_ids:
+                conditions.append(
+                    Candidate.candidate_id.in_(
+                        db.query(WorkExperience.candidate_id).filter(
+                            WorkExperience.role_id.in_(role_ids)
+                        )
+                    )
+                )
 
         education = filters.get("education")
         if isinstance(education, list) and education:
@@ -1800,38 +1822,84 @@ def extract_filters_from_query(query: str) -> dict:
     OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
     OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3")
     prompt = """
-You are a hiring-query parser.
+        You are a hiring-query parser.
 
-Given a recruiter's natural-language search query, extract structured filter criteria.
+        Given a recruiter's natural-language search query, extract structured filter criteria.
 
-Return ONLY valid JSON matching this schema (omit keys whose value would be null or empty):
+        Return ONLY valid JSON matching this schema (omit keys whose value would be null or empty):
 
-{
-    "skills": ["skill1", "skill2"],
-    "education": ["qualification1"],
-    "roles": ["role1"],
-    "companies": ["company1"],
-    "min_experience": <number or null>,
-    "max_experience": <number or null>,
-    "name": "<candidate name or null>",
-    "passout_start_year": <four-digit year or null>,
-    "passout_end_year": <four-digit year or null>,
-    "percentage": <number 0-100 or null>
-}
+        {
+            "skills": ["skill1", "skill2"],
+            "education": ["qualification1"],
+            "roles": ["role1"],
+            "companies": ["company1"],
+            "min_experience": <number or null>,
+            "max_experience": <number or null>,
+            "name": "<candidate name or null>",
+            "passout_start_year": <four-digit year or null>,
+            "passout_end_year": <four-digit year or null>,
+            "percentage": <number 0-100 or null>
+        }
 
-RULES:
-1. skills, education, roles, companies must be arrays of SHORT strings (e.g. "Python", "B.Tech").
-2. Experience: "5+ years" → min_experience=5. "3-5 years" → min_experience=3, max_experience=5.
-   "10 years" → min_experience=10, max_experience=10.
-3. Graduation / passout year: "graduated after 2020" → passout_start_year=2020.
-   "passed out between 2018 and 2022" → passout_start_year=2018, passout_end_year=2022.
-   "2021 batch" → passout_start_year=2021, passout_end_year=2021.
-4. Percentage / score: "above 80%" → percentage=80. "minimum 75 percentage" → percentage=75.
-   If a CGPA is mentioned (e.g. "8.5 CGPA"), convert to percentage: multiply by 10 (8.5 → 85).
-5. Only include fields explicitly mentioned in the query.
-6. Do NOT guess or infer values not present in the query.
-7. Return ONLY JSON – no markdown, no explanation, no extra text.
-"""
+        RULES:
+        1. skills, education, roles, companies must be arrays of SHORT strings.
+        Examples:
+        - skills: "Python", "Java", ".NET", "React"
+        - education: "B.Tech", "MBA"
+        - roles: "Python Developer", "Backend Developer", "Data Engineer"
+
+        2. Role vs Skill classification:
+        - If a term includes a job designation such as:
+            "developer", "engineer", "architect", "lead", "manager",
+            "analyst", "consultant", "administrator", "specialist",
+            then classify it under "roles".
+            
+            Examples:
+            - "Python Developer" -> roles
+            - "Backend Developer" -> roles
+            - ".NET Developer" -> roles
+            - "Java Engineer" -> roles
+
+        - If only a technology/programming language/framework is mentioned
+            without a designation, classify it under "skills".
+
+            Examples:
+            - "Python" -> skills
+            - "Java" -> skills
+            - ".NET" -> skills
+            - "React" -> skills
+
+        3. Experience:
+        - "5+ years" → min_experience=5
+        - "3-5 years" → min_experience=3, max_experience=5
+        - "10 years" → min_experience=10, max_experience=10
+
+        4. Graduation / passout year:
+        - "graduated after 2020" → passout_start_year=2020
+        - "passed out between 2018 and 2022" →
+            passout_start_year=2018,
+            passout_end_year=2022
+        - "2021 batch" →
+            passout_start_year=2021,
+            passout_end_year=2021
+
+        5. Percentage / score:
+        - "above 80%" → percentage=80
+        - "minimum 75 percentage" → percentage=75
+        - If a CGPA is mentioned (e.g. "8.5 CGPA"),
+            convert to percentage by multiplying by 10.
+            Example:
+            8.5 CGPA → 85
+
+        6. Only include fields explicitly mentioned in the query.
+
+        7. Do NOT guess or infer values not present in the query.
+
+        8. Return ONLY JSON.
+        No markdown.
+        No explanation.
+        No extra text.
+        """
     try:
         response = ollama.chat(
             model=OLLAMA_MODEL,
@@ -1911,7 +1979,8 @@ def resolve_dynamic_filters(dynamic_filters: dict) -> dict:
         if role_names and isinstance(role_names, list):
             role_ids = _match_ids(Role, "role_id", Role.role, role_names)
             if role_ids:
-                resolved["roles"] = role_ids
+                resolved["roles"] = list(dict.fromkeys(role_ids))
+            
 
         companies = dynamic_filters.get("companies")
         if companies and isinstance(companies, list):
