@@ -24,8 +24,8 @@ from sqlalchemy import JSON, Float, Integer, select, and_, cast, String, text, f
 from sqlalchemy.orm import aliased, joinedload
 from src.email_reader.models import EmailLogs, Attachment
 from src.candidate.models import (
-	Candidate, CandidateSkills, CandidateEducation, 
-	WorkExperience, Skill, Education, Company, Role
+    Candidate, CandidateSkills, CandidateEducation, 
+    WorkExperience, Skill, Education, Company, Role
 )
 from src.services.admin.service import get_model
 from src.admin.models import Admin, AiModel, AiModelConfig, AiModelversion
@@ -1114,7 +1114,6 @@ def search_resumes(filters: dict, export: bool = False) -> list:
             .subquery()
         )
 
-# Build candidate info JSON - handle resume_id properly
         query = (
             db.query(
                 func.json_build_object(
@@ -1817,10 +1816,8 @@ def semantic_search_resumes(query: str, top_k: int = 5):
         logger.debug("[semantic_search] Database session closed")
 
 def extract_filters_from_query(query: str) -> dict:
-    """Use Ollama LLM to convert a natural-language hiring query into a structured filter payload."""
+    """Use LLM to convert a natural-language hiring query into a structured filter payload."""
 
-    OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-    OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3")
     prompt = """
         You are a hiring-query parser.
 
@@ -1901,14 +1898,79 @@ def extract_filters_from_query(query: str) -> dict:
         No extra text.
         """
     try:
-        response = ollama.chat(
-            model=OLLAMA_MODEL,
-            messages=[
-                {"role": "system", "content": "You output only JSON."},
-                {"role": "user", "content": prompt + "\n\nQuery:\n" + query[:1000]},
-            ],
+        db = SessionLocal()
+        admin = db.query(Admin).filter(Admin.is_active == True).first()
+
+        if not admin:
+            logger.warning("[extract_filters_from_query] No admin found, defaulting to ollama with latest model")
+            raise Exception("No admin found")
+
+        model_info = (db.query(
+            func.json_build_object(
+                'model_name', AiModel.model_name,
+                'model_version_name', AiModelversion.version_name,
+                'apikey', AiModelConfig.apikey,
+                'max_tokens', AiModelConfig.max_tokens,
+                'temperature', AiModelConfig.temparature,
+                'is_active', AiModelConfig.is_active
+            )
         )
-        content = response["message"]["content"].strip()
+        .select_from(AiModelConfig)
+        .join(AiModel, AiModel.ai_model_id == AiModelConfig.ai_model_id)
+        .join(AiModelversion, AiModelversion.ai_model_version_id == AiModelConfig.ai_model_version_id)
+        .filter(AiModelConfig.is_active == True)
+        .first()
+        )
+
+        if not model_info:
+            model_info = {}
+        else:
+            model_info = model_info[0]
+        
+        logger.info("[extract_filters_from_query] Using LLM model: %s, version: %s", model_info.get("model_name"), model_info.get("model_version_name"))
+
+        model = model_info.get("model_name", "ollama").lower()
+        version = model_info.get("model_version_name", "llama3").lower()
+        api_key = model_info.get("apikey") or None
+
+        message = [
+            {"role": "system", "content": "You output only JSON."},
+            {"role": "user", "content": prompt + "\n\nQuery:\n" + query[:1000]},
+        ]
+
+        if model == "openai":
+            if not api_key or api_key == None:
+                raise Exception("OpenAI API key not found")
+
+            client = OpenAI(api_key=api_key)
+
+            response = client.chat.completions.create(
+                model=version,
+                messages=message
+            )
+            content = response.choices[0].message.content.strip()
+        elif model == "claude":
+            if not api_key or api_key == None:
+                raise Exception("Claude API key not found")
+
+            client = Anthropic(api_key=api_key)
+
+            response = client.messages.create(
+                model=version,
+                max_tokens=1000,
+                system="You output only JSON.",
+                messages=[
+                    {"role": "user", "content": prompt + "\n\nQuery:\n" + query[:1000]}
+                ]
+            )
+            content = response.content[0].text.strip()
+        else:
+            response = ollama.chat(
+                model=version,
+                messages=message
+            )
+            content = response["message"]["content"].strip()
+
         logger.info("[extract_filters_from_query] Raw LLM response: %s", content[:500])
 
         start = content.find("{")
@@ -1931,6 +1993,8 @@ def extract_filters_from_query(query: str) -> dict:
     except Exception as e:
         logger.error("[extract_filters_from_query] LLM extraction failed: %s", str(e), exc_info=True)
         return {}
+    finally:
+        db.close()
 
 
 def resolve_dynamic_filters(dynamic_filters: dict) -> dict:
