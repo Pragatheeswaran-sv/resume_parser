@@ -15,7 +15,7 @@ from src.services.resume_filter.service import (
     search_resumes, semantic_search_resumes, get_master_data,
     extract_filters_from_query, resolve_dynamic_filters, merge_filters,
 )
-from src.services.nl_search.service import nl_search_initial, nl_search_paginate
+from src.services.nl_search.service import _execute_search, _load_search_session, nl_search_initial, nl_search_paginate
 from src.resume_filter.schemas import (
     ResumeFilterRequest, SemanticSearchRequest, DynamicFilterRequest, DynamicFilterResponse,
     NLSearchRequest, NLSearchPaginateRequest, NLSearchResponse,
@@ -92,9 +92,12 @@ def generate_dynamic_filters(body: dict) -> Dict[str, Any]:
 @router.post("/filter_resumes")
 def filter_resumes(
     filters: dict,
+    search_id: str,
+    sort_by: str | None = None,
+    sort_order: str | None = None,
     page: int = Query(default=1, ge=1, description="Page number (must be >= 1)"),
-    page_size: int = Query(default=20, ge=1, le=100, description="Results per page (1-100)")
-) -> List[Dict[str, Any]]:
+    page_size: int = Query(default=20, ge=1, le=100, description="Results per page (1-100)"),
+) -> List:
     """
     Filter or search resumes stored in the database with pagination support.
 
@@ -211,7 +214,7 @@ def filter_resumes(
         rows = []
 
         is_semantic = "query" in filters and filters.get("query")
-        is_combined = "filters" in filters or "dynamic_filters" in filters
+        is_combined = "filter" in filters or "dynamic_filters" in filters
 
         if is_semantic:
             logger.info("[filter_resumes] Semantic search mode detected")
@@ -319,8 +322,24 @@ def filter_resumes(
                 "[filter_resumes] Validated filters | active_filters=%s, page=%s, page_size=%s",
                 active_filters, page, page_size
             )
+            result = _load_search_session(search_id)
+            
+            resolved_filters = result["filters"]
+            
+            standard_filter = filters.get('filters')
+            for filter_key, filter_value in standard_filter.items():
 
-            rows = search_resumes(parsed_filters)
+                if filter_key in resolved_filters:
+                    resolved_filters[filter_key] = list(
+                        set(resolved_filters[filter_key] + filter_value)
+                    )
+                else:
+                    resolved_filters[filter_key] = filter_value
+
+            print("resolved_filters", resolved_filters)
+            print("filters_", filters)
+
+            rows = _execute_search(resolved_filters, page = page, page_size = page_size, sort_by = sort_by, sort_order = sort_order, export = False)
             result_count = len(rows) - 1 if rows else 0
             logger.info("[filter_resumes] Structured search returned %s results", result_count)
 
