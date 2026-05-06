@@ -9,15 +9,11 @@ from lxml import etree
 import pandas as pd
 from alembic.util import status
 from fastapi import HTTPException
-from fastapi.responses import JSONResponse
 import ollama
 from dotenv import load_dotenv
 from email.utils import parseaddr
 from pypdf import PdfReader
 from docx import Document
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_community.vectorstores import FAISS
 from db.connection import SessionLocal
 from src.resume_filter.models import Resume
 from sqlalchemy import JSON, Float, Integer, select, and_, cast, String, text, func, or_
@@ -39,7 +35,6 @@ EXPORT_PATH = os.path.join(BASE_DIR, "export_files")
 
 load_dotenv()
 logger = logging.getLogger(__name__)
-VECTORDB_PATH = "faiss_index"
 
 def normalize_experience(exp_value) -> int:
     """Ensure experience is always integer for DB"""
@@ -64,13 +59,9 @@ def save_resumes_to_db(resumes):
     """Save extracted resume info to PostgreSQL database with normalized schema."""
     
     db = SessionLocal()
-    embedding_model = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
-    )
 
     for r in resumes:
         try:
-            raw_text = r["text"]
             info = r["info"]            
             attachment_id = r.get("attachment_id")
             sender_email = parse_email_address(r.get("sender_email", ""))
@@ -81,9 +72,6 @@ def save_resumes_to_db(resumes):
             if not info_email and sender_email:
                 logger.info(f' using sender email fallback: {sender_email}')
                 info_email = sender_email
-                # info["email"] = sender_email
-
-            vector = embedding_model.embed_query(raw_text)
 
             email_address = info_email or sender_email or ""
             phone_number = (info.get("phone_number") or "").strip()
@@ -293,22 +281,6 @@ def save_resumes_to_db(resumes):
                             else:
                                 logger.info("candidate experience already exists")
                                       
-            # Create Resume record linking to candidate and attachment
-            # is_resume_record = db.query(Resume).filter(Resume.candidate_id == candidate.candidate_id, Resume.candidate_role == extracted_role).first()
-            # if not is_resume_record:
-            #     resume_record = Resume(
-            #         embedding=vector,
-            #         candidate_id=candidate.candidate_id,
-            #         attachment_id=attachment_id,
-            #         candidate_role=extracted_role,
-            #         created_by="resume_parser"
-            #     )
-            #     db.add(resume_record)
-            #     db.flush()
-                
-            #     logger.info(f'Successfully saved resume for {info.get("name", "Unknown")}')
-            
-            # logger.info('Resume of candidate is already exists')
             is_resume_record = db.query(Resume).filter(
                 Resume.candidate_id == candidate.candidate_id,
                 Resume.candidate_role == extracted_role
@@ -318,7 +290,6 @@ def save_resumes_to_db(resumes):
                 logger.info('Resume of candidate already exists')
             else:
                 resume_record = Resume(
-                    embedding=vector,
                     candidate_id=candidate.candidate_id,
                     attachment_id=attachment_id,
                     candidate_role=extracted_role,
@@ -338,22 +309,6 @@ def save_resumes_to_db(resumes):
         db.commit()
     finally:
         db.close()
-
-def save_to_faiss(resumes, save_path=VECTORDB_PATH):
-    splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
-    docs = []
-    metadatas = []
-    for r in resumes:
-        # Use JSON string as text to embed
-        text_to_embed = json.dumps(r, ensure_ascii=False)
-        chunks = splitter.split_text(text_to_embed)
-        docs.extend(chunks)
-        metadatas.extend([{"file_name": r.get("file_name", "")}] * len(chunks))
-    embedding = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-    vectordb = FAISS.from_texts(docs, embedding=embedding, metadatas=metadatas)
-    vectordb.save_local(save_path)
-    logger.info("[INFO] FAISS index saved")
-    return vectordb
 
 def extract_text_from_pdf(path):
     text = ""
@@ -811,7 +766,7 @@ def process_resumes(email_id: UUID) -> dict:
         1. Fetch all attachments for the email.
         2. Extract text and classify each attachment as resume or not (LLM).
         3. For confirmed resumes, extract structured info (name, skills, etc.).
-        4. Store resume data in PostgreSQL and vector embeddings in FAISS.
+        4. Store resume and candidate data in PostgreSQL.
     """
 
     logger.info("process_resumes called for email_id=%s", email_id)
@@ -1698,182 +1653,6 @@ def search_resumes(filters: dict, export: bool = False) -> list:
 #         db.close()
 #         logger.debug("[search_resumes] Database session closed")
 
-def get_query_embedding(query: str):
-    logger.debug("[get_query_embedding] Generating embedding for query: '%s'", query[:80])
-    embedding_model = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
-    )
-    return embedding_model.embed_query(query)
-
-def semantic_search_resumes(query: str, top_k: int = 5):
-    """Perform semantic search on resumes using vector embeddings."""
-
-    logger.info("[semantic_search] Called with query='%s', top_k=%d", query[:80], top_k)
-
-    if not query or not isinstance(query, str) or not query.strip():
-        logger.warning("[semantic_search] Empty or invalid query received")
-        return []
-
-    if not isinstance(top_k, int) or top_k < 1:
-        logger.warning("[semantic_search] Invalid top_k=%s, defaulting to 5", top_k)
-        top_k = 5
-
-    db = SessionLocal()
-    try:
-        query_embedding = get_query_embedding(query)
-        logger.debug("[semantic_search] Embedding generated, executing vector search")
-
-        sql = text("""
-            SELECT 
-                r.resume_id,
-                c.candidate_id,
-                c.name,
-                c.email_address,
-                c.total_experience,
-                r.embedding <=> CAST(:query_embedding AS vector) as similarity_distance
-            FROM resumes r
-            JOIN candidates c ON r.candidate_id = c.candidate_id
-            ORDER BY similarity_distance ASC
-            LIMIT :top_k
-        """)
-
-        results = db.execute(
-            sql,
-            {
-                "query_embedding": query_embedding,
-                "top_k": top_k
-            }
-        ).mappings().all()
-
-        logger.info("[semantic_search] Returned %d results", len(results))
-        semantic_results = [
-            {
-                "resume_id": row.resume_id,
-                "candidate_id": row.candidate_id,
-                # "similarity_distance": row.similarity_distance
-            }
-            for row in results
-        ]
-
-        candidate_ids = [item["candidate_id"] for item in semantic_results]
-
-        if not candidate_ids:
-            return JSONResponse(
-                status_code=404,
-                content={
-                    "status": False,
-                    "message": "data not found"
-                }
-            )
-
-        candidate_education = (
-            db.query(
-                CandidateEducation.candidate_id.label("candidate_id"),
-                func.json_agg(
-                    func.json_build_object(
-                        "education_id", Education.education_id,
-                        "education", Education.education,
-                        "institution", CandidateEducation.institution,
-                        "percentage", CandidateEducation.percentage,
-                        "year_of_passed", CandidateEducation.year_of_passed
-                    )
-                ).label("education")
-            )
-            .select_from(CandidateEducation)
-            .join(Education, CandidateEducation.education_id == Education.education_id)
-            .filter(CandidateEducation.candidate_id.in_(candidate_ids))
-            .group_by(CandidateEducation.candidate_id)
-            .subquery()
-        )
-
-        candidate_skills = (
-            db.query(
-                CandidateSkills.candidate_id.label("candidate_id"),
-                func.json_agg(
-                    func.json_build_object(
-                        "skill_id", Skill.skill_id,
-                        "skill", Skill.skill
-                    )
-                ).label("skills")
-            )
-            .select_from(CandidateSkills)
-            .join(Skill, CandidateSkills.skill_id == Skill.skill_id)
-            .filter(CandidateSkills.candidate_id.in_(candidate_ids))
-            .group_by(CandidateSkills.candidate_id)
-            .subquery()
-        )
-
-        candidate_work_exp = (
-            db.query(
-                WorkExperience.candidate_id.label("candidate_id"),
-                func.json_agg(
-                    func.json_build_object(
-                        "role_id", Role.role_id,
-                        "role", Role.role,
-                        "company_name", Company.company_name,
-                        "company_location", Company.company_location,
-                        "start_date", WorkExperience.start_date,
-                        "end_date", WorkExperience.end_date,
-                        "is_present", WorkExperience.is_active
-                    )
-                ).label("work_experience")
-            )
-            .select_from(WorkExperience)
-            .join(Role, WorkExperience.role_id == Role.role_id)
-            .join(Company, WorkExperience.company_id == Company.company_id)
-            .filter(WorkExperience.candidate_id.in_(candidate_ids))
-            .group_by(WorkExperience.candidate_id)
-            .subquery()
-        )
-
-        total_count = (
-                    db.query(func.count(Candidate.candidate_id))
-                    .filter(Candidate.is_active == True, Candidate.candidate_id.in_(candidate_ids))
-                    .scalar()
-                )
-
-        candidates = (
-            db.query(
-                func.json_build_object(
-                    "candidate_id", Candidate.candidate_id,
-                    "name", Candidate.name,
-                    "email", Candidate.email_address,
-                    "phone_number", Candidate.phone_number,
-                    "location", Candidate.location,
-                    "total_experience", Candidate.total_experience,
-                    "education", func.coalesce(candidate_education.c.education, cast('[]', JSON)),
-                    "skills", func.coalesce(candidate_skills.c.skills, cast('[]', JSON)),
-                    "work_experience", func.coalesce(candidate_work_exp.c.work_experience, cast('[]', JSON))
-                ).label("candidate_info")
-            )
-            .select_from(Candidate)
-            .outerjoin(candidate_education, Candidate.candidate_id == candidate_education.c.candidate_id)
-            .outerjoin(candidate_skills, Candidate.candidate_id == candidate_skills.c.candidate_id)
-            .outerjoin(candidate_work_exp, Candidate.candidate_id == candidate_work_exp.c.candidate_id)
-            .filter(
-                Candidate.is_active == True,
-                Candidate.candidate_id.in_(candidate_ids)
-            )
-            .all()
-        )
-
-        details = []
-        for row in candidates:
-            details.append(dict(row.candidate_info))
-
-        total ={}
-        total['total_record'] = total_count
-        details.append(total)
-
-        return details
-
-    except Exception as e:
-        logger.error("[semantic_search] Error during vector search: %s", str(e), exc_info=True)
-        raise
-    finally:
-        db.close()
-        logger.debug("[semantic_search] Database session closed")
-
 def extract_filters_from_query(query: str) -> dict:
     """Use LLM to convert a natural-language hiring query into a structured filter payload."""
 
@@ -1986,11 +1765,11 @@ def extract_filters_from_query(query: str) -> dict:
         else:
             model_info = model_info[0]
         
-        logger.info("[extract_filters_from_query] Using LLM model: %s, version: %s", model_info.get("model_name"), model_info.get("model_version_name"))
-
         model = model_info.get("model_name", "ollama").lower()
         version = model_info.get("model_version_name", "llama3").lower()
         api_key = model_info.get("apikey") or None
+        
+        logger.info("[extract_filters_from_query] Using model: %s, version: %s", model, version)
 
         message = [
             {"role": "system", "content": "You output only JSON."},

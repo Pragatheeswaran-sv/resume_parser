@@ -6,7 +6,6 @@ from fastapi.exceptions import RequestValidationError
 from dotenv import load_dotenv
 import logging
 from db.connection import engine, Base
-from sqlalchemy import text
 from src.resume_filter.api import router as resume_router
 from src.email_reader.api import router as email_router
 from src.candidate.api import router as candidate_route
@@ -30,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Resume Tracker API",
-    description="API for tracking, filtering, and semantically searching candidate resumes.",
+    description="API for tracking, filtering, and searching candidate resumes.",
     version="1.0.0",
 )
 app.include_router(resume_router)
@@ -84,13 +83,10 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 @app.on_event("startup")
 def startup():
-    """Initialize database and pgvector extension on application startup."""
+    """Initialize database tables on application startup."""
 
-    with engine.connect() as conn:
-        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        conn.commit()
     Base.metadata.create_all(bind=engine)
-    logger.info("Database & pgvector ready")
+    logger.info("Database ready")
 
 @app.get("/health")
 def health_check() -> dict:

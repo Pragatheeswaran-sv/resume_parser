@@ -9,8 +9,6 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
-import pgvector.sqlalchemy
-from pgvector.sqlalchemy import Vector
 
 # revision identifiers, used by Alembic.
 revision: str = '113c8a06267d'
@@ -46,7 +44,7 @@ def upgrade() -> None:
     sa.Column('skills', sa.ARRAY(sa.Text()), nullable=True),
     sa.Column('companies', sa.ARRAY(sa.Text()), nullable=True),
     sa.Column('education', sa.JSON(), nullable=True),
-    sa.Column('embedding', pgvector.sqlalchemy.vector.VECTOR(dim=384), nullable=True),
+    sa.Column('embedding', sa.LargeBinary(), nullable=True),
     sa.Column('created_at', sa.TIMESTAMP(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.TIMESTAMP(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.PrimaryKeyConstraint('id')
