@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, status, Query, Depends
 from src.admin.dependencies import get_current_admin, get_current_admin_or_user
 from typing import List, Dict, Any
 from src.services.candidate.service import candidate_datails, CandidateServiceError
-from src.resume_filter.schemas import ResumeFilterRequest, SemanticSearchRequest
+from src.resume_filter.schemas import ResumeFilterRequest
 from pydantic import ValidationError
 from src.utils.response import serialize_response
 from src.services.candidate.service import export_candidate
