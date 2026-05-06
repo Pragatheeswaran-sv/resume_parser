@@ -59,15 +59,14 @@ services:
       - "6379:6379"
 
   db:
-    image: pgvector/pgvector:pg16
-    container_name: postgres_pgvector
+    image: postgres:16
+    container_name: postgres_db
     env_file:
       - .env
     ports:
       - "5436:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./src/db:/docker-entrypoint-initdb.d 
 
 volumes:
   pgdata:

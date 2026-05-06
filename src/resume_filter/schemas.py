@@ -364,36 +364,6 @@ class ResumeFilterRequest(BaseModel):
         return self
     
 
-class SemanticSearchRequest(BaseModel):
-    query: str
-    top_k: Optional[int] = 5
-
-    @field_validator("query", mode="before")
-    @classmethod
-    def validate_query(cls, v):
-        if not v or not isinstance(v, str) or not v.strip():
-            raise ValueError("query must be a non-empty string")
-        cleaned = v.strip()
-        if len(cleaned) > 1000:
-            raise ValueError("query must not exceed 1000 characters")
-        return cleaned
-
-    @field_validator("top_k", mode="before")
-    @classmethod
-    def validate_top_k(cls, v):
-        if v is None:
-            return 5
-        try:
-            val = int(v)
-        except (ValueError, TypeError):
-            raise ValueError(f"top_k must be a positive integer, got '{v}'")
-        if val < 1:
-            raise ValueError("top_k must be >= 1")
-        if val > 50:
-            raise ValueError("top_k cannot exceed 50")
-        return val
-
-
 # ---------------------------------------------------------------------------
 # Response schemas
 # ---------------------------------------------------------------------------
@@ -454,14 +424,6 @@ class MasterDataResponse(BaseModel):
 class ErrorResponse(BaseModel):
     status: str = "error"
     message: str
-
-
-class SemanticSearchResultItem(BaseModel):
-    id: str
-    name: Optional[str] = None
-    file_name: Optional[str] = None
-    experience: Optional[float] = 0.0
-    skills: List[Any] = []
 
 
 # ---------------------------------------------------------------------------

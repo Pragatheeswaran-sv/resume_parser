@@ -1,6 +1,6 @@
 """Resume filter REST API router.
 
-Provides endpoints for structured filter search, semantic (vector)
+Provides endpoints for structured filter search, LLM-powered natural-language
 search, and master-data retrieval for filter dropdowns.
 """
 
@@ -12,12 +12,12 @@ from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 from typing import List, Dict, Any
 from src.services.resume_filter.service import (
-    search_resumes, semantic_search_resumes, get_master_data,
+    search_resumes, get_master_data,
     extract_filters_from_query, resolve_dynamic_filters, merge_filters,
 )
 from src.services.nl_search.service import nl_search_initial, nl_search_paginate
 from src.resume_filter.schemas import (
-    ResumeFilterRequest, SemanticSearchRequest, DynamicFilterRequest, DynamicFilterResponse,
+    ResumeFilterRequest, DynamicFilterRequest, DynamicFilterResponse,
     NLSearchRequest, NLSearchPaginateRequest, NLSearchResponse,
 )
 from src.utils.response import serialize_response
@@ -96,43 +96,23 @@ def filter_resumes(
     page_size: int = Query(default=20, ge=1, le=100, description="Results per page (1-100)")
 ) -> List[Dict[str, Any]]:
     """
-    Filter or search resumes stored in the database with pagination support.
+    Filter resumes stored in the database with pagination support.
 
-    This endpoint supports two types of search:
+    Supports two modes:
 
-    1. **Semantic Search**
-       - If `query` is provided in the request body.
-       - Uses embeddings with the `all-MiniLM-L6-v2` model.
-       - Performs vector similarity search using PostgreSQL `pgvector`.
-
-    2. **Structured Filter Search**
-       - If `query` is NOT provided.
+    1. **Structured Filter Search**
        - Filters resumes based on fields such as:
-         - skills (UUID list)
-         - education (UUID list)
-         - roles (UUID list)
-         - min_experience / max_experience
-         - passout_start_year / passout_end_year
-         - percentage
-         - companies
-         - name
-         - file_name
+         skills, education, roles, min/max experience,
+         passout year range, percentage, companies, name, file_name.
+
+    2. **Combined Filter Search**
+       - Merges standard UI filters with LLM-generated dynamic filters.
 
     Query Parameters:
         - page (int, default=1): Page number for pagination
         - page_size (int, default=20): Number of records per page
 
-    Request Body Examples:
-
-    **Semantic Search**
-    ```json
-    {
-        "query": "Python developer with FastAPI experience",
-        "limit": 3
-    }
-    ```
-
-    **Structured Filter Search**
+    Request Body Example:
     ```json
     {
         "skills": ["uuid", "uuid"],
@@ -146,52 +126,6 @@ def filter_resumes(
         "sort_by": "total_experience",
         "sort_order": "desc"
     }
-    ```
-
-    Returns:
-        list[dict]: List of matching candidate resumes with pagination info.
-
-    Example Response:
-    ```json
-    [
-        {
-            "candidate_id": "uuid",
-            "name": "John Doe",
-            "email": "john@example.com",
-            "phone_number": "1234567890",
-            "location": "New York",
-            "total_experience": 5,
-            "education": [
-                {
-                    "education_id": "uuid",
-                    "education": "B.Tech",
-                    "institution": "MIT",
-                    "percentage": 8.5,
-                    "year_of_passed": 2020
-                }
-            ],
-            "skills": [
-                {
-                    "skill_id": "uuid",
-                    "skill": "Python"
-                }
-            ],
-            "work_experience": [
-                {
-                    "role_id": "uuid",
-                    "role": "Senior Developer",
-                    "company_name": "TechCorp",
-                    "company_location": "New York",
-                    "start_date": "2020-01-15",
-                    "end_date": null,
-                    "is_present": true
-                }
-            ]
-        },
-        {
-            "total_record": 150
-        }
-    ]
     ```
     """
     start_time = time.time()
@@ -210,43 +144,9 @@ def filter_resumes(
     try:
         rows = []
 
-        is_semantic = "query" in filters and filters.get("query")
         is_combined = "filters" in filters or "dynamic_filters" in filters
 
-        if is_semantic:
-            logger.info("[filter_resumes] Semantic search mode detected")
-            try:
-                semantic_req = SemanticSearchRequest(
-                    query=filters["query"],
-                    top_k=filters.get("limit", filters.get("top_k", 5))
-                )
-            except ValidationError as ve:
-                logger.warning(
-                    "[filter_resumes] Semantic search validation failed: %s", ve.errors()
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail={
-                        "status": "error",
-                        "message": "Invalid semantic search parameters",
-                        "errors": [
-                            {"field": ".".join(str(loc) for loc in err.get("loc", [])), "message": err.get("msg", "")}
-                            for err in ve.errors()
-                        ],
-                    }
-                )
-
-            logger.info(
-                "[filter_resumes] Executing semantic search | query='%s', top_k=%s",
-                semantic_req.query[:50], semantic_req.top_k
-            )
-            rows = semantic_search_resumes(semantic_req.query, semantic_req.top_k or 5)
-            logger.info(
-                "[filter_resumes] Semantic search returned %s results",
-                len(rows) if rows else 0
-            )
-
-        elif is_combined:
+        if is_combined:
             logger.info("[filter_resumes] Combined filter mode detected (standard + dynamic)")
             standard_raw = filters.get("filters") or {}
             dynamic_raw = filters.get("dynamic_filters") or {}
@@ -457,25 +357,6 @@ def nl_search(body: dict) -> Dict[str, Any]:
             detail={"status": "error", "message": "Natural language search failed"},
         )
 
-
-@router.post("/semantic_search")
-def semantic_search(body: SemanticSearchRequest) -> List[Dict[str, Any]]:
-    """Perform a standalone semantic (vector-similarity) search over resumes.
-
-    Accepts a validated ``SemanticSearchRequest`` with a natural-language
-    query and an optional ``top_k`` limit.  Returns matching candidates
-    ranked by embedding similarity.
-    """
-    try:
-        results = semantic_search_resumes(body.query, body.top_k or 5)
-    except Exception as e:
-        logger.error("[semantic_search] Error: %s", str(e), exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"status": "error", "message": "Semantic search failed"},
-        )
-
-    return results
 
 @router.get("/filter_options")
 def show_filter() -> Dict[str, Any]:
