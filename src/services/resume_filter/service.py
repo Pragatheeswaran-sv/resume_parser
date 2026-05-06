@@ -860,6 +860,7 @@ def search_resumes(filters: dict, export: bool = False) -> list:
         return [{"total_record": 0}]
     db = SessionLocal()
     try:
+        filter_count = 0
         results = []
         candidate_education = (
             db.query(
@@ -932,19 +933,22 @@ def search_resumes(filters: dict, export: bool = False) -> list:
                     name_conditions.append(Candidate.name.ilike(f"%{name}%"))
             if name_conditions:
                 conditions.append(or_(*name_conditions))
+                filter_count += 1
         elif name_list and isinstance(name_list, str):
             # Single name - LIKE pattern match (case-insensitive)
             conditions.append(Candidate.name.ilike(f"%{name_list.strip()}%"))
-
+            filter_count += 1
         if filters.get("min_experience") not in (None, ""):
             try:
                 conditions.append(Candidate.total_experience >= float(filters["min_experience"]))
+                filter_count += 1
             except:
                 pass
 
         if filters.get("max_experience") not in (None, ""):
             try:
                 conditions.append(Candidate.total_experience <= float(filters["max_experience"]))
+                filter_count += 1
             except:
                 pass
 
@@ -957,7 +961,8 @@ def search_resumes(filters: dict, export: bool = False) -> list:
                     )
                 )
             )
-
+            filter_count += 1
+            
         roles = filters.get("roles")
         if isinstance(roles, list) and roles:
             conditions.append(
@@ -967,6 +972,7 @@ def search_resumes(filters: dict, export: bool = False) -> list:
                     )
                 )
             )
+            filter_count += 1
 
         companies = filters.get("companies")
         if isinstance(companies, list) and companies:
@@ -986,6 +992,7 @@ def search_resumes(filters: dict, export: bool = False) -> list:
                         )
                     )
                 )
+                filter_count += 1
 
         roles = filters.get("roles")
         if isinstance(roles, list) and roles:
@@ -1005,6 +1012,7 @@ def search_resumes(filters: dict, export: bool = False) -> list:
                         )
                     )
                 )
+                filter_count += 1
 
         education = filters.get("education")
         if isinstance(education, list) and education:
@@ -1015,26 +1023,76 @@ def search_resumes(filters: dict, export: bool = False) -> list:
                     )
                 )
             )
+            filter_count += 1
 
+        # year_conditions = []
+        # if filters.get("passout_start_year") not in (None, ""):
+        #     try:
+        #         year_conditions.append(CandidateEducation.year_of_passed >= int(filters["passout_start_year"]))
+        #     except:
+        #         pass
+
+        # if filters.get("passout_end_year") not in (None, ""):
+        #     try:
+        #         year_conditions.append(CandidateEducation.year_of_passed <= int(filters["passout_end_year"]))
+        #     except:
+        #         pass
+        # degree_conditions = or_(
+        #     Education.education.ilike("%b.e%"),
+        #     Education.education.ilike("%btech%"),
+        #     Education.education.ilike("%b.tech%"),
+        #     Education.education.ilike("%m.e%"),
+        #     Education.education.ilike("%mtech%"),
+        #     Education.education.ilike("%m.tech%"),
+        #     Education.education.ilike("%bachelor%"),
+        #     Education.education.ilike("%master%")
+        # )
+        # if year_conditions:
+        #     conditions.append(
+        #         Candidate.candidate_id.in_(
+        #             db.query(CandidateEducation.candidate_id).filter(and_(*year_conditions), degree_conditions)
+        #         )
+        #     )
+        #     filter_count += 1
         year_conditions = []
         if filters.get("passout_start_year") not in (None, ""):
             try:
-                year_conditions.append(CandidateEducation.year_of_passed >= int(filters["passout_start_year"]))
-            except:
+                year_conditions.append(
+                    func.max(CandidateEducation.year_of_passed) >= int(filters["passout_start_year"])
+                )
+            except (ValueError, TypeError):
                 pass
 
         if filters.get("passout_end_year") not in (None, ""):
             try:
-                year_conditions.append(CandidateEducation.year_of_passed <= int(filters["passout_end_year"]))
-            except:
+                year_conditions.append(
+                    func.max(CandidateEducation.year_of_passed) <= int(filters["passout_end_year"])
+                )
+            except (ValueError, TypeError):
                 pass
+
+        degree_conditions = or_(
+            Education.education.ilike("%b.e%"),
+            Education.education.ilike("%btech%"),
+            Education.education.ilike("%b.tech%"),
+            Education.education.ilike("%m.e%"),
+            Education.education.ilike("%mtech%"),
+            Education.education.ilike("%m.tech%"),
+            Education.education.ilike("%bachelor%"),
+            Education.education.ilike("%master%")
+        )
 
         if year_conditions:
             conditions.append(
                 Candidate.candidate_id.in_(
-                    db.query(CandidateEducation.candidate_id).filter(and_(*year_conditions))
+                    db.query(CandidateEducation.candidate_id)
+                    .join(Education, Education.education_id == CandidateEducation.education_id)
+                    # .filter(degree_conditions)                  
+                    .group_by(CandidateEducation.candidate_id) 
+                    .having(and_(*year_conditions))
                 )
             )
+            filter_count += 1
 
         if filters.get("percentage") not in (None, ""):
             try:
@@ -1045,6 +1103,7 @@ def search_resumes(filters: dict, export: bool = False) -> list:
                         )
                     )
                 )
+                filter_count += 1
             except:
                 pass
 
@@ -1128,7 +1187,7 @@ def search_resumes(filters: dict, export: bool = False) -> list:
                 df.to_csv(export_file, index=False)
                 logger.info(f"Export completed successfully: {export_file}")
                 result = {"file_path": export_file[4:]} 
-                print('export result-->', result)
+                # print('export result-->', result)
                 return result
             else:
                 logger.info("No data to export")
@@ -1147,7 +1206,7 @@ def search_resumes(filters: dict, export: bool = False) -> list:
             round(_time.time() - start_time, 3),
             len(results) - 1
         )
-        if results[0].get('total_record') == 0:
+        if results[0].get('total_record') == 0 or filter_count == 0:
             return []
         # print('results-->', results)
         return results
@@ -1625,7 +1684,7 @@ def extract_filters_from_query(query: str) -> dict:
         - roles: "Python Developer", "Backend Developer", "Data Engineer"
 
         2. Role vs Skill classification:
-        - If a term includes a job designation such as:
+        - If a term includes a job designation such as and take role if keyword like role or designation is mentioned:
             "developer", "engineer", "architect", "lead", "manager",
             "analyst", "consultant", "administrator", "specialist",
             then classify it under "roles".
