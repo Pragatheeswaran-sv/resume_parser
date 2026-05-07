@@ -244,7 +244,8 @@ def filter_resumes(
                 "message" : "filter records successfully",
                 "data" : {
                     "candidates" : result,
-                    "total_records" : len(result)
+                    "total_records" : len(result),
+                    "search_id": search_id
                 }
             }
            
