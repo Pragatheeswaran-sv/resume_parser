@@ -575,22 +575,36 @@ def extract_basic_info(resume_text):
         7. passout_year must be ONLY a YEAR (YYYY).
         - If not a valid year -> return ""
 
-        8. work_experience dates must ALWAYS follow YYYY-MM or YYYY.
+        8. EDUCATION PERCENTAGE EXTRACTION (STRICT):
+
+        Extract percentage/CGPA/GPA only if explicitly mentioned near the education entry.
+
+        Examples:
+        - "85%" -> "85"
+        - "CGPA 8.2" -> "77.9" (CGPA × 9.5)
+        - "GPA 3.8/4" -> "95" ((GPA / 4) × 100)
+
+        Return ONLY the final percentage value as string.
+
+        Do NOT guess, mix values between education entries, or extract unrelated numbers.
+        If no valid value exists, return "".
+
+        9. work_experience dates must ALWAYS follow YYYY-MM or YYYY.
         - If end_date is "present" -> return "Present"
 
-        9. DO NOT include words like:
+        10. DO NOT include words like:
         - "June", "Feb", "Year 11", "Currently"
         Only return normalized values.
 
-        10. Do NOT guess missing data except for top-level role inference from skills.
+        11. Do NOT guess missing data except for top-level role inference from skills.
 
-        11. Ensure output is valid JSON (parsable).
+        12. Ensure output is valid JSON (parsable).
 
-        12. Infer top-level "role" ONLY from technical skills; do not use summary, titles, company, projects, responsibilities, certifications, education, or any other content. Keep it short and professional; if unclear, return "".
+        13. Infer top-level "role" ONLY from technical skills; do not use summary, titles, company, projects, responsibilities, certifications, education, or any other content. Keep it short and professional; if unclear, return "".
 
-        13. Example mappings: Python/FastAPI/Django -> Python Developer, React/JS/HTML/CSS -> Frontend Developer, Node/Express/MongoDB -> Backend Developer, React+Node -> Full Stack Developer, Java/Spring -> Java Developer, Selenium/Testing -> QA Engineer, AWS/Docker/K8s/Jenkins -> DevOps Engineer, ML/NLP/TensorFlow -> Machine Learning Engineer, Power BI/Tableau/SQL -> Data Analyst, Python/Pandas/ETL -> Data Engineer, Kotlin/Java -> Android Developer, Swift/iOS -> iOS Developer, PHP/Laravel -> PHP Developer, C#/.NET -> .NET Developer.
+        14. Example mappings: Python/FastAPI/Django -> Python Developer, React/JS/HTML/CSS -> Frontend Developer, Node/Express/MongoDB -> Backend Developer, React+Node -> Full Stack Developer, Java/Spring -> Java Developer, Selenium/Testing -> QA Engineer, AWS/Docker/K8s/Jenkins -> DevOps Engineer, ML/NLP/TensorFlow -> Machine Learning Engineer, Power BI/Tableau/SQL -> Data Analyst, Python/Pandas/ETL -> Data Engineer, Kotlin/Java -> Android Developer, Swift/iOS -> iOS Developer, PHP/Laravel -> PHP Developer, C#/.NET -> .NET Developer.
 
-        14. work_experience.role must be extracted only if explicitly mentioned; otherwise return "".
+        15. work_experience.role must be extracted only if explicitly mentioned; otherwise return "".
 
         IMPORTANT:
         - Top-level "role" must be based ONLY on skills.
@@ -2013,3 +2027,104 @@ def get_master_data():
         raise
     finally:
         db.close()
+
+
+def apply_filters(candidates: list, filters: dict) -> list:
+    """
+    Apply filters on candidate records returned from DB.
+    """
+    filtered_candidates = []
+    filters = filters.get("filters", {})
+
+    for candidate in candidates:
+
+        matched = True
+
+        if filters.get("name"):
+            search_names = [n.lower() for n in filters["name"]]
+
+            candidate_name = (candidate.get("name") or "").lower()
+            if not any(name in candidate_name for name in search_names):
+                matched = False
+
+        if matched and filters.get("location"):
+            location_filter = filters["location"].lower()
+
+            candidate_location = (candidate.get("location") or "").lower()
+
+            if location_filter not in candidate_location:
+                matched = False
+
+        if matched and filters.get("skills"):
+
+            candidate_skill_ids = {
+                skill.get("skill_id")
+                for skill in candidate.get("skills", [])
+            }
+
+            filter_skill_ids = set(filters["skills"])
+
+            if not filter_skill_ids.issubset(candidate_skill_ids):
+                matched = False
+
+        if matched and filters.get("companies"):
+
+            candidate_companies = {
+                (exp.get("company_name") or "").lower()
+                for exp in candidate.get("work_experience", [])
+            }
+
+            filter_companies = {
+                company.lower()
+                for company in filters["companies"]
+            }
+
+            if not any(
+                company in candidate_companies
+                for company in filter_companies
+            ):
+                matched = False
+
+        if matched and filters.get("passout_start_year"):
+
+            start_year = int(filters["passout_start_year"])
+
+            education_years = [
+                edu.get("year_of_passed")
+                for edu in candidate.get("education", [])
+                if edu.get("year_of_passed")
+            ]
+
+            if not any(year >= start_year for year in education_years):
+                matched = False
+
+        if matched and filters.get("passout_end_year"):
+
+            end_year = int(filters["passout_end_year"])
+
+            education_years = [
+                edu.get("year_of_passed")
+                for edu in candidate.get("education", [])
+                if edu.get("year_of_passed")
+            ]
+
+            if not any(year <= end_year for year in education_years):
+                matched = False
+
+        if matched and filters.get("percentage"):
+
+            required_percentage = float(filters["percentage"])
+
+            percentages = [
+                edu.get("percentage")
+                for edu in candidate.get("education", [])
+                if edu.get("percentage") is not None
+            ]
+
+            if not any(p >= required_percentage for p in percentages):
+                matched = False
+
+        if matched:
+            filtered_candidates.append(candidate)
+
+    return filtered_candidates
