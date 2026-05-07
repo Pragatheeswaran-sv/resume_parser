@@ -152,7 +152,18 @@ def save_resumes_to_db(resumes):
                     if isinstance(edu_item, dict):
                         qualification = edu_item.get("qualification", "").strip()
                         institution = edu_item.get("institution", "").strip()
-                        percentage = edu_item.get("percentage", "")
+                        percentage = edu_item.get("percentage", "") 
+                        try:
+                            value = float(percentage.replace("%", "").strip())
+
+                            # If value looks like CGPA (commonly <= 10), convert to percentage
+                            if value <= 10:
+                                percentage = str(round(value * 9.5, 2))
+                            else:
+                                percentage = str(value)
+
+                        except ValueError:
+                            percentage = ""
                         passout_year = edu_item.get("passout_year", "")
                         
                         if qualification:
@@ -2033,52 +2044,81 @@ def apply_filters(candidates: list, filters: dict) -> list:
     """
     Apply filters on candidate records returned from DB.
     """
+
     filtered_candidates = []
     filters = filters.get("filters", {})
 
     for candidate in candidates:
-
         matched = True
 
         if filters.get("name"):
-            search_names = [n.lower() for n in filters["name"]]
+            search_names = [
+                str(n).lower()
+                for n in filters["name"]
+            ]
 
-            candidate_name = (candidate.get("name") or "").lower()
-            if not any(name in candidate_name for name in search_names):
+            candidate_name = (
+                candidate.get("name") or ""
+            ).lower()
+
+            if not any(
+                name in candidate_name
+                for name in search_names
+            ):
                 matched = False
 
         if matched and filters.get("location"):
-            location_filter = filters["location"].lower()
+            location_filter = (
+                filters["location"]
+            ).lower()
 
-            candidate_location = (candidate.get("location") or "").lower()
+            candidate_location = (
+                candidate.get("location") or ""
+            ).lower()
 
             if location_filter not in candidate_location:
                 matched = False
 
         if matched and filters.get("skills"):
+            candidate_skill_ids = set()
+            for skill in candidate.get("skills", []):
+                if not isinstance(skill, dict):
+                    continue
 
-            candidate_skill_ids = {
-                skill.get("skill_id")
-                for skill in candidate.get("skills", [])
-            }
+                skill_id = skill.get("skill_id")
+
+                if skill_id is not None:
+                    candidate_skill_ids.add(skill_id)
 
             filter_skill_ids = set(filters["skills"])
-
-            if not filter_skill_ids.issubset(candidate_skill_ids):
+            if not filter_skill_ids.issubset(
+                candidate_skill_ids
+            ):
                 matched = False
 
         if matched and filters.get("companies"):
+            candidate_companies = set()
+            for exp in candidate.get(
+                "work_experience", []
+            ):
+                if isinstance(exp, dict):
+                    company_name = exp.get(
+                        "company_name", ""
+                    )
+                elif isinstance(exp, str):
+                    company_name = exp
+                else:
+                    continue
 
-            candidate_companies = {
-                (exp.get("company_name") or "").lower()
-                for exp in candidate.get("work_experience", [])
-            }
+                if company_name:
+                    candidate_companies.add(
+                        company_name.lower()
+                    )
 
             filter_companies = {
-                company.lower()
+                str(company).lower()
                 for company in filters["companies"]
             }
-
             if not any(
                 company in candidate_companies
                 for company in filter_companies
@@ -2086,42 +2126,87 @@ def apply_filters(candidates: list, filters: dict) -> list:
                 matched = False
 
         if matched and filters.get("passout_start_year"):
+            start_year = int(
+                filters["passout_start_year"]
+            )
 
-            start_year = int(filters["passout_start_year"])
+            education_years = []
+            for edu in candidate.get("education", []):
+                if not isinstance(edu, dict):
+                    continue
 
-            education_years = [
-                edu.get("year_of_passed")
-                for edu in candidate.get("education", [])
-                if edu.get("year_of_passed")
-            ]
+                year = edu.get("year_of_passed")
+                if year is not None:
+                    try:
+                        education_years.append(
+                            int(year)
+                        )
+                    except (
+                        ValueError,
+                        TypeError,
+                    ):
+                        pass
 
-            if not any(year >= start_year for year in education_years):
+            if not any(
+                year >= start_year
+                for year in education_years
+            ):
                 matched = False
 
         if matched and filters.get("passout_end_year"):
+            end_year = int(
+                filters["passout_end_year"]
+            )
 
-            end_year = int(filters["passout_end_year"])
+            education_years = []
+            for edu in candidate.get("education", []):
+                if not isinstance(edu, dict):
+                    continue
 
-            education_years = [
-                edu.get("year_of_passed")
-                for edu in candidate.get("education", [])
-                if edu.get("year_of_passed")
-            ]
+                year = edu.get("year_of_passed")
+                if year is not None:
+                    try:
+                        education_years.append(
+                            int(year)
+                        )
+                    except (
+                        ValueError,
+                        TypeError,
+                    ):
+                        pass
 
-            if not any(year <= end_year for year in education_years):
+            if not any(
+                year <= end_year
+                for year in education_years
+            ):
                 matched = False
 
         if matched and filters.get("percentage"):
+            required_percentage = float(
+                filters["percentage"]
+            )
 
-            required_percentage = float(filters["percentage"])
+            percentages = []
+            for edu in candidate.get("education", []):
+                if not isinstance(edu, dict):
+                    continue
 
-            percentages = [
-                edu.get("percentage")
-                for edu in candidate.get("education", [])
-                if edu.get("percentage") is not None
-            ]
+                percentage = edu.get("percentage")
+                if percentage is not None:
+                    try:
+                        percentages.append(
+                            float(percentage)
+                        )
+                    except (
+                        ValueError,
+                        TypeError,
+                    ):
+                        pass
 
-            if not any(p >= required_percentage for p in percentages):
+            if not any(
+                p >= required_percentage
+                for p in percentages
+            ):
                 matched = False
 
         if matched:
