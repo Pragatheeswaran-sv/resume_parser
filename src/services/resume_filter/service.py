@@ -2044,7 +2044,7 @@ def apply_filters(candidates: list, filters: dict) -> list:
     """
     Apply filters on candidate records returned from DB.
     """
-
+    
     filtered_candidates = []
     filters = filters.get("filters", {})
 
@@ -2209,6 +2209,30 @@ def apply_filters(candidates: list, filters: dict) -> list:
             ):
                 matched = False
 
+        if matched and filters.get("experience"):
+
+            filter_experience = {
+                int(exp)
+                for exp in filters["experience"]
+            }
+            print('filter_experience_', filter_experience)
+            candidate_experience = candidate.get(
+                "total_experience"
+            )
+
+            try:
+                candidate_experience = int(
+                    candidate_experience
+                )
+            except (ValueError, TypeError):
+                matched = False
+
+            if (
+                matched
+                and candidate_experience
+                not in filter_experience
+            ):
+                matched = False
         if matched:
             filtered_candidates.append(candidate)
 
