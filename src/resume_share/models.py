@@ -2,7 +2,8 @@ import uuid
 import datetime
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import UUID, Column, String, DateTime, Boolean, Integer, Text
+from sqlalchemy import UUID, Column, ForeignKey, String, DateTime, Boolean, Integer, Text
+from sqlalchemy.orm import relationship
 from db.connection import Base
 
 
@@ -36,3 +37,20 @@ class EmailTemplate(Base):
     created_at = Column(DateTime(timezone=False), default=ist_now)
     updated_at = Column(DateTime(timezone=False), default=ist_now, onupdate=ist_now)
     is_active = Column(Boolean, default=True)
+
+class EmailShareLogs(Base):
+    __tablename__ = "email_share_logs"
+
+    email_share_id = Column(UUID, primary_key=True, default=uuid.uuid4)
+    to_address = Column(String(255), nullable=False)
+    cc_address = Column(String(255), nullable=False)
+    candidate_id = Column(UUID(as_uuid=True), ForeignKey("candidates.candidate_id"), nullable=False) 
+    resume_id = Column(UUID(as_uuid=True), ForeignKey("resumes.resume_id"), nullable=False)
+    is_active = Column(Boolean, default=True)
+    create_by = Column(String(255), nullable=True)
+    updated_by = Column(String(255), nullable=True)
+    created_at = Column(DateTime(timezone=False), default=ist_now)
+    updated_at = Column(DateTime(timezone=False), default=ist_now, onupdate=ist_now)
+
+    candidate = relationship("Candidate")
+    candidate = relationship("Resume")

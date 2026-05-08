@@ -16,7 +16,7 @@ from src.auth.api import router as auth_router
 from src.resume_download.api import router as resume_download_router
 from src.resume_share.api import router as resume_share_router
 from src.resume_share.admin_api import router as email_config_router
- 
+from src.admin_dashboard.api import router as admin_dashboard
 
  
 load_dotenv()
@@ -40,6 +40,7 @@ app.include_router(auth_router)
 app.include_router(resume_download_router)
 app.include_router(resume_share_router)
 app.include_router(email_config_router)
+app.include_router(admin_dashboard)
 
 app.add_middleware(AllowedEmailMiddleware)
 app.add_middleware(
