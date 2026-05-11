@@ -220,21 +220,20 @@ def user_dashboard(user_mail):
             )
         ]
 
-        schedular = (
+        scheduler = (
             db.query(ExtractionConfig)
             .filter(ExtractionConfig.is_active == True)
             .first()
         )
 
-        schedular_data = {}
 
-        if schedular:
-            schedular_data = {
-                "schedular_id": schedular.config_id,
-                "schedule_type": schedular.schedule_type,
-                "interval_minutes": schedular.interval_minutes,
-                "weekday": schedular.weekday,
-                "is_active": schedular.is_active,
+        if scheduler:
+            scheduler_data = {
+                "scheduler_id": scheduler.config_id,
+                "schedule_type": scheduler.schedule_type,
+                "interval_minutes": scheduler.interval_minutes,
+                "weekday": scheduler.weekday,
+                "is_active": scheduler.is_active,
             }
 
         parsed_by_user = (
@@ -265,7 +264,7 @@ def user_dashboard(user_mail):
             "experience": experience_data,
             "active_ai_model": active_model_data,
             "roles": role_data,
-            "schedular_data": schedular_data,
+            "scheduler_data": scheduler_data,
             "skills": skill_data,
             "recent_candidate": recent_candidate,
             "parsed_success_count": parsed_count.parsed_success_count,
