@@ -7,6 +7,7 @@ class ShareResumeRequest(BaseModel):
     resume_id: str
     to_address: EmailStr
     cc_address: Optional[List[EmailStr]] = None
+    share: bool
 
 
 class ShareResumeResponse(BaseModel):

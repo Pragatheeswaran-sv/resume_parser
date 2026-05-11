@@ -2215,7 +2215,6 @@ def apply_filters(candidates: list, filters: dict) -> list:
                 int(exp)
                 for exp in filters["experience"]
             }
-            print('filter_experience_', filter_experience)
             candidate_experience = candidate.get(
                 "total_experience"
             )
