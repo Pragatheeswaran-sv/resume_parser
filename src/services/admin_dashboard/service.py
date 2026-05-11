@@ -9,7 +9,7 @@ from src.candidate.models import (
     Education, Role, WorkExperience, Company,
 )
 from fastapi import APIRouter, Depends, HTTPException, status
-from src.resume_share.models import EmailShareLogs
+from src.resume_share.models import EmailNotification
 from src.admin.models import (
     ExtractionConfig,
     Users
@@ -160,7 +160,7 @@ def admin_dashboard(admin_id):
         )
 
         email_share_success_count = (
-            db.query(func.count(EmailShareLogs.email_share_id))
+            db.query(func.count(EmailNotification.email_share_id))
             .scalar()
         )
 

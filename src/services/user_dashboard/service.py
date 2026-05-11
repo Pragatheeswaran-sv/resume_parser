@@ -10,7 +10,7 @@ from src.candidate.models import (
 )
 from src.auth.models import OauthCredentials
 from fastapi import APIRouter, Depends, HTTPException, status
-from src.resume_share.models import EmailShareLogs
+from src.resume_share.models import EmailNotification
 from src.admin.models import (
     AiModel, AiModelversion, Users, AiModelConfig, ExtractionConfig
 )
@@ -120,7 +120,7 @@ def user_dashboard(user_mail):
             .first()
         )
 
-        shared_count = db.query(func.count(EmailShareLogs.email_share_id)).scalar()
+        shared_count = db.query(func.count(EmailNotification.email_share_id)).scalar()
 
         active_model = (
             db.query(
