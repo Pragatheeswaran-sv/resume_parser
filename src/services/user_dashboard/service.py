@@ -226,7 +226,6 @@ def user_dashboard(user_mail):
             .first()
         )
 
-        schedular_data = {}
 
         if schedular:
             schedular_data = {
