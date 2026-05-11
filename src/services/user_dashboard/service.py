@@ -24,10 +24,20 @@ db = SessionLocal()
 def user_dashboard(user_mail):
     try:
 
+        candidates = (
+            db.query(func.count(Candidate.candidate_id))
+            .filter(Candidate.is_active == True)
+            .scalar()
+        )
+
         experience_data = [
             {
                 "experience": row.total_experience,
-                "no_of_candidate": row.candidate_count
+                "no_of_candidate": row.candidate_count,
+                "percentage": (
+                    f"{round((row.candidate_count / candidates) * 100, 2)}%"
+                    if candidates > 0 else "0%"
+                )
             }
             for row in (
                 db.query(
@@ -37,18 +47,16 @@ def user_dashboard(user_mail):
                 .group_by(Candidate.total_experience)
                 .all()
             )
-        ]
-
-        candidates = (
-            db.query(func.count(Candidate.candidate_id))
-            .filter(Candidate.is_active == True)
-            .scalar()
-        )
+        ]    
 
         role_data = [
             {
                 "candidate_role": row.candidate_role,
-                "no_of_candidate": row.role_count
+                "no_of_candidate": row.role_count,
+                "percentage": (
+                    f"{round((row.role_count / candidates) * 100, 2)}%"
+                    if candidates > 0 else "0%"
+                )
             }
             for row in (
                 db.query(
@@ -145,12 +153,19 @@ def user_dashboard(user_mail):
 
         if active_model:
 
+            raw_key = active_model["apikey"]
             decrypted_key = None
 
             try:
-                decrypted_key = decrypt_data(active_model["apikey"])
+                
+                decrypted_key = decrypt_data(raw_key)
+                if isinstance(decrypted_key, bytes):
+                    decrypted_key = decrypted_key.decode("utf-8")
             except Exception:
-                decrypted_key = str(active_model["apikey"])
+                if isinstance(raw_key, bytes):
+                    decrypted_key = raw_key.decode("utf-8", errors="ignore")
+                else:
+                    decrypted_key = str(raw_key)
 
             masked_api_key = (
                 decrypted_key[:2] + "******" + decrypted_key[-2:]
@@ -179,7 +194,11 @@ def user_dashboard(user_mail):
         skill_data = [
             {
                 "skills": row.skill,
-                "no_of_candidate": row.candidate_count
+                "no_of_candidate": row.candidate_count,
+                "percentage": (
+                    f"{round((row.candidate_count / candidates) * 100, 2)}%"
+                    if candidates > 0 else "0%"
+                )
             }
             for row in (
                 db.query(
@@ -251,6 +270,7 @@ def user_dashboard(user_mail):
             "recent_candidate": recent_candidate,
             "parsed_success_count": parsed_count.parsed_success_count,
             "parsed_fail_count": parsed_count.parsed_fail_count,
+            "total_parsed_count": parsed_count.parsed_success_count + parsed_count.parsed_fail_count,
             "email_shared_count": shared_count
         }
 
