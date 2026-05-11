@@ -1,7 +1,8 @@
+import datetime
 import logging
 
 from fastapi import APIRouter, HTTPException
-
+from src.services.background_task.tasks import share_mail_to_client
 from src.resume_share.schemas import ShareResumeRequest, ShareResumeResponse
 from src.resume_share.models import EmailShareLogs
 from src.services.resume_share.service import ResumeShareError, share_resume_via_email
@@ -29,31 +30,25 @@ def share_resume_email(request: ShareResumeRequest):
         resume_id = request.resume_id
         to_address = request.to_address
         cc_address = str(request.cc_address)
-
-        print(candidate_id, resume_id, to_address)
-        print(
-            "__cc_address",
-            type(cc_address),
-            type(candidate_id),
-            type(resume_id),
-            type(to_address)
-        )
+        share = request.share
 
         share_log = db.query(EmailShareLogs).filter(
             EmailShareLogs.candidate_id == candidate_id,
             EmailShareLogs.resume_id == resume_id,
             EmailShareLogs.to_address == to_address,
-            # EmailShareLogs.cc_address == cc_address,
         ).first()
 
-        if share_log:
+
+        date = datetime.datetime.now()
+
+        past_five_days = date - datetime.timedelta(days=7)
+        if share_log and share_log.created_at > past_five_days and not share:
             return {
                 "success": False,
-                "message": "Candidate profile already shared with given address",
+                "message": f"Candidate profile already shared to {to_address} at {share_log.created_at}",
                 "email_id": ""
             }
 
-        # CREATE NEW OBJECT
         share_log = EmailShareLogs(
             candidate_id=candidate_id,
             resume_id=resume_id,
@@ -64,13 +59,19 @@ def share_resume_email(request: ShareResumeRequest):
         db.add(share_log)
         db.commit()
         db.refresh(share_log)
-        result = share_resume_via_email(
+       
+        celery_task = share_mail_to_client.delay(
             candidate_id=request.candidate_id,
             resume_id=request.resume_id,
             to_address=request.to_address,
             cc_address=request.cc_address,
         )
-        return ShareResumeResponse(**result)
+       
+        return{
+            'success' : True,
+            'message' : "resume shared successfully",
+            'email_id' : to_address
+        }
 
     except ResumeShareError as e:
         logger.warning("Resume share error: %s (status=%d)", e.message, e.status_code)
