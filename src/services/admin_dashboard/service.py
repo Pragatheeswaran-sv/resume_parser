@@ -52,19 +52,19 @@ def admin_dashboard(admin_id):
             if total_users > 0 else 0
         )
 
-        schedular = (
+        scheduler = (
             db.query(ExtractionConfig)
             .filter(ExtractionConfig.is_active == True)
             .first()
         )
 
-        if schedular:
-            schedular_data = {
-                "schedular_id": schedular.config_id,
-                "schedule_type": schedular.schedule_type,
-                "interval_minutes": schedular.interval_minutes,
-                "weekday": schedular.weekday,
-                "is_active": schedular.is_active,
+        if scheduler:
+            scheduler_data = {
+                "scheduler_id": scheduler.config_id,
+                "schedule_type": scheduler.schedule_type,
+                "interval_minutes": scheduler.interval_minutes,
+                "weekday": scheduler.weekday,
+                "is_active": scheduler.is_active,
             }
 
 
@@ -172,7 +172,7 @@ def admin_dashboard(admin_id):
             "active_user_percentage": f"{active_user_percentage}%",
             "blocked_user_percentage": f"{blocked_user_percentage}%",
             "total_users_percentage": f"{active_user_percentage + blocked_user_percentage}%",
-            "schedular_data": schedular_data,
+            "scheduler_data": scheduler_data,
             "roles": role_data,
             "recent_candidate": [
                 candidate.candidate_info
