@@ -38,19 +38,23 @@ class EmailTemplate(Base):
     updated_at = Column(DateTime(timezone=False), default=ist_now, onupdate=ist_now)
     is_active = Column(Boolean, default=True)
 
-class EmailShareLogs(Base):
-    __tablename__ = "email_share_logs"
+class EmailNotification(Base):
+    __tablename__ = "email_notification"
 
     email_share_id = Column(UUID, primary_key=True, default=uuid.uuid4)
     to_address = Column(String(255), nullable=False)
-    cc_address = Column(String(255), nullable=False)
-    candidate_id = Column(UUID(as_uuid=True), ForeignKey("candidates.candidate_id"), nullable=False) 
+    cc_address = Column(String(255), nullable=True)
+    # candidate_id = Column(UUID(as_uuid=True), ForeignKey("candidates.candidate_id"), nullable=False) 
     resume_id = Column(UUID(as_uuid=True), ForeignKey("resumes.resume_id"), nullable=False)
+    subject = Column(String(500), nullable=True)
+    mail_body = Column(Text, nullable=True)
+    status = Column(String, default='Pending')
     is_active = Column(Boolean, default=True)
-    create_by = Column(String(255), nullable=True)
+    created_by = Column(String(255), nullable=True)
     updated_by = Column(String(255), nullable=True)
+    sent_at = Column(DateTime(timezone=False))
     created_at = Column(DateTime(timezone=False), default=ist_now)
     updated_at = Column(DateTime(timezone=False), default=ist_now, onupdate=ist_now)
 
-    candidate = relationship("Candidate")
-    candidate = relationship("Resume")
+    # candidate = relationship("Candidate")
+    resume = relationship("Resume")

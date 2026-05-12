@@ -17,7 +17,7 @@ from src.candidate.models import (
 )
 from src.resume_filter.models import Resume
 from src.email_reader.models import Attachment
-from src.resume_share.models import EmailProviderConfig, EmailTemplate
+from src.resume_share.models import EmailNotification, EmailProviderConfig, EmailTemplate
 from src.services.resume_share.email_sender import send_email
 
 logger = logging.getLogger(__name__)
@@ -164,7 +164,9 @@ def share_resume_via_email(
 	candidate_id: str,
 	resume_id: str,
 	to_address: str,
+	share_log_id,
 	cc_address: Optional[List[str]] = None,
+	
 ) -> dict:
 	"""Orchestrate fetching data, rendering template, and sending email."""
 	db = SessionLocal()
@@ -198,6 +200,16 @@ def share_resume_via_email(
 
 		ext = os.path.splitext(file_name)[1] or ".pdf"
 		friendly_filename = candidate_name.strip().replace(" ", "_") + "_Resume" + ext
+
+		db = SessionLocal()
+		email_notification = db.query(EmailNotification).filter(EmailNotification.email_share_id == share_log_id).first()
+		if email_notification != None :
+			print('--Data')
+			email_notification.subject = subject
+			email_notification.mail_body = email_body
+			db.add(email_notification)
+			db.commit()
+			db.refresh(email_notification)
 
 		config_dict = {
 			"provider_name": provider_config.provider_name,

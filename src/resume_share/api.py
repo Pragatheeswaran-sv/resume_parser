@@ -4,7 +4,7 @@ import logging
 from fastapi import APIRouter, HTTPException
 from src.services.background_task.tasks import share_mail_to_client
 from src.resume_share.schemas import ShareResumeRequest, ShareResumeResponse
-from src.resume_share.models import EmailShareLogs
+from src.resume_share.models import EmailNotification
 from src.services.resume_share.service import ResumeShareError, share_resume_via_email
 from db.connection import SessionLocal
 logger = logging.getLogger(__name__)
@@ -32,13 +32,11 @@ def share_resume_email(request: ShareResumeRequest):
         cc_address = str(request.cc_address)
         share = request.share
 
-        share_log = db.query(EmailShareLogs).filter(
-            EmailShareLogs.candidate_id == candidate_id,
-            EmailShareLogs.resume_id == resume_id,
-            EmailShareLogs.to_address == to_address,
-        ).first()
-
-
+        share_log = db.query(EmailNotification).filter(
+                EmailNotification.resume_id == resume_id,
+                EmailNotification.to_address == to_address,
+            ).order_by(EmailNotification.created_at.desc()).first()
+        
         date = datetime.datetime.now()
 
         past_five_days = date - datetime.timedelta(days=7)
@@ -48,9 +46,9 @@ def share_resume_email(request: ShareResumeRequest):
                 "message": f"Candidate profile already shared to {to_address} at {share_log.created_at}",
                 "email_id": ""
             }
-
-        share_log = EmailShareLogs(
-            candidate_id=candidate_id,
+        
+        share_log = EmailNotification(
+            # candidate_id=candidate_id,
             resume_id=resume_id,
             to_address=to_address,
             cc_address=cc_address
@@ -59,12 +57,13 @@ def share_resume_email(request: ShareResumeRequest):
         db.add(share_log)
         db.commit()
         db.refresh(share_log)
-       
+        print('share_log.email_share_id', share_log.email_share_id)
         celery_task = share_mail_to_client.delay(
             candidate_id=request.candidate_id,
             resume_id=request.resume_id,
             to_address=request.to_address,
             cc_address=request.cc_address,
+            share_log_id = share_log.email_share_id
         )
        
         return{
