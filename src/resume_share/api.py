@@ -33,12 +33,10 @@ def share_resume_email(request: ShareResumeRequest):
         share = request.share
 
         share_log = db.query(EmailNotification).filter(
-            # EmailNotification.candidate_id == candidate_id,
-            EmailNotification.resume_id == resume_id,
-            EmailNotification.to_address == to_address,
-        ).first()
-
-
+                EmailNotification.resume_id == resume_id,
+                EmailNotification.to_address == to_address,
+            ).order_by(EmailNotification.created_at.desc()).first()
+        
         date = datetime.datetime.now()
 
         past_five_days = date - datetime.timedelta(days=7)
@@ -48,7 +46,7 @@ def share_resume_email(request: ShareResumeRequest):
                 "message": f"Candidate profile already shared to {to_address} at {share_log.created_at}",
                 "email_id": ""
             }
-
+        
         share_log = EmailNotification(
             # candidate_id=candidate_id,
             resume_id=resume_id,
