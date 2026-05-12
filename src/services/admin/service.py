@@ -1326,21 +1326,55 @@ def get_model(page, page_size, sort_by, sort_order, filter_column, filter_value,
         if not admin_id:
             raise ValueError("Admin ID must be provided")
 
+        # def _mask_apikey(raw_apikey):
+        #     if not raw_apikey:
+        #         return None
+
+        #     normalized_key = decrypt_data(raw_apikey)
+        #     if normalized_key is None:
+        #         normalized_key = raw_apikey
+
+        #     normalized_key = str(normalized_key)
+        #     if not normalized_key:
+        #         return None
+
+        #     if len(normalized_key) <= 4:
+        #         return "*" * len(normalized_key)
+        #     return normalized_key[:2] + "******" + normalized_key[-2:]
+
         def _mask_apikey(raw_apikey):
             if not raw_apikey:
                 return None
 
-            normalized_key = decrypt_data(raw_apikey)
-            if normalized_key is None:
+            normalized_key = raw_apikey
+
+            try:
+                decrypted = decrypt_data(raw_apikey)
+
+                if decrypted:
+                    # if decrypted value is bytes -> decode
+                    if isinstance(decrypted, bytes):
+                        decrypted = decrypted.decode("utf-8")
+
+                    normalized_key = decrypted
+
+            except Exception:
+                # already plain text / invalid encrypted value
                 normalized_key = raw_apikey
 
-            normalized_key = str(normalized_key)
+            normalized_key = str(normalized_key).strip()
+
             if not normalized_key:
                 return None
 
             if len(normalized_key) <= 4:
                 return "*" * len(normalized_key)
-            return normalized_key[:2] + "******" + normalized_key[-2:]
+
+            return (
+                normalized_key[:2]
+                + "******"
+                + normalized_key[-2:]
+            )
 
         query = (
             db.query(
