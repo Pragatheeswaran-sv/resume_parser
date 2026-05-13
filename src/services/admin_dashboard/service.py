@@ -251,24 +251,59 @@ def admin_dashboard(admin_id):
 
         role_query = text("""
             SELECT
-                candidate_role AS role,
+                LOWER(TRIM(candidate_role)) AS role,
                 COUNT(*) AS role_count,
-                ROUND( COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 2) AS percentage
+                ROUND(
+                    COUNT(*) * 100.0
+                    / SUM(COUNT(*)) OVER (),
+                    2
+                ) AS percentage
             FROM resumes
-            WHERE candidate_role IS NOT NULL AND TRIM(candidate_role) <> ''
-            GROUP BY candidate_role
+            WHERE candidate_role IS NOT NULL
+            AND TRIM(candidate_role) <> ''
+            GROUP BY LOWER(TRIM(candidate_role))
             ORDER BY role_count DESC
         """)
 
         role_result = db.execute(role_query).fetchall()
+
+        top_roles = role_result[:5]
+
+        top_role_count = sum(
+            row.role_count for row in top_roles
+        )
+
+        top_role_percentage = sum(
+            row.percentage for row in top_roles
+        )
+
+        total_role_count = sum(
+            row.role_count for row in role_result
+        )
+
+        others_count = total_role_count - top_role_count
+
+        others_percentage = round(
+            100 - top_role_percentage,
+            2
+        )
+
         roles_data = [
             {
                 "role": row.role,
                 "no_of_candidate": row.role_count,
                 "percentage": f"{row.percentage}%"
             }
-            for row in role_result
+            for row in top_roles
         ]
+
+        if others_count > 0:
+            roles_data.append({
+                "role": "others",
+                "no_of_candidate": others_count,
+                "percentage": f"{others_percentage}%"
+            })
+
 
         recent_candidate_query = text("""
             SELECT c.candidate_id, c.name, c.email_address, c.phone_number, c.location, c.total_experience, u.name AS parsed_user_name
