@@ -57,7 +57,7 @@ def share_resume_email(request: ShareResumeRequest):
         db.add(share_log)
         db.commit()
         db.refresh(share_log)
-        print('share_log.email_share_id', share_log.email_share_id)
+
         celery_task = share_mail_to_client.delay(
             candidate_id=request.candidate_id,
             resume_id=request.resume_id,

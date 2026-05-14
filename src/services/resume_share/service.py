@@ -204,7 +204,6 @@ def share_resume_via_email(
 		db = SessionLocal()
 		email_notification = db.query(EmailNotification).filter(EmailNotification.email_share_id == share_log_id).first()
 		if email_notification != None :
-			print('--Data')
 			email_notification.subject = subject
 			email_notification.mail_body = email_body
 			db.add(email_notification)
