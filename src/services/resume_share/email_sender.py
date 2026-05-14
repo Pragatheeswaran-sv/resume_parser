@@ -38,11 +38,29 @@ def _send_smtp(config: dict, to_address: str, cc_address: Optional[List[str]],
     recipients = [to_address]
     if cc_address:
         recipients.extend(cc_address)
+    try:
+        server = smtplib.SMTP(config["host"], config["port"])
+        if config.get("tls_enabled", True):
+            server.starttls()
 
-    server = smtplib.SMTP(config["host"], config["port"])
-    if config.get("tls_enabled", True):
-        server.starttls()
-    server.login(config["username"], config["password"])
+        server.login(config["username"], config["password"])
+    except smtplib.SMTPAuthenticationError:
+        return {
+            "success": False,
+            "error": "Invalid Gmail credentials or App Password required"
+        }
+    except smtplib.SMTPConnectError:
+        return {
+            "success": False,
+            "error": "SMTP server connection failed"
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+    
     server.sendmail(config["from_email"], recipients, msg.as_string())
     message_id = msg.get("Message-ID", "")
     server.quit()
