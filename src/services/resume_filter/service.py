@@ -1684,78 +1684,95 @@ def extract_filters_from_query(query: str) -> dict:
     prompt = """
         You are a hiring-query parser.
 
-        Given a recruiter's natural-language search query, extract structured filter criteria.
+        Extract filters from:
+        - short queries
+        - skills lists
+        - role searches
+        - full job descriptions
 
-        Return ONLY valid JSON matching this schema (omit keys whose value would be null or empty):
+        Return ONLY valid JSON.
 
+        Schema:
         {
-            "skills": ["skill1", "skill2"],
-            "education": ["qualification1"],
-            "roles": ["role1"],
-            "companies": ["company1"],
-            "min_experience": <number or null>,
-            "max_experience": <number or null>,
-            "name": "<candidate name or null>",
-            "passout_start_year": <four-digit year or null>,
-            "passout_end_year": <four-digit year or null>,
-            "percentage": <number 0-100 or null>
+        "skills": [],
+        "education": [],
+        "roles": [],
+        "companies": [],
+        "min_experience": null,
+        "max_experience": null,
+        "name": null,
+        "passout_start_year": null,
+        "passout_end_year": null,
+        "percentage": null
         }
 
-        RULES:
-        1. skills, education, roles, companies must be arrays of SHORT strings.
+        Rules:
+
+        1. Technologies, programming languages, frameworks, libraries, databases, cloud platforms, tools, ETL tools, DevOps tools, AI/ML concepts, and software technologies -> skills.
+
         Examples:
-        - skills: "Python", "Java", ".NET", "React"
-        - education: "B.Tech", "MBA"
-        - roles: "Python Developer", "Backend Developer", "Data Engineer"
+        Python, SQL, React, FastAPI, AWS, Docker, Snowflake, Databricks, Airflow, Pinecone, FAISS, Chroma, Qdrant, LangGraph, CrewAI.
 
-        2. Role vs Skill classification:
-        - If a term includes a job designation such as and take role if keyword like role or designation is mentioned:
-            "developer", "engineer", "architect", "lead", "manager",
-            "analyst", "consultant", "administrator", "specialist",
-            then classify it under "roles".
-            
-            Examples:
-            - "Python Developer" -> roles
-            - "Backend Developer" -> roles
-            - ".NET Developer" -> roles
-            - "Java Engineer" -> roles
+        2. Extract technologies mentioned after:
+        - e.g.
+        - like
+        - such as
+        - including
+        and inside brackets ().
 
-        - If only a technology/programming language/framework is mentioned
-            without a designation, classify it under "skills".
+        3. Job titles/designations -> roles.
 
-            Examples:
-            - "Python" -> skills
-            - "Java" -> skills
-            - ".NET" -> skills
-            - "React" -> skills
+        Examples:
+        Python Developer
+        Backend Engineer
+        Data Engineer
+        Software Developer
+        DevOps Engineer
 
-        3. Experience:
-        - "5+ years" → min_experience=5
-        - "3-5 years" → min_experience=3, max_experience=5
-        - "10 years" → min_experience=10, max_experience=10
+        4. If a phrase contains:
+        developer, engineer, architect, manager, lead, analyst, consultant, administrator, specialist, tester, designer
 
-        4. Graduation / passout year:
-        - "graduated after 2020" → passout_start_year=2020
-        - "passed out between 2018 and 2022" →
-            passout_start_year=2018,
-            passout_end_year=2022
-        - "2021 batch" →
-            passout_start_year=2021,
-            passout_end_year=2021
+        then treat the FULL phrase as ONE role.
 
-        5. Percentage / score:
-        - "above 80%" → percentage=80
-        - "minimum 75 percentage" → percentage=75
-        - If a CGPA is mentioned (e.g. "8.5 CGPA"),
-            convert to percentage by multiplying by 10.
-            Example:
-            8.5 CGPA → 85
+        Examples:
+        "Python Developer"
+        "Java Engineer"
+        "Data Engineer"
 
-        6. Only include fields explicitly mentioned in the query.
+        Do NOT split:
+        "Python Developer"
+        into:
+        skills=["Python"]
+        roles=["Developer"]
 
-        7. Do NOT guess or infer values not present in the query.
+        5. Single technologies without designation -> skills.
 
-        8. Return ONLY JSON.
+        Examples:
+        Python, React, AWS.
+
+        6. Extract multiple skills separately.
+
+        Example:
+        "Python, Java, SQL"
+        -> ["Python", "Java", "SQL"]
+
+        7. Experience:
+        - "5+ years" -> min_experience=5
+        - "3-5 years" -> min_experience=3, max_experience=5
+        - "10 years" -> min_experience=10, max_experience=10
+
+        8. Extract only explicitly mentioned education.
+
+        9. CGPA to percentage:
+        8.5 CGPA -> 85
+
+        10. Remove duplicates and normalize values.
+
+        11. Extract only explicitly mentioned values.
+
+        12. Omit null or empty fields.
+
+        13. Return ONLY valid JSON.
         No markdown.
         No explanation.
         No extra text.
