@@ -1,5 +1,5 @@
 import logging
-from src.client_track.schema import ClientInsertRequest, ClientUpdateRequest, InterviewInsertRequest, InterviewStatusRequest, RoundInsertRequest
+from src.client_track.schema import ClientInsertRequest, ClientUpdateRequest, InterviewInsertRequest, InterviewStatusRequest, InterviewStatusUpdateRequest, RoundInsertRequest
 from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException, status, Query, Depends
 from src.services.client_track.service import add_client, add_interview, add_interview_status, add_round, delete_round, modify_client, modify_interview_status, remove_client, remove_interview, rounds, update_round, view_clients, view_interview_status, view_interviews
@@ -179,12 +179,12 @@ def interview_status(payload: InterviewStatusRequest, _user =  Depends(get_curre
         )
 
 @router.patch("/update_interview_status")
-def update_interview_status(payload: ClientUpdateRequest, client_id, _user =  Depends(get_current_user)):
+def update_interview_status(payload: InterviewStatusUpdateRequest, interview_status_id, _user =  Depends(get_current_user)):
     try:
         user_name = _user.name
-        return modify_interview_status(payload.model_dump(), client_id, user_name)
+        return modify_interview_status(payload.model_dump(), interview_status_id, user_name)
     except Exception as e:
-        logger.error(f"[Update Client] Error :{e}")
+        logger.error(f"[Update Interview Status] Error :{e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"status": "error", "message": str(e)},

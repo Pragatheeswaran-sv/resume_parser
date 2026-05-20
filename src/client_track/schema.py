@@ -37,6 +37,7 @@ class InterviewStatusRequest(BaseModel):
     status : str
 
 class InterviewStatusUpdateRequest(BaseModel):
+    feedback : str | None = None
     scheduled_date : str | None = None
     meeting_link : str | None = None
     status : str | None = None

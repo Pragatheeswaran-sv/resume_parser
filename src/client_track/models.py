@@ -56,7 +56,7 @@ class InterviewRounds(Base):
 class InterviewStatus(Base):
     __tablename__ = 'interview_status'
 
-    interview_round_id = Column(UUID, primary_key= True, default= uuid.uuid4)
+    interview_status_id = Column(UUID, primary_key= True, default= uuid.uuid4)
     interview_id = Column(UUID(as_uuid=True), ForeignKey("candidate_interviews.interview_id"), nullable=False)
     round_id = Column(UUID(as_uuid=True), ForeignKey("interview_rounds.round_id"), nullable=False)
     round_no  = Column(String(5), nullable = False)
@@ -70,5 +70,5 @@ class InterviewStatus(Base):
     updated_by = Column(String, nullable = True)
     is_active = Column(Boolean, default = True)
 
-    interview = relationship("CandidateInterviews")
-    interview = relationship("InterviewRounds")
+    candidate_interview = relationship("CandidateInterviews")
+    interview_round = relationship("InterviewRounds")

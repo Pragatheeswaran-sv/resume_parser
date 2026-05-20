@@ -44,8 +44,7 @@ def rounds():
     
 def add_round(payload, user_name):
     try:
-        round_name = payload.get("round_name") if payload.get("round_name") else None
-        print('round_name', round_name)
+        round_name = payload.get("round_name") or None
         interview_round = db.query(InterviewRounds).filter(InterviewRounds.round_name == round_name ,InterviewRounds.is_active == True).first()
         if interview_round:
             return{
@@ -75,7 +74,7 @@ def add_round(payload, user_name):
 
 def update_round(payload, round_id, user_name):
     try:
-        round_name = payload.get("round_name") if payload.get("round_name") else None
+        round_name = payload.get("round_name") or None
         if not round_id:
             return{
                 "status": status.HTTP_400_BAD_REQUEST,
@@ -177,13 +176,11 @@ def view_clients():
 
 def add_client(payload, user_name):
     try:
-        print('_user', payload)
-        company_name = payload.get("company_name") if payload.get("company_name") else None
-        contact_person = payload.get("contact_person") if payload.get("contact_person") else None
-        location = payload.get("location") if payload.get("location") else None
-        email_address = payload.get("email_address") if payload.get("email_address") else None
-        phone_number = payload.get("phone_number") if payload.get("phone_number") else None
-        print('round_name', company_name, contact_person, location, email_address, phone_number)
+        company_name = payload.get("company_name") or None
+        contact_person = payload.get("contact_person") or None
+        location = payload.get("location") or None
+        email_address = payload.get("email_address") or None
+        phone_number = payload.get("phone_number") or None
 
         client = db.query(Clients).filter(Clients.email_address == email_address, Clients.phone_number == phone_number, Clients.is_active == True).first()
         if client:
@@ -236,11 +233,11 @@ def modify_client(payload, client_id, user_name):
                 "message": "client not found",
             }
         
-        company_name = payload.get("company_name") if payload.get("company_name") else client.company_name
-        contact_person = payload.get("contact_person") if payload.get("contact_person") else client.contact_person
-        location = payload.get("location") if payload.get("location") else client.location
-        email_address = payload.get("email_address") if payload.get("email_address") else client.email_address
-        phone_number = payload.get("phone_number") if payload.get("phone_number") else client.phone_number
+        company_name = payload.get("company_name") or client.company_name
+        contact_person = payload.get("contact_person") or client.contact_person
+        location = payload.get("location") or client.location
+        email_address = payload.get("email_address") or client.email_address
+        phone_number = payload.get("phone_number") or client.phone_number
 
         if company_name == None or contact_person == None or location == None or email_address == None or phone_number == None:
             return{
@@ -350,13 +347,11 @@ def view_interviews():
 
 def add_interview(payload, user_name):
     try:
-        print('_user', payload)
-        resume_id = payload.get("resume_id") if payload.get("resume_id") else None
-        client_id = payload.get("client_id") if payload.get("client_id") else None
-        experience = payload.get("experience") if payload.get("experience") else None
-        Status = payload.get("status") if payload.get("status") else None
-        role = payload.get("role") if payload.get("role") else None
-        print('round_name', resume_id, client_id, experience, status, role)
+        resume_id = payload.get("resume_id") or None
+        client_id = payload.get("client_id") or None
+        experience = payload.get("experience") or None
+        Status = payload.get("status") or None
+        role = payload.get("role") or None
 
         client = db.query(CandidateInterviews).filter(CandidateInterviews.resume_id == resume_id, CandidateInterviews.client_id == client_id, CandidateInterviews.is_active == True).first()
         if client:
@@ -436,12 +431,12 @@ def remove_interview(interview_id, user_name):
 
 def view_interview_status(interview_id):
     try:
-        interview_status = db.query(InterviewStatus).filter(InterviewStatus.interview_id == interview_id, InterviewStatus.is_active == True).all()
+        interview_status = db.query(InterviewStatus).filter(InterviewStatus.interview_id == interview_id, InterviewStatus.is_active == True).order_by(InterviewStatus.created_at).all()
         return{
             "status": status.HTTP_200_OK,
             "message": "candidate interview status retrieved successfully",
             "data" : [{
-                "interview_round_id" : str(interview.interview_round_id),
+                "interview_status_id" : str(interview.interview_status_id),
                 "interview_id" : str(interview.interview_id),
                 "round_id" : str(interview.round_id),
                 "round_no" : interview.round_no,
@@ -462,15 +457,21 @@ def view_interview_status(interview_id):
 
 def add_interview_status(payload, user_name):
     try:
-        print('_user', payload)
-        interview_id = payload.get("interview_id") if payload.get("interview_id") else None
-        round_id = payload.get("round_id") if payload.get("round_id") else None
-        round_no = payload.get("round_no") if payload.get("round_no") else None
-        scheduled_date = payload.get("scheduled_date") if payload.get("scheduled_date") else None
-        meeting_link = payload.get("meeting_link") if payload.get("meeting_link") else None
-        feedback = payload.get("feedback") if payload.get("feedback") else None
-        Status = payload.get("status") if payload.get("status") else None
-        print('round_name', interview_id, round_id, round_no, status, scheduled_date, meeting_link, feedback)
+        interview_id = payload.get("interview_id") or None
+        round_id = payload.get("round_id") or None
+        round_no = payload.get("round_no") or None
+        scheduled_date = payload.get("scheduled_date") or None
+        meeting_link = payload.get("meeting_link") or None
+        feedback = payload.get("feedback") or ""
+        Status = payload.get("status") or None
+        
+        Candidate_interviews = db.query(CandidateInterviews).filter(CandidateInterviews.interview_id == interview_id, CandidateInterviews.is_active == True).first()
+        Candidate_status = str(Candidate_interviews.status)
+        if Candidate_status.lower() == "rejected":
+            return{
+                "status": status.HTTP_400_BAD_REQUEST,
+                "message": "can't schedule interview anymore, candidate rejected last round",
+            }
 
         interview_status = db.query(InterviewStatus).filter(InterviewStatus.round_no == round_no, InterviewStatus.round_id == round_id, InterviewStatus.is_active == True).first()
         if interview_status:
@@ -478,7 +479,7 @@ def add_interview_status(payload, user_name):
                 "status": status.HTTP_208_ALREADY_REPORTED,
                 "message": "Interview status already exists",
             }
-        if interview_id == None or round_id == None or round_no == None or scheduled_date == None or meeting_link == None or feedback == None or Status == None:
+        if interview_id == None or round_id == None or round_no == None or scheduled_date == None or meeting_link == None or Status == None:
             return{
                 "status": status.HTTP_400_BAD_REQUEST,
                 "message": "enter values to add interview status",
@@ -492,14 +493,14 @@ def add_interview_status(payload, user_name):
             "status": status.HTTP_201_CREATED,
             "message": "client created successfully",
             "data" : {
-                "interview_round_id" : str(new_interview_status.interview_round_id),
+                "interview_status_id" : str(new_interview_status.interview_status_id),
                 "interview_id" : str(new_interview_status.interview_id),
                 "round_id" : str(new_interview_status.round_id),
-                "client_id" : str(new_interview_status.round_no),
-                "experience" : new_interview_status.scheduled_date,
-                "status" : new_interview_status.meeting_link,
-                "role" : new_interview_status.feedback,
-                "role" : new_interview_status.status,
+                "round_no" : str(new_interview_status.round_no),
+                "scheduled_date" : new_interview_status.scheduled_date,
+                "meeting_link" : new_interview_status.meeting_link,
+                "feedback" : new_interview_status.feedback,
+                "status" : new_interview_status.status,
                 "created_by" : new_interview_status.created_by,
                 "updated_by" : new_interview_status.updated_by,
                 "is_active" : new_interview_status.is_active,
@@ -510,64 +511,79 @@ def add_interview_status(payload, user_name):
     finally:
         db.close()
 
-def modify_interview_status(payload, interview_id, user_name):
+def modify_interview_status(payload, interview_status_id, user_name):
     try:
         
-        if not interview_id:
+        if not interview_status_id:
             return{
                 "status": status.HTTP_400_BAD_REQUEST,
-                "message": "Provide client id",
+                "message": "Provide interview status id",
             }
-        client = db.query(CandidateInterviews).filter(
-            CandidateInterviews.interview_id == interview_id,
-            Clients.is_active == True).first()
-        if client == None:
+        interview_status = db.query(InterviewStatus).filter(
+            InterviewStatus.interview_status_id == interview_status_id,
+            InterviewStatus.is_active == True).first()
+        if interview_status == None:
             return{
                 "status": status.HTTP_404_NOT_FOUND,
-                "message": "client not found",
+                "message": "interview status not found",
             }
-        
-        company_name = payload.get("company_name") if payload.get("company_name") else client.company_name
-        contact_person = payload.get("contact_person") if payload.get("contact_person") else client.contact_person
-        location = payload.get("location") if payload.get("location") else client.location
-        email_address = payload.get("email_address") if payload.get("email_address") else client.email_address
-        phone_number = payload.get("phone_number") if payload.get("phone_number") else client.phone_number
+        feedback = payload.get("feedback") or interview_status.feedback
+        scheduled_date = payload.get("scheduled_date") or interview_status.scheduled_date
+        meeting_link = payload.get("meeting_link") or interview_status.meeting_link
+        Status = payload.get("status") or interview_status.status
 
-        if company_name == None or contact_person == None or location == None or email_address == None or phone_number == None:
+        if scheduled_date == None or meeting_link == None or Status == None:
             return{
                 "status": status.HTTP_208_ALREADY_REPORTED,
-                "message": "enter values to update client",
+                "message": "enter values to update interview status",
             }
 
-        if client.company_name == company_name and client.contact_person == contact_person and client.location == location and client.email_address == email_address and client.phone_number == phone_number:
+        if interview_status.scheduled_date == scheduled_date and interview_status.meeting_link == meeting_link and interview_status.status == Status and interview_status.feedback == feedback:
             return{
                 "status": status.HTTP_208_ALREADY_REPORTED,
-                "message": "client already exists",
+                "message": "interview status already exists",
             }
-        client.company_name = company_name
-        client.contact_person = contact_person
-        client.location = location
-        client.email_address = email_address
-        client.phone_number = phone_number
-        client.updated_by = user_name
+        interview_status.scheduled_date = scheduled_date
+        interview_status.feedback = feedback
+        interview_status.meeting_link = meeting_link
+        interview_status.status = Status
+        interview_status.updated_by = user_name
         
-        db.add(client)
+        db.add(interview_status)
         db.commit()
-        db.refresh(client)
+        db.refresh(interview_status)
+
+        interview_id = interview_status.interview_id
+        Status = str(interview_status.status)
+        round_no = interview_status.round_no
+
+        Candidate_interviews = db.query(CandidateInterviews).filter(CandidateInterviews.interview_id == interview_id, CandidateInterviews.is_active == True).first()
+        if Status.lower() == "completed":
+            Candidate_interviews.status = f"round {round_no} completed"
+        elif Status.lower() == "cleared":
+            Candidate_interviews.status = f"round {round_no} cleared"
+        elif Status.lower() == "rejected":
+            Candidate_interviews.status = "rejected"
+        
+        db.add(Candidate_interviews)
+        db.commit()
+        db.refresh(Candidate_interviews)
 
         return{
             "status": status.HTTP_201_CREATED,
-            "message": "client updated successfully",
+            "message": "candidate interview status updated successfully",
             "data" : {
-                "client_id" : str(client.client_id),
-                "company_name" : client.company_name,
-                "contact_person" : client.contact_person,
-                "location" : client.location,
-                "email_address" : client.email_address,
-                "phone_number" : client.phone_number,
-                "created_by" : client.created_by,
-                "updated_by" : client.updated_by,
-                "is_active" : client.is_active
+                "interview_status_id" : str(interview_status.interview_status_id),
+                "interview_id" : str(interview_status.interview_id),
+                "round_id" : str(interview_status.round_id),
+                "round_no" : str(interview_status.round_no),
+                "scheduled_date" : interview_status.scheduled_date,
+                "meeting_link" : interview_status.meeting_link,
+                "feedback" : interview_status.feedback,
+                "status" : interview_status.status,
+                "created_by" : interview_status.created_by,
+                "updated_by" : interview_status.updated_by,
+                "is_active" : interview_status.is_active,
             }
         }
     except Exception as e:
