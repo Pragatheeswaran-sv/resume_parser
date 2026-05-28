@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 import logging
 import cryptography.fernet as fernet
 import re
+from rapidfuzz import fuzz
 import phonenumbers
 
 load_dotenv()
@@ -99,3 +100,92 @@ def clean_mobile_number(phone_number):
 
     except Exception:
         return phone_number
+
+def calculate_match_score(
+    jd_role,
+    candidate_role,
+    jd_skills,
+    candidate_skills,
+    required_exp,
+    candidate_exp
+):
+
+    if isinstance(jd_role, list):
+        jd_role = " ".join(map(str, jd_role))
+
+    if isinstance(candidate_role, list):
+        candidate_role = " ".join(map(str, candidate_role))
+
+    jd_role = str(jd_role or "").lower().strip()
+    candidate_role = str(candidate_role or "").lower().strip()
+
+    title_score = fuzz.partial_ratio(
+        jd_role,
+        candidate_role
+    )
+
+    jd_skills = [
+        str(skill).lower().strip()
+        for skill in (jd_skills or [])
+        if skill
+    ]
+
+    candidate_skills = [
+        str(skill).lower().strip()
+        for skill in (candidate_skills or [])
+        if skill
+    ]
+
+    jd_skills = list(set(jd_skills))
+    candidate_skills = list(set(candidate_skills))
+
+    matched_skills = []
+
+    for jd_skill in jd_skills:
+        for candidate_skill in candidate_skills:
+            if jd_skill.lower() == candidate_skill.lower():
+                matched_skills.append(jd_skill)
+  
+    skill_score = (
+        (len(matched_skills) / len(jd_skills)) * 100
+        if jd_skills else 0
+    )
+    
+    required_exp = float(required_exp or 0)
+    candidate_exp = float(candidate_exp or 0)
+
+    if required_exp == 0 and candidate_exp == 0:
+        experience_score = 100
+    elif candidate_exp >= required_exp:
+        experience_score = 100
+    else:
+        experience_score = (
+            candidate_exp / required_exp
+        ) * 100
+   
+    final_score = (
+        title_score * 0.1 +
+        skill_score * 0.8 +
+        experience_score * 0.1
+    )
+    final_score = round(final_score, 2)
+
+    if final_score >= 85:
+        stars = "5"
+    elif final_score >= 70:
+        stars = "4"
+    elif final_score >= 55:
+        stars = "3"
+    elif final_score >= 40:
+        stars = "2"
+    else:
+        stars = "1"
+    
+    return {
+        "final_score": final_score,
+        "star_rating": stars,
+        "title_score": round(title_score, 2),
+        "skill_score": round(skill_score, 2),
+        "experience_score": round(experience_score, 2),
+        "matched_skills": matched_skills
+    }
