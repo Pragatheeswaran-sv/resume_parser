@@ -18,6 +18,7 @@ from src.resume_share.api import router as resume_share_router
 from src.resume_share.admin_api import router as email_config_router
 from src.admin_dashboard.api import router as admin_dashboard
 from src.user_dashboard.api import router as user_dashboard
+from src.client_track.api import router as client
 
  
 load_dotenv()
@@ -43,6 +44,7 @@ app.include_router(resume_share_router)
 app.include_router(email_config_router)
 app.include_router(admin_dashboard)
 app.include_router(user_dashboard)
+app.include_router(client)
 
 app.add_middleware(AllowedEmailMiddleware)
 app.add_middleware(

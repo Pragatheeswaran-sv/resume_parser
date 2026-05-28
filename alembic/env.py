@@ -9,7 +9,8 @@ from src.resume_filter import models
 from src.candidate import models
 from src.admin import models
 from src.auth import models
-from src.resume_share import models as resume_share_models
+from src.resume_share import models 
+from src.client_track import models 
 
 from alembic import context
 
