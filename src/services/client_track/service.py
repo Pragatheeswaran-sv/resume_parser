@@ -467,10 +467,17 @@ def add_interview_status(payload, user_name):
         
         Candidate_interviews = db.query(CandidateInterviews).filter(CandidateInterviews.interview_id == interview_id, CandidateInterviews.is_active == True).first()
         Candidate_status = str(Candidate_interviews.status)
+        candidate_status = Candidate_status.split(' ')[-1]
         if Candidate_status.lower() == "rejected":
             return{
                 "status": status.HTTP_400_BAD_REQUEST,
                 "message": "can't schedule interview anymore, candidate rejected last round",
+            }
+        
+        if candidate_status.lower() != "cleared":
+            return{
+                "status": status.HTTP_400_BAD_REQUEST,
+                "message": "can't schedule interview, previous round not cleared",
             }
 
         interview_status = db.query(InterviewStatus).filter(InterviewStatus.round_no == round_no, InterviewStatus.round_id == round_id, InterviewStatus.is_active == True).first()
