@@ -387,7 +387,7 @@ def extract_docx_text(path):
 
     # Remove duplicates while preserving order
     unique_text = list(dict.fromkeys(full_text))
-    logger.info(f"Extracted text from DOCX: {' '.join(unique_text[:20])}...")  # Print first 20 unique pieces for verification
+    logger.info(f"Extracted text from DOCX: {' '.join(unique_text)}...")
     return "\n".join(unique_text)
     # return preprocess_resume_text("\n".join(unique_text))
 
@@ -1175,9 +1175,9 @@ def search_resumes(filters: dict, export: bool = False) -> list:
         query = query.limit(page_size).offset((page - 1) * page_size)
 
         data = query.all()
-        jd_role = filters.get("roles", [])
+        jd_role = filters.get("roles") or []
         jd_role = db.query(Role.role).filter(Role.role_id.in_(jd_role)).first()
-        jd_skill = filters.get("skills", [])
+        jd_skill = filters.get("skills") or []
         jd_skills = [skill.skill for skill in db.query(Skill.skill).filter(Skill.skill_id.in_(jd_skill)).all()]
         jd_exp = filters.get("max_experience", 0)
         results = []
