@@ -371,7 +371,7 @@ def add_interview(payload, user_name):
 
         return{
             "status": status.HTTP_201_CREATED,
-            "message": "client created successfully",
+            "message": "interview created successfully",
             "data" : {
                 "interview_id" : str(new_interview.interview_id),
                 "resume_id" : str(new_interview.resume_id),
@@ -411,7 +411,7 @@ def remove_interview(interview_id, user_name):
 
         return{
             "status": status.HTTP_201_CREATED,
-            "message": "client deleted successfully",
+            "message": "interview deleted successfully",
             "data" : {
                 "interview_id" : str(interview.interview_id),
                 "resume_id" : str(interview.resume_id),
@@ -466,39 +466,52 @@ def add_interview_status(payload, user_name):
         Status = payload.get("status") or None
         
         Candidate_interviews = db.query(CandidateInterviews).filter(CandidateInterviews.interview_id == interview_id, CandidateInterviews.is_active == True).first()
-        Candidate_status = str(Candidate_interviews.status)
-        candidate_status = Candidate_status.split(' ')[-1]
-        if Candidate_status.lower() == "rejected":
+        if not Candidate_interviews:
             return{
                 "status": status.HTTP_400_BAD_REQUEST,
-                "message": "can't schedule interview anymore, candidate rejected last round",
+                "message": "No interview status found for the given interview ID",
             }
         
-        if candidate_status.lower() != "cleared":
-            return{
-                "status": status.HTTP_400_BAD_REQUEST,
-                "message": "can't schedule interview, previous round not cleared",
-            }
+        candidate_interview_status = db.query(InterviewStatus).filter(InterviewStatus.interview_id == interview_id).order_by(InterviewStatus.updated_at.desc()).first()
+        
+        if candidate_interview_status == None:
+            new_interview_status = InterviewStatus(interview_id = interview_id, round_id = round_id, round_no = round_no, scheduled_date = scheduled_date, meeting_link = meeting_link, feedback = feedback, status = Status, created_by = user_name, updated_by = user_name)
+            db.add(new_interview_status)
+            db.commit()
+            db.refresh(new_interview_status)
+        else:
+            candidate_status = str(candidate_interview_status.status)
+            if candidate_status.lower() == "rejected":
+                return{
+                    "status": status.HTTP_400_BAD_REQUEST,
+                    "message": "can't schedule interview anymore, candidate rejected last round",
+                }
+            
+            if candidate_status.lower() != "cleared":
+                return{
+                    "status": status.HTTP_400_BAD_REQUEST,
+                    "message": "can't schedule interview, previous round not cleared",
+                }
 
-        interview_status = db.query(InterviewStatus).filter(InterviewStatus.round_no == round_no, InterviewStatus.round_id == round_id, InterviewStatus.is_active == True).first()
-        if interview_status:
-            return{
-                "status": status.HTTP_208_ALREADY_REPORTED,
-                "message": "Interview status already exists",
-            }
-        if interview_id == None or round_id == None or round_no == None or scheduled_date == None or meeting_link == None or Status == None:
-            return{
-                "status": status.HTTP_400_BAD_REQUEST,
-                "message": "enter values to add interview status",
-            }
-        new_interview_status = InterviewStatus(interview_id = interview_id, round_id = round_id, round_no = round_no, scheduled_date = scheduled_date, meeting_link = meeting_link, feedback = feedback, status = Status, created_by = user_name, updated_by = user_name)
-        db.add(new_interview_status)
-        db.commit()
-        db.refresh(new_interview_status)
+            interview_status = db.query(InterviewStatus).filter(InterviewStatus.interview_id == interview_id, InterviewStatus.round_no == round_no, InterviewStatus.round_id == round_id, InterviewStatus.is_active == True).first()
+            if interview_status:
+                return{
+                    "status": status.HTTP_208_ALREADY_REPORTED,
+                    "message": "Interview status already exists",
+                }
+            if interview_id == None or round_id == None or round_no == None or scheduled_date == None or meeting_link == None or Status == None:
+                return{
+                    "status": status.HTTP_400_BAD_REQUEST,
+                    "message": "enter values to add interview status",
+                }
+            new_interview_status = InterviewStatus(interview_id = interview_id, round_id = round_id, round_no = round_no, scheduled_date = scheduled_date, meeting_link = meeting_link, feedback = feedback, status = Status, created_by = user_name, updated_by = user_name)
+            db.add(new_interview_status)
+            db.commit()
+            db.refresh(new_interview_status)
 
         return{
             "status": status.HTTP_201_CREATED,
-            "message": "client created successfully",
+            "message": "interview status added successfully",
             "data" : {
                 "interview_status_id" : str(new_interview_status.interview_status_id),
                 "interview_id" : str(new_interview_status.interview_id),
