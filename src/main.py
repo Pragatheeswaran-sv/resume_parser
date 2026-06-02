@@ -19,6 +19,7 @@ from src.resume_share.admin_api import router as email_config_router
 from src.admin_dashboard.api import router as admin_dashboard
 from src.user_dashboard.api import router as user_dashboard
 from src.client_track.api import router as client
+from src.tailor_resume.api import router as tailor_resume
 
  
 load_dotenv()
@@ -45,6 +46,7 @@ app.include_router(email_config_router)
 app.include_router(admin_dashboard)
 app.include_router(user_dashboard)
 app.include_router(client)
+app.include_router(tailor_resume)
 
 app.add_middleware(AllowedEmailMiddleware)
 app.add_middleware(
