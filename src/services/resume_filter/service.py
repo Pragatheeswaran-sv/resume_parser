@@ -17,6 +17,7 @@ from docx import Document
 from db.connection import SessionLocal
 from src.resume_filter.models import Resume
 from sqlalchemy import JSON, Float, Integer, select, and_, cast, String, text, func, or_
+from sqlalchemy.dialects.postgresql import aggregate_order_by
 from sqlalchemy.orm import aliased, joinedload
 from src.email_reader.models import EmailLogs, Attachment
 from src.candidate.models import (
@@ -946,14 +947,17 @@ def search_resumes(filters: dict, export: bool = False) -> list:
                 ),
 
                 func.json_agg(
-                    func.json_build_object(
-                        "role_id", Role.role_id,
-                        "role", Role.role,
-                        "company_name", Company.company_name,
-                        "company_location", Company.company_location,
-                        "start_date", WorkExperience.start_date,
-                        "end_date", WorkExperience.end_date,
-                        "is_present", WorkExperience.is_active
+                    aggregate_order_by(
+                        func.json_build_object(
+                            "role_id", Role.role_id,
+                            "role", Role.role,
+                            "company_name", Company.company_name,
+                            "company_location", Company.company_location,
+                            "start_date", WorkExperience.start_date,
+                            "end_date", WorkExperience.end_date,
+                            "is_present", WorkExperience.is_active
+                        ),
+                        WorkExperience.start_date.asc()
                     )
                 ).label("work_experience")
             )
@@ -963,6 +967,7 @@ def search_resumes(filters: dict, export: bool = False) -> list:
             .group_by(WorkExperience.candidate_id)
             .subquery()
         )
+        
         conditions = [Candidate.is_active == True]
 
         name_list = filters.get("name")
