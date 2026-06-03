@@ -332,8 +332,7 @@ def view_interviews():
             .filter(CandidateInterviews.is_active == True)
             .all())
         # candidate_name = db.query(Candidate.name).join(Resume, Resume.candidate_id == Candidate.candidate_id).filter(Candidate.is_active == True).all()
-        print(interviews)
-        # return '1'
+
         return{
             "status": status.HTTP_200_OK,
             "message": "candidate interviews retrieved successfully",
