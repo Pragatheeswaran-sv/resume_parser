@@ -29,7 +29,7 @@ from src.admin.models import Admin, AiModel, AiModelConfig, AiModelversion
 from openai import OpenAI
 from anthropic import Anthropic
 
-from src.utils.helper import clean_mobile_number, compress_file
+from src.utils.helper import calculate_match_score, clean_mobile_number, compress_file
 BASE_DIR = "/app"  
 EXPORT_PATH = os.path.join(BASE_DIR, "export_files")
 
@@ -387,7 +387,7 @@ def extract_docx_text(path):
 
     # Remove duplicates while preserving order
     unique_text = list(dict.fromkeys(full_text))
-    logger.info(f"Extracted text from DOCX: {' '.join(unique_text[:20])}...")  # Print first 20 unique pieces for verification
+    logger.info(f"Extracted text from DOCX: {' '.join(unique_text)}...")
     return "\n".join(unique_text)
     # return preprocess_resume_text("\n".join(unique_text))
 
@@ -883,10 +883,23 @@ def search_resumes(filters: dict, export: bool = False) -> list:
     if not filters or not isinstance(filters, dict):
         logger.warning("[search_resumes] Received empty or invalid filters dict")
         return [{"total_record": 0}]
+
     db = SessionLocal()
     try:
         filter_count = 0
-        results = []
+
+        def _safe_float(value):
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return None
+
+        def _safe_int(value):
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return None
+
         candidate_education = (
             db.query(
                 CandidateEducation.candidate_id.label("candidate_id"),
@@ -948,34 +961,24 @@ def search_resumes(filters: dict, export: bool = False) -> list:
         conditions = [Candidate.is_active == True]
 
         name_list = filters.get("name")
-        if name_list and isinstance(name_list, list):
-            # LIKE pattern search: match names containing the pattern (case-insensitive like %name%)
-            name_conditions = []
-            for name in name_list:
-                name = str(name).strip()
-                if name:
-                    # Use LIKE with wildcards for partial match (e.g., %Ramesh%)
-                    name_conditions.append(Candidate.name.ilike(f"%{name}%"))
+        if isinstance(name_list, list) and name_list:
+            name_conditions = [Candidate.name.ilike(f"%{str(name).strip()}%") for name in name_list if str(name).strip()]
             if name_conditions:
                 conditions.append(or_(*name_conditions))
                 filter_count += 1
-        elif name_list and isinstance(name_list, str):
-            # Single name - LIKE pattern match (case-insensitive)
+        elif isinstance(name_list, str) and name_list.strip():
             conditions.append(Candidate.name.ilike(f"%{name_list.strip()}%"))
             filter_count += 1
-        if filters.get("min_experience") not in (None, ""):
-            try:
-                conditions.append(Candidate.total_experience >= float(filters["min_experience"]))
-                filter_count += 1
-            except:
-                pass
 
-        if filters.get("max_experience") not in (None, ""):
-            try:
-                conditions.append(Candidate.total_experience <= float(filters["max_experience"]))
-                filter_count += 1
-            except:
-                pass
+        min_exp = _safe_float(filters.get("min_experience"))
+        if min_exp is not None:
+            conditions.append(Candidate.total_experience >= min_exp)
+            filter_count += 1
+
+        max_exp = _safe_float(filters.get("max_experience"))
+        if max_exp is not None:
+            conditions.append(Candidate.total_experience <= max_exp)
+            filter_count += 1
 
         skills = filters.get("skills")
         if isinstance(skills, list) and skills:
@@ -987,27 +990,17 @@ def search_resumes(filters: dict, export: bool = False) -> list:
                 )
             )
             filter_count += 1
-            
-        roles = filters.get("roles")
-        if isinstance(roles, list) and roles:
-            conditions.append(
-                Candidate.candidate_id.in_(
-                    db.query(WorkExperience.candidate_id).filter(
-                        WorkExperience.role_id.in_(roles)
-                    )
-                )
-            )
-            filter_count += 1
 
         companies = filters.get("companies")
         if isinstance(companies, list) and companies:
+            company_terms = [str(comp).strip() for comp in companies if str(comp).strip()]
             company_ids = []
-            for comp in companies:
-                # LIKE pattern search: match company names containing the pattern (case-insensitive like %company%)
-                matched = db.query(Company).filter(
-                    Company.company_name.ilike(f"%{comp.strip()}%")
-                ).all()
-                company_ids.extend([c.company_id for c in matched])
+            if company_terms:
+                company_name_filters = [Company.company_name.ilike(f"%{term}%") for term in company_terms]
+                company_ids = [
+                    row.company_id
+                    for row in db.query(Company.company_id).filter(or_(*company_name_filters)).all()
+                ]
 
             if company_ids:
                 conditions.append(
@@ -1021,14 +1014,21 @@ def search_resumes(filters: dict, export: bool = False) -> list:
 
         roles = filters.get("roles")
         if isinstance(roles, list) and roles:
+            role_terms = [str(role).strip() for role in roles if str(role).strip()]
             role_ids = []
-            for rol in roles:
-                matched = db.query(Role).filter(
-                    # Role.role_id.in_(rol)
-                    Role.role_id == rol
-                ).all()
-                role_ids.extend([c.role_id for c in matched])
-
+            if role_terms:
+                role_numeric_ids = [rid for rid in (_safe_int(role) for role in role_terms) if rid is not None]
+                role_name_filters = [Role.role.ilike(f"%{term}%") for term in role_terms]
+                role_filters = list(role_name_filters)
+                if role_numeric_ids:
+                    role_filters.append(Role.role_id.in_(role_numeric_ids))
+                role_ids = [
+                    row.role_id
+                    for row in db.query(Role.role_id).filter(
+                        or_(*role_filters)
+                    ).all()
+                ]
+            
             if role_ids:
                 conditions.append(
                     Candidate.candidate_id.in_(
@@ -1047,90 +1047,39 @@ def search_resumes(filters: dict, export: bool = False) -> list:
                         CandidateEducation.education_id.in_(education)
                     )
                 )
-            )
+                )
             filter_count += 1
 
-        # year_conditions = []
-        # if filters.get("passout_start_year") not in (None, ""):
-        #     try:
-        #         year_conditions.append(CandidateEducation.year_of_passed >= int(filters["passout_start_year"]))
-        #     except:
-        #         pass
-
-        # if filters.get("passout_end_year") not in (None, ""):
-        #     try:
-        #         year_conditions.append(CandidateEducation.year_of_passed <= int(filters["passout_end_year"]))
-        #     except:
-        #         pass
-        # degree_conditions = or_(
-        #     Education.education.ilike("%b.e%"),
-        #     Education.education.ilike("%btech%"),
-        #     Education.education.ilike("%b.tech%"),
-        #     Education.education.ilike("%m.e%"),
-        #     Education.education.ilike("%mtech%"),
-        #     Education.education.ilike("%m.tech%"),
-        #     Education.education.ilike("%bachelor%"),
-        #     Education.education.ilike("%master%")
-        # )
-        # if year_conditions:
-        #     conditions.append(
-        #         Candidate.candidate_id.in_(
-        #             db.query(CandidateEducation.candidate_id).filter(and_(*year_conditions), degree_conditions)
-        #         )
-        #     )
-        #     filter_count += 1
         year_conditions = []
-        if filters.get("passout_start_year") not in (None, ""):
-            try:
-                year_conditions.append(
-                    func.max(CandidateEducation.year_of_passed) >= int(filters["passout_start_year"])
-                )
-            except (ValueError, TypeError):
-                pass
+        passout_start_year = _safe_int(filters.get("passout_start_year"))
+        if passout_start_year is not None:
+            year_conditions.append(func.max(CandidateEducation.year_of_passed) >= passout_start_year)
 
-        if filters.get("passout_end_year") not in (None, ""):
-            try:
-                year_conditions.append(
-                    func.max(CandidateEducation.year_of_passed) <= int(filters["passout_end_year"])
-                )
-            except (ValueError, TypeError):
-                pass
-
-        degree_conditions = or_(
-            Education.education.ilike("%b.e%"),
-            Education.education.ilike("%btech%"),
-            Education.education.ilike("%b.tech%"),
-            Education.education.ilike("%m.e%"),
-            Education.education.ilike("%mtech%"),
-            Education.education.ilike("%m.tech%"),
-            Education.education.ilike("%bachelor%"),
-            Education.education.ilike("%master%")
-        )
+        passout_end_year = _safe_int(filters.get("passout_end_year"))
+        if passout_end_year is not None:
+            year_conditions.append(func.max(CandidateEducation.year_of_passed) <= passout_end_year)
 
         if year_conditions:
             conditions.append(
                 Candidate.candidate_id.in_(
                     db.query(CandidateEducation.candidate_id)
                     .join(Education, Education.education_id == CandidateEducation.education_id)
-                    # .filter(degree_conditions)                  
-                    .group_by(CandidateEducation.candidate_id) 
+                    .group_by(CandidateEducation.candidate_id)
                     .having(and_(*year_conditions))
                 )
             )
             filter_count += 1
 
-        if filters.get("percentage") not in (None, ""):
-            try:
-                conditions.append(
-                    Candidate.candidate_id.in_(
-                        db.query(CandidateEducation.candidate_id).filter(
-                            CandidateEducation.percentage >= float(filters["percentage"])
-                        )
+        percentage = _safe_float(filters.get("percentage"))
+        if percentage is not None:
+            conditions.append(
+                Candidate.candidate_id.in_(
+                    db.query(CandidateEducation.candidate_id).filter(
+                        CandidateEducation.percentage >= percentage
                     )
                 )
-                filter_count += 1
-            except:
-                pass
+            )
+            filter_count += 1
 
         logger.info("[search_resumes] Total filter conditions built: %d", len(conditions))
 
@@ -1145,6 +1094,7 @@ def search_resumes(filters: dict, export: bool = False) -> list:
             db.query(
                 Resume.candidate_id,
                 Resume.resume_id,
+                Resume.candidate_role,
                 func.row_number().over(
                     partition_by=Resume.candidate_id,
                     order_by=Resume.created_at.desc()
@@ -1152,7 +1102,6 @@ def search_resumes(filters: dict, export: bool = False) -> list:
             )
             .subquery()
         )
-
         query = (
             db.query(
                 func.json_build_object(
@@ -1163,6 +1112,7 @@ def search_resumes(filters: dict, export: bool = False) -> list:
                     "location", Candidate.location,
                     "total_experience", Candidate.total_experience,
                     "resume_id", recent_resume_subq.c.resume_id,
+                    "candidate_role", func.coalesce(recent_resume_subq.c.candidate_role, ""),
                     "education", func.coalesce(candidate_education.c.education, cast('[]', JSON)),
                     "skills", func.coalesce(candidate_skills.c.skills, cast('[]', JSON)),
                     "work_experience", func.coalesce(candidate_work_exp.c.work_experience, cast('[]', JSON))
@@ -1217,13 +1167,38 @@ def search_resumes(filters: dict, export: bool = False) -> list:
             else:
                 logger.info("No data to export")
                 return {"file_path": "No data to export"}
-        
-        page = max(1, int(filters.get("page", 1)))
-        page_size = max(1, min(100, int(filters.get("page_size", 20))))
+
+        page = _safe_int(filters.get("page", 1)) or 1
+        page_size = _safe_int(filters.get("page_size", 20)) or 20
+        page = max(1, page)
+        page_size = max(1, min(100, page_size))
         query = query.limit(page_size).offset((page - 1) * page_size)
 
         data = query.all()
-        results = [row.candidate_info for row in data]
+        jd_role = filters.get("roles") or []
+        jd_role = db.query(Role.role).filter(Role.role_id.in_(jd_role)).first()
+        jd_skill = filters.get("skills") or []
+        jd_skills = [skill.skill for skill in db.query(Skill.skill).filter(Skill.skill_id.in_(jd_skill)).all()]
+        jd_exp = filters.get("max_experience", 0)
+        results = []
+        for row in data:
+            candidate_info = row.candidate_info
+            candidate_skills_list = candidate_info.get("skills", [])
+            rate_skill = [item.get("skill") for item in candidate_skills_list if item.get("skill")]
+            rate_experience = candidate_info.get("total_experience", 0) or 0
+            rate_role = candidate_info.get("candidate_role", "") or ""
+            
+            candidate_rating = calculate_match_score(
+                jd_role,
+                rate_role,
+                jd_skills,
+                rate_skill,
+                jd_exp,
+                rate_experience,
+            )
+            candidate_info["candidate_rating"] = candidate_rating.get("star_rating")
+            results.append(candidate_info)
+
         results.append({"total_record": total_count})
 
         logger.info(
@@ -1231,9 +1206,7 @@ def search_resumes(filters: dict, export: bool = False) -> list:
             round(_time.time() - start_time, 3),
             len(results) - 1
         )
-        if results[0].get('total_record') == 0 or filter_count == 0:
-            return []
-        # print('results-->', results)
+
         return results
         
 
