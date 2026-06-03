@@ -3,6 +3,8 @@ import logging
 import datetime
 from datetime import timezone
 from zoneinfo import ZoneInfo
+from src.candidate.models import Candidate
+from src.resume_filter.models import Resume
 from src.auth.models import OauthCredentials
 from datetime import timezone
 from zoneinfo import ZoneInfo
@@ -323,7 +325,15 @@ def remove_client(client_id, user_name):
 
 def view_interviews():
     try:
-        interviews = db.query(CandidateInterviews).filter(CandidateInterviews.is_active == True).all()
+        interviews = (
+            db.query(CandidateInterviews)
+            .join(Resume, Resume.resume_id == CandidateInterviews.resume_id)
+            .join(Candidate, Candidate.candidate_id == Resume.candidate_id)
+            .filter(CandidateInterviews.is_active == True)
+            .all())
+        # candidate_name = db.query(Candidate.name).join(Resume, Resume.candidate_id == Candidate.candidate_id).filter(Candidate.is_active == True).all()
+        print(interviews)
+        # return '1'
         return{
             "status": status.HTTP_200_OK,
             "message": "candidate interviews retrieved successfully",
@@ -331,6 +341,7 @@ def view_interviews():
                 "interview_id" : str(interview.interview_id),
                 "resume_id" : str(interview.resume_id),
                 "client_id" : str(interview.client_id),
+                "candidate_name" : interview.resume.candidate.name,
                 "experience" : interview.experience,
                 "status" : interview.status,
                 "role" : interview.role,
