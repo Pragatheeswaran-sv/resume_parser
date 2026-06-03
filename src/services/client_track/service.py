@@ -96,7 +96,7 @@ def update_round(payload, round_id, user_name):
         interview_round.round_name = round_name
         interview_round.updated_by = user_name
         db.add(interview_round)
-        db.commit()
+        db.commit() 
         db.refresh(interview_round)
 
         return{
