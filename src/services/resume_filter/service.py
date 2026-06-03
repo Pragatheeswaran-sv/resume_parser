@@ -940,6 +940,11 @@ def search_resumes(filters: dict, export: bool = False) -> list:
         candidate_work_exp = (
             db.query(
                 WorkExperience.candidate_id.label("candidate_id"),
+
+                func.count(WorkExperience.experience_id).label(
+                    "work_exp_count"
+                ),
+
                 func.json_agg(
                     func.json_build_object(
                         "role_id", Role.role_id,
@@ -1089,6 +1094,30 @@ def search_resumes(filters: dict, export: bool = False) -> list:
             .scalar()
         ) or 0
 
+        candidate_resumes = (
+            db.query(
+                Resume.candidate_id.label("candidate_id"),
+
+                func.count(Resume.resume_id).label("resume_count"),
+
+                func.json_agg(
+                    func.json_build_object(
+                        "resume_id", Resume.resume_id,
+                        "candidate_role", Resume.candidate_role,
+                        "file_name", Attachment.file_name
+                    )
+                ).label("resumes")
+            )
+            .select_from(Resume)
+            .join(
+                Attachment,
+                Resume.attachment_id == Attachment.attachment_id
+            )
+            .group_by(Resume.candidate_id)
+            .subquery()
+        )
+
+
         # Subquery to get the most recent resume for each candidate
         recent_resume_subq = (
             db.query(
@@ -1113,9 +1142,12 @@ def search_resumes(filters: dict, export: bool = False) -> list:
                     "total_experience", Candidate.total_experience,
                     "resume_id", recent_resume_subq.c.resume_id,
                     "candidate_role", func.coalesce(recent_resume_subq.c.candidate_role, ""),
+                    'resume_count', func.coalesce(candidate_resumes.c.resume_count, 0),
+                    'resumes', func.coalesce(candidate_resumes.c.resumes, cast('[]', JSON)),
                     "education", func.coalesce(candidate_education.c.education, cast('[]', JSON)),
                     "skills", func.coalesce(candidate_skills.c.skills, cast('[]', JSON)),
-                    "work_experience", func.coalesce(candidate_work_exp.c.work_experience, cast('[]', JSON))
+                    "work_experience", func.coalesce(candidate_work_exp.c.work_experience, cast('[]', JSON)),
+                    "company_count", func.coalesce(candidate_work_exp.c.work_exp_count, 0)
                 ).label("candidate_info")
             )
             .select_from(Candidate)
@@ -1128,6 +1160,10 @@ def search_resumes(filters: dict, export: bool = False) -> list:
                     Candidate.candidate_id == recent_resume_subq.c.candidate_id,
                     recent_resume_subq.c.rn == 1
                 )
+            )
+            .outerjoin(
+                candidate_resumes,
+                Candidate.candidate_id == candidate_resumes.c.candidate_id
             )
             .filter(and_(*conditions))
         )
