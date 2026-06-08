@@ -18,8 +18,19 @@ from dotenv import load_dotenv
 from db.connection import SessionLocal
 from sqlalchemy import UUID, String, func, cast, inspect
 from sqlalchemy.dialects.postgresql import JSON, aggregate_order_by
-from src.admin.models import Admin, Users, ExtractionConfig, ist_now
-from src.auth.jwt import create_access_token, hash_password, verify_password
+from src.admin.models import (
+    Admin, AiModel, AiModelConfig, AiModelversion,
+    Users, ExtractionConfig, ist_now,
+)
+from src.auth.jwt import (
+    create_access_token,
+    generate_refresh_token,
+    hash_password,
+    hash_refresh_token,
+    new_family_id,
+    verify_password,
+)
+from src.auth.models import RefreshToken
 from fastapi import status
 from src.admin.models import Admin, AiModel, AiModelConfig, AiModelversion, Users
 from src.utils.helper import encrypt_data, decrypt_data
@@ -60,11 +71,23 @@ def admin_check(email: str, password: str) -> Dict[str, Any]:
             "role": "admin",
         })
 
+        raw_rt, rt_hash, rt_expires = generate_refresh_token()
+        family = new_family_id()
+        session.add(RefreshToken(
+            token_hash=rt_hash,
+            user_id=str(admin.admin_id),
+            role="admin",
+            family_id=family,
+            expires_at=rt_expires,
+        ))
+        session.commit()
+
         return {
             "status": status.HTTP_200_OK,
             "message": "Admin logged in successfully",
             "data": {
                 "access_token": token,
+                "refresh_token": raw_rt,
                 "token_type": "bearer",
                 "is_admin": True,
                 "name": admin.name,
@@ -75,6 +98,7 @@ def admin_check(email: str, password: str) -> Dict[str, Any]:
     except ValueError:
         raise
     except Exception as e:
+        session.rollback()
         logger.warning("[admin_check] Error: %s", str(e), exc_info=True)
         raise ValueError(str(e))
     finally:
@@ -240,8 +264,20 @@ def sso_user_login(
 
         token = create_access_token(token_payload)
 
+        raw_rt, rt_hash, rt_expires = generate_refresh_token()
+        family = new_family_id()
+        session.add(RefreshToken(
+            token_hash=rt_hash,
+            user_id=str(account.user_id),
+            role="user",
+            family_id=family,
+            expires_at=rt_expires,
+        ))
+        session.commit()
+
         response_data: Dict[str, Any] = {
             "access_token": token,
+            "refresh_token": raw_rt,
             "token_type": "bearer",
             "role": "user",
             "email": account.email_address,
@@ -257,7 +293,166 @@ def sso_user_login(
     except ValueError:
         raise
     except Exception as e:
+        session.rollback()
         logger.warning("[sso_user_login] Error: %s", str(e), exc_info=True)
+        raise ValueError(str(e))
+    finally:
+        session.close()
+
+
+def rotate_refresh_token(raw_token: str) -> Dict[str, Any]:
+    """Validate a refresh token, revoke it, and issue a fresh token pair.
+
+    Implements **token-family replay detection**: if the incoming token has
+    already been revoked (i.e. it was reused) the entire family is
+    invalidated, forcing re-authentication.
+
+    Args:
+        raw_token: The opaque refresh token string sent by the client.
+
+    Returns:
+        Dict containing new ``access_token`` and ``refresh_token``.
+
+    Raises:
+        ValueError: If the token is invalid, expired, revoked, or the
+            underlying account is no longer valid.
+    """
+    session = SessionLocal()
+    try:
+        if not raw_token or not raw_token.strip():
+            raise ValueError("Refresh token is required")
+
+        token_hash = hash_refresh_token(raw_token)
+        stored = (
+            session.query(RefreshToken)
+            .filter(RefreshToken.token_hash == token_hash)
+            .first()
+        )
+
+        if not stored:
+            raise ValueError("Invalid refresh token")
+
+        if stored.is_revoked:
+            session.query(RefreshToken).filter(
+                RefreshToken.family_id == stored.family_id
+            ).update({"is_revoked": True})
+            session.commit()
+            raise ValueError("Refresh token reuse detected — family revoked, please log in again")
+
+        now_utc = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+        if stored.expires_at < now_utc:
+            stored.is_revoked = True
+            session.commit()
+            raise ValueError("Refresh token has expired — please log in again")
+
+        stored.is_revoked = True
+
+        if stored.role == "admin":
+            account = (
+                session.query(Admin)
+                .filter(Admin.admin_id == stored.user_id, Admin.is_active.is_(True))
+                .first()
+            )
+            if not account:
+                session.commit()
+                raise ValueError("Admin account not found or deactivated")
+            payload: Dict[str, Any] = {
+                "sub": str(account.admin_id),
+                "email": account.email_address,
+                "role": "admin",
+            }
+        else:
+            account = (
+                session.query(Users)
+                .filter(
+                    Users.user_id == stored.user_id,
+                    Users.is_active.is_(True),
+                    Users.is_blocked.is_(False),
+                )
+                .first()
+            )
+            if not account:
+                session.commit()
+                raise ValueError("User account not found, blocked, or deactivated")
+            payload = {
+                "sub": str(account.user_id),
+                "email": account.email_address,
+                "role": "user",
+            }
+
+        access_token = create_access_token(payload)
+
+        raw_rt, rt_hash, rt_expires = generate_refresh_token()
+        session.add(RefreshToken(
+            token_hash=rt_hash,
+            user_id=stored.user_id,
+            role=stored.role,
+            family_id=stored.family_id,
+            expires_at=rt_expires,
+        ))
+        session.commit()
+
+        return {
+            "status": status.HTTP_200_OK,
+            "message": "Token refreshed successfully",
+            "data": {
+                "access_token": access_token,
+                "refresh_token": raw_rt,
+                "token_type": "bearer",
+                "role": stored.role,
+            },
+        }
+    except ValueError:
+        raise
+    except Exception as e:
+        session.rollback()
+        logger.warning("[rotate_refresh_token] Error: %s", str(e), exc_info=True)
+        raise ValueError(str(e))
+    finally:
+        session.close()
+
+
+def revoke_refresh_tokens(raw_token: str) -> Dict[str, Any]:
+    """Revoke the token family associated with *raw_token* (logout).
+
+    Args:
+        raw_token: The opaque refresh token the client currently holds.
+
+    Returns:
+        Dict confirming logout.
+
+    Raises:
+        ValueError: If the token is not found.
+    """
+    session = SessionLocal()
+    try:
+        if not raw_token or not raw_token.strip():
+            raise ValueError("Refresh token is required")
+
+        token_hash = hash_refresh_token(raw_token)
+        stored = (
+            session.query(RefreshToken)
+            .filter(RefreshToken.token_hash == token_hash)
+            .first()
+        )
+
+        if not stored:
+            raise ValueError("Invalid refresh token")
+
+        session.query(RefreshToken).filter(
+            RefreshToken.family_id == stored.family_id
+        ).update({"is_revoked": True})
+        session.commit()
+
+        return {
+            "status": status.HTTP_200_OK,
+            "message": "Logged out successfully — all sessions in this family revoked",
+        }
+    except ValueError:
+        raise
+    except Exception as e:
+        session.rollback()
+        logger.warning("[revoke_refresh_tokens] Error: %s", str(e), exc_info=True)
         raise ValueError(str(e))
     finally:
         session.close()

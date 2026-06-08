@@ -33,11 +33,13 @@ OPEN_PATHS = {
     "/api/create_admin",
     "/api/admin/login",
     "/api/auth/sso/login",
-    "/api/oauth/login/gmail",
-    "/api/oauth/login/zoho",
-    "/api/auth/gmail/callback",
-    "/api/auth/zoho/callback",
-    "/api/emails",
+    "/api/auth/refresh",
+    "/api/auth/logout",
+    "/oauth/login/gmail",
+    "/oauth/login/zoho",
+    "/auth/gmail/callback",
+    "/auth/zoho/callback",
+    "/emails",
     "/api/download/{file_name}"
 }
 
