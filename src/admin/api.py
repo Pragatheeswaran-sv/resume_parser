@@ -15,6 +15,7 @@ from src.admin.schema import (
     CreateModelValidate,
     ExtractionConfigUpdate,
     ExtractionToggleRequest,
+    RefreshTokenRequest,
     SSOLoginRequest,
     Validate_new_job,
 )
@@ -36,6 +37,8 @@ from src.services.admin.service import (
     pause_extraction,
     profile,
     resume_extraction,
+    revoke_refresh_tokens,
+    rotate_refresh_token,
     sso_user_login,
     toggle_block,
     toggle_extraction,
@@ -49,7 +52,7 @@ from src.services.admin.service import (
     # new_model_version,
     model_config, 
     get_model,
-    create_model
+    create_model,
 )
 from typing import List, Dict, Any
 # from src.services.admin.service import (
@@ -151,6 +154,41 @@ def sso_login(body: SSOLoginRequest):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"status": "error", "message": str(e)},
         )
+
+
+@router.post("/auth/refresh")
+def refresh_token(body: RefreshTokenRequest):
+    """Exchange a valid refresh token for a new access + refresh token pair.
+
+    Implements token rotation: the old refresh token is revoked and a
+    fresh pair is returned.  If a previously-revoked token is reused the
+    entire token family is invalidated (replay detection).
+    """
+    try:
+        return rotate_refresh_token(body.refresh_token)
+    except ValueError as e:
+        logger.warning("[refresh_token] Error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"status": "error", "message": str(e)},
+        )
+
+
+@router.post("/auth/logout")
+def logout(body: RefreshTokenRequest):
+    """Revoke all refresh tokens in the same family (log out).
+
+    The client should discard its stored tokens after calling this endpoint.
+    """
+    try:
+        return revoke_refresh_tokens(body.refresh_token)
+    except ValueError as e:
+        logger.warning("[logout] Error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"status": "error", "message": str(e)},
+        )
+
 
 # ── Legacy auth-mail CRUD (kept for backward-compat) ────────────────────
 

@@ -3,9 +3,21 @@
 Handles password hashing/verification via bcrypt and JWT token
 creation/decoding using python-jose.  Configuration is pulled from
 environment variables so secrets stay out of source control.
+
+Refresh-token rotation
+~~~~~~~~~~~~~~~~~~~~~~
+* A random opaque string is issued alongside each access JWT.
+* Only a SHA-256 hash of the refresh token is stored in the DB.
+* On each ``/api/auth/refresh`` call the old token is revoked and a new
+  pair (access + refresh) is returned — this is **token rotation**.
+* If a revoked token is reused the entire family is invalidated
+  (replay-detection).
 """
 
+import hashlib
 import os
+import secrets
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -18,6 +30,7 @@ load_dotenv()
 SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-me-to-a-strong-random-secret-key")
 ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
+REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("JWT_REFRESH_TOKEN_EXPIRE_DAYS", "7"))
 
 
 def hash_password(plain: str) -> str:
@@ -88,3 +101,31 @@ def decode_access_token(token: str) -> dict:
     if not token:
         raise JWTError("Token must not be empty")
     return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+
+
+# ── Refresh-token helpers ─────────────────────────────────────────────────
+
+def _hash_token(raw_token: str) -> str:
+    """Return the hex SHA-256 digest of *raw_token*."""
+    return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+
+
+def generate_refresh_token() -> tuple[str, str, datetime]:
+    """Create a new opaque refresh token.
+
+    Returns:
+        A 3-tuple of ``(raw_token, token_hash, expires_at)``.
+        The raw token is sent to the client; only the hash is persisted.
+    """
+    raw = secrets.token_urlsafe(48)
+    return raw, _hash_token(raw), datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+
+
+def new_family_id() -> uuid.UUID:
+    """Return a fresh UUID4 to start a new refresh-token family."""
+    return uuid.uuid4()
+
+
+def hash_refresh_token(raw_token: str) -> str:
+    """Public wrapper so callers can hash a client-supplied token for lookup."""
+    return _hash_token(raw_token)
