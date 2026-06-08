@@ -1,3 +1,5 @@
+import uuid
+
 from fastapi.responses import RedirectResponse
 import requests
 import logging
@@ -279,21 +281,16 @@ def get_valid_access_token(email: str, db = SessionLocal()):
     return cred.access_token
  
 def save_attachment_bytes(file_bytes, filename):
-    logger.info(f"NAV----> Saving attachment")
-    logger.info(f"NAV----> Saving attachment: {filename}")
     ATTACHMENT_DIR = os.getenv("ATTACHMENT_DIR", "attachments")
 
     if not os.path.exists(ATTACHMENT_DIR):
         os.makedirs(ATTACHMENT_DIR)
 
-    base_name, ext = os.path.splitext(filename)
-    unique_name = filename
-    counter = 0
-    while os.path.exists(os.path.join(ATTACHMENT_DIR, unique_name)):
-        counter += 1
-        unique_name = f"{base_name}_{counter}{ext}"
+    _, ext = os.path.splitext(filename)
 
+    unique_name = f"{uuid.uuid4()}{ext}"
     path = os.path.join(ATTACHMENT_DIR, unique_name)
+
     with open(path, "wb") as f:
         f.write(file_bytes)
 

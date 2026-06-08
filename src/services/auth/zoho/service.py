@@ -1,3 +1,5 @@
+import uuid
+
 from fastapi.responses import RedirectResponse
 import requests
 import logging
@@ -779,13 +781,9 @@ def is_resume(filename: str) -> bool:
 def save_attachment_bytes(file_bytes: bytes, filename: str):
     os.makedirs(ATTACHMENT_DIR, exist_ok=True)
 
-    base, ext = os.path.splitext(filename)
-    unique_name = filename
-    counter = 1
+    _, ext = os.path.splitext(filename)
 
-    while os.path.exists(os.path.join(ATTACHMENT_DIR, unique_name)):
-        unique_name = f"{base}_{counter}{ext}"
-        counter += 1
+    unique_name = f"{uuid.uuid4()}{ext}"
 
     path = os.path.join(ATTACHMENT_DIR, unique_name)
 
