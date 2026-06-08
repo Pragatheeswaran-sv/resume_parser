@@ -23,14 +23,14 @@ from typing import List, Optional, Literal
 from uuid import UUID
 
 class MultiDownloadRequest(BaseModel):
-    resume_ids: List[UUID]
+    candidate_ids: List[UUID]
     format: Optional[Literal["pdf", "original"]] = "original"
 
-    @field_validator("resume_ids")
+    @field_validator("candidate_ids")
     @classmethod
     def validate_ids(cls, v: List[UUID]):
         if not v:
-            raise ValueError("resume_ids must contain at least one ID")
+            raise ValueError("candidate_ids must contain at least one ID")
         if len(v) > 50:
             raise ValueError("Cannot request more than 50 resumes at once")
         return v

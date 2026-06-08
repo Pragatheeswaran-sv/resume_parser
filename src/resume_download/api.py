@@ -13,7 +13,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse
 
-from src.resume_download.schemas import MultiDownloadItem, MultiDownloadRequest, previewResumeRequest
+from src.resume_download.schemas import MultiDownloadRequest, previewResumeRequest
 from src.email_reader.models import Attachment
 from src.resume_filter.models import Resume
 from src.admin.dependencies import get_current_admin_or_user
@@ -62,31 +62,31 @@ def download_multiple(
 ):
     try: 
         db = SessionLocal()
-        files = get_download_links(db, request.resume_ids)
+        files = get_download_links(db, request.candidate_ids)
         return files
     except Exception as e:
         logger.error(f"Error in download_multiple: {str(e)}")
         raise HTTPException(status_code=500, detail="An error occurred while processing the download-multiple request")
 
-@router.get("/download/{file_name}")
-def download_file(file_name: str):
-    try:
-        file_path = os.path.join(UPLOAD_DIR, file_name)
+# @router.get("/download/{file_name}")
+# def download_file(file_name: str):
+#     try:
+#         file_path = os.path.join(UPLOAD_DIR, file_name)
 
-        logger.info("Checking file:", file_path)
+#         logger.info("Checking file:", file_path)
 
-        if not os.path.exists(file_path):
-            logger.info("File NOT found!")  
-            raise HTTPException(status_code=404, detail="File not found")
+#         if not os.path.exists(file_path):
+#             logger.info("File NOT found!")  
+#             raise HTTPException(status_code=404, detail="File not found")
 
-        return FileResponse(
-            path=file_path,
-            filename=file_name,
-            media_type="application/octet-stream",
-            headers={
-                "Content-Disposition": f"attachment; filename={file_name}"
-            }
-        )
-    except Exception as e:
-        logger.error(f"Error in download_file: {str(e)}")
-        raise HTTPException(status_code=500, detail="An error occurred while processing the download_file request")
+#         return FileResponse(
+#             path=file_path,
+#             filename=file_name,
+#             media_type="application/octet-stream",
+#             headers={
+#                 "Content-Disposition": f"attachment; filename={file_name}"
+#             }
+#         )
+#     except Exception as e:
+#         logger.error(f"Error in download_file: {str(e)}")
+#         raise HTTPException(status_code=500, detail="An error occurred while processing the download_file request")
