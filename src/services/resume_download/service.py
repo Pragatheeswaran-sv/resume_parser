@@ -5,10 +5,14 @@ stays thin.  Conversion results are cached on disk to avoid redundant
 LibreOffice invocations.
 """
 
+import datetime
 import logging
 import os
 import base64
 import mimetypes
+import re
+import uuid
+import shutil
 import zipfile
 from io import BytesIO
 from pathlib import Path
@@ -26,7 +30,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = "/app"  
 UPLOAD_DIR = os.path.join(BASE_DIR, "attachments")
 FILES_DIR = "attachments/"
-
+DOWNLOAD_FILES = 'downloads/'
 
 def get_file_path(filename: str) -> str:
     try:
@@ -102,55 +106,92 @@ def get_file_for_download(filename: str) -> str:
         logger.error(f"Error in get_file_for_download: {str(e)}")
         raise HTTPException(status_code=404, detail=str(e))
 
-def get_download_links(db: Session, resume_ids: List[str]) -> List[dict]:
-    try:
 
-        resumes = (
-            db.query(Resume)
-            .filter(Resume.resume_id.in_(resume_ids))
+def get_download_links(db: Session, candidate_ids: list[str]):
+    try:
+        candidate_details = (
+            db.query(
+                Candidate.name,
+                Candidate.candidate_id,
+                Resume.resume_id,
+                Attachment.attachment_id,
+                Attachment.file_name,
+            )
+            .join(Resume, Candidate.candidate_id == Resume.candidate_id)
+            .join(Attachment, Resume.attachment_id == Attachment.attachment_id)
+            .filter(Resume.candidate_id.in_(candidate_ids))
             .all()
         )
 
-        if not resumes:
+        if not candidate_details:
             raise HTTPException(status_code=404, detail="No resumes found")
 
-        attachment_ids = [r.attachment_id for r in resumes if r.attachment_id]
-
-        if not attachment_ids:
-            raise HTTPException(status_code=404, detail="No attachments found")
-
-        attachments = (
-            db.query(Attachment)
-            .filter(Attachment.attachment_id.in_(attachment_ids))
-            .all()
+        
+        folder_name = (
+            f"{uuid.uuid4()}_"
+            f"{datetime.datetime.now():%Y%m%d_%H%M%S}"
         )
 
-        if not attachments:
-            raise HTTPException(status_code=404, detail="No files found")
+        download_path = os.path.join(BASE_DIR, DOWNLOAD_FILES)
+        os.makedirs(download_path, exist_ok=True)
 
-        result = []
+        temp_folder = os.path.join(download_path, folder_name)
+        os.makedirs(temp_folder, exist_ok=True)
 
-        for att in attachments:
-            file_name = att.file_name
-            file_path = os.path.join(UPLOAD_DIR, file_name)
+        for resume in candidate_details:
+            
+            candidate_name = re.sub(
+                r'[<>:"/\\|?*]',
+                "_",
+                resume.name or "Unknown_Candidate"
+            )
 
-            if not os.path.exists(file_path):
+            candidate_folder = os.path.join(temp_folder, candidate_name)
+            os.makedirs(candidate_folder, exist_ok=True)
+
+            source_file = os.path.join(
+                UPLOAD_DIR,
+                str(resume.file_name)
+            )
+
+            if not os.path.exists(source_file):
+                logger.warning(
+                    f"File not found for attachment_id "
+                    f"{resume.attachment_id}: {source_file}"
+                )
                 continue
 
-            result.append({
-                "file_name": file_name,
-                "download_url": f"/attachments/{file_name}"
-            })
+            
+            destination_file = os.path.join(
+                candidate_folder,
+                f"{resume.attachment_id}_{resume.file_name}"
+            )
+
+            shutil.copy2(source_file, destination_file)
+
         
-        if not result:
-            raise HTTPException(status_code=404, detail="Files not found on server")
+        zip_path = shutil.make_archive(
+            temp_folder,
+            "zip",
+            temp_folder
+        )
+
+        shutil.rmtree(temp_folder, ignore_errors=True)
+
+        with open(zip_path, "rb") as zip_file:
+            zip_base64 = base64.b64encode(zip_file.read()).decode("utf-8")
+
         return {
-                    "status": status.HTTP_200_OK,
-                    "message": "File downloaded successfully",
-                    "data": result
-                    }
+            "file_name": os.path.basename(zip_path),
+            "content": zip_base64
+        }
+
     except HTTPException as e:
         raise e
+
     except Exception as e:
-        logger.error(f"Error in get_download_links: {str(e)}")
-        raise HTTPException(status_code=500, detail="An error occurred while processing the download links request")
+        logger.exception("Error in get_download_links")
+        raise HTTPException(
+            status_code=500,
+            detail="An error occurred while processing the download request"
+        )
