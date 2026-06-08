@@ -5,6 +5,7 @@ import logging
 from uuid import UUID
 import datetime as dt
 import zipfile
+from src.client_track.models import CandidateInterviews
 from lxml import etree
 import pandas as pd
 from alembic.util import status
@@ -1136,6 +1137,35 @@ def search_resumes(filters: dict, export: bool = False) -> list:
             )
             .subquery()
         )
+
+        candidate_interviews = (
+            db.query(
+                Candidate.candidate_id.label("candidate_id"),
+                func.count(CandidateInterviews.interview_id).label("interview_count"),
+                func.json_agg(
+                    func.json_build_object(
+                        "interview_id", CandidateInterviews.interview_id,
+                        "client_id", CandidateInterviews.client_id,
+                        "resume_id", CandidateInterviews.resume_id,
+                        "experience", CandidateInterviews.experience,
+                        "status", CandidateInterviews.status,
+                        "role", CandidateInterviews.role,
+                        "created_at", CandidateInterviews.created_at,
+                    )
+                ).label("interviews")
+            )
+            .join(
+                Resume,
+                Resume.resume_id == CandidateInterviews.resume_id
+            )
+            .join(
+                Candidate,
+                Candidate.candidate_id == Resume.candidate_id
+            )
+            .group_by(Candidate.candidate_id)
+            .subquery()
+        )
+
         query = (
             db.query(
                 func.json_build_object(
@@ -1152,7 +1182,9 @@ def search_resumes(filters: dict, export: bool = False) -> list:
                     "education", func.coalesce(candidate_education.c.education, cast('[]', JSON)),
                     "skills", func.coalesce(candidate_skills.c.skills, cast('[]', JSON)),
                     "work_experience", func.coalesce(candidate_work_exp.c.work_experience, cast('[]', JSON)),
-                    "company_count", func.coalesce(candidate_work_exp.c.work_exp_count, 0)
+                    "company_count", func.coalesce(candidate_work_exp.c.work_exp_count, 0),
+                    "interview_count", func.coalesce(candidate_interviews.c.interview_count, 0),
+                    "interviews", func.coalesce(candidate_interviews.c.interviews, cast('[]', JSON)),
                 ).label("candidate_info")
             )
             .select_from(Candidate)
@@ -1170,6 +1202,10 @@ def search_resumes(filters: dict, export: bool = False) -> list:
                 candidate_resumes,
                 Candidate.candidate_id == candidate_resumes.c.candidate_id
             )
+            .outerjoin(
+                candidate_interviews,
+                Candidate.candidate_id == candidate_interviews.c.candidate_id
+            )
             .filter(and_(*conditions))
         )
 
@@ -1183,7 +1219,7 @@ def search_resumes(filters: dict, export: bool = False) -> list:
             "percentage": cast(candidate_education.c.max_percentage, Float),
         }
 
-        sort_by = filters.get("sort_by")
+        sort_by = (filters.get("sort_by") or "name").lower()
         sort_order = (filters.get("sort_order") or "asc").lower()
 
         if sort_by in sort_map:
