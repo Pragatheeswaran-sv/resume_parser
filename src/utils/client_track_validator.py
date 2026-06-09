@@ -1138,3 +1138,101 @@ def validate_add_interview_status(payload, user_name):
         )
 
     return errors
+
+PAGINATION_VALIDATION = {
+    "page": {
+        "required": False,
+        "type": int,
+        "min": 1,
+        "default": 1,
+    },
+    "per_page": {
+        "required": False,
+        "type": int,
+        "min": 1,
+        "max": 100,
+        "default": 10,
+    }
+}
+
+def validate_pagination(page, per_page):
+    if page is not None and page < 1:
+        return {
+            "field": "page",
+            "message": "Page must be greater than 0."
+        }
+
+    if per_page is not None and per_page < 1:
+        return {
+            "field": "per_page",
+            "message": "Per page must be greater than 0."
+        }
+
+    if per_page is not None and per_page > 100:
+        return {
+            "field": "per_page",
+            "message": "Per page cannot exceed 100."
+        }
+
+    return None
+
+CLIENT_COLUMNS = {
+    "company",
+    "contact_person",
+    "email_address",
+    "phone_number",
+    "location",
+}
+
+INTERVIEW_COLUMNS = {
+    "candidate_name",
+    "role",
+    "status",
+    "experience",
+}
+
+
+def validate_client_columns(filter_column, sort_by):
+    errors = []
+
+    if filter_column and filter_column not in CLIENT_COLUMNS:
+        errors.append({
+            "field": "filter_column",
+            "message": f"Allowed values: {', '.join(CLIENT_COLUMNS)}"
+        })
+
+    if sort_by and sort_by not in CLIENT_COLUMNS:
+        errors.append({
+            "field": "sort_by",
+            "message": f"Allowed values: {', '.join(CLIENT_COLUMNS)}"
+        })
+
+    return errors
+
+def validate_interview_columns(filter_column, sort_by):
+    errors = []
+
+    if filter_column and filter_column not in INTERVIEW_COLUMNS:
+        errors.append({
+            "field": "filter_column",
+            "message": f"Allowed values: {', '.join(INTERVIEW_COLUMNS)}"
+        })
+
+    if sort_by and sort_by not in INTERVIEW_COLUMNS:
+        errors.append({
+            "field": "sort_by",
+            "message": f"Allowed values: {', '.join(INTERVIEW_COLUMNS)}"
+        })
+
+    return errors
+
+VALID_SORT_ORDERS = {"asc", "desc"}
+
+def validate_sort_order(sort_order):
+    if sort_order and sort_order.lower() not in VALID_SORT_ORDERS:
+        return {
+            "field": "sort_order",
+            "message": "Sort order must be either 'asc' or 'desc'."
+        }
+
+    return None
