@@ -37,8 +37,8 @@ OPEN_PATHS = {
     "/api/auth/logout",
     "/oauth/login/gmail",
     "/oauth/login/zoho",
-    "/auth/gmail/callback",
-    "/auth/zoho/callback",
+    "/api/auth/gmail/callback",
+    "/api/auth/zoho/callback",
     "/emails",
     "/api/download/{file_name}"
 }

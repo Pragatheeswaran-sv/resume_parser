@@ -193,10 +193,12 @@ def gmail_callback(code: str, db = SessionLocal()) -> dict:
             Users.is_blocked == False,
             Users.is_active == True
         ).first()
-        access_token = create_access_token({"email": email, "sub": str(valid_mail.user_id), "role": "user"})
+
         if not valid_mail:
             logger.warning(f"Email {email} is not authorized to connect")
             raise HTTPException(status_code=status.HTTP_200_OK, detail={"status": status.HTTP_401_UNAUTHORIZED, "message": "Email not authorized"})
+        
+        access_token = create_access_token({"email": email, "sub": str(valid_mail.user_id), "role": "user"}) 
 
         return {
             "status": status.HTTP_200_OK,
