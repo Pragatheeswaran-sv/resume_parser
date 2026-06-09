@@ -87,9 +87,9 @@ def delete_interview_round(round_id, _current_role = Depends(get_current_admin_o
         )
     
 @router.get("/view_clients")
-def get_client(_current_role = Depends(get_current_admin_or_user)):
+def get_client(page = 1, page_size = 10, filter_column = None, filter_by = None, sort_by = None, sort_order = None, _current_role = Depends(get_current_admin_or_user)):
     try:
-        return view_clients()
+        return view_clients(int(page), int(page_size), filter_column, filter_by, sort_by, sort_order)
     except Exception as e:
         logger.error(f"[View Client] Error :{e}")
         raise HTTPException(
@@ -134,9 +134,9 @@ def delete_client(client_id, _current_role = Depends(get_current_admin_or_user))
         )
     
 @router.get("/view_interviews")
-def get_interviews(_current_role = Depends(get_current_admin_or_user)):
+def get_interviews(page = 1, page_size = 10, filter_column = None, filter_by = None, sort_by = None, sort_order = None, _current_role = Depends(get_current_admin_or_user)):
     try:
-        return view_interviews()
+        return view_interviews(int(page), int(page_size), filter_column, filter_by, sort_by, sort_order)
     except Exception as e:
         logger.error(f"[View Interviews] Error :{e}")
         raise HTTPException(

@@ -11,14 +11,14 @@ from datetime import timezone
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from db.connection import SessionLocal
-from sqlalchemy import UUID, String, func, cast, inspect
+from sqlalchemy import UUID, String, asc, desc, func, cast, inspect
 from sqlalchemy.dialects.postgresql import JSON, aggregate_order_by
 from src.admin.models import Admin, Users, ExtractionConfig, ist_now
 from src.auth.jwt import create_access_token, hash_password, verify_password
 from fastapi import status
 from src.client_track.models import CandidateInterviews, Clients, InterviewRounds, InterviewStatus
 from src.utils.helper import encrypt_data, decrypt_data
-from src.utils.client_track_validator import VALID_STATUSES, validate_add_client, validate_add_interview, validate_add_interview_status, validate_add_round, validate_modify_client, validate_required, validate_update_round, validate_user, validate_uuid
+from src.utils.client_track_validator import VALID_STATUSES, validate_add_client, validate_add_interview, validate_add_interview_status, validate_add_round, validate_interview_columns, validate_modify_client, validate_pagination, validate_required, validate_sort_order, validate_update_round, validate_user, validate_uuid
 from src.utils.response import internal_server_error_response, not_found_response, success_response, validation_error_response
 
 load_dotenv()
@@ -418,16 +418,68 @@ def delete_round(round_id, user_name):
         db.close()
 
 
-def view_clients():
+def view_clients(page, page_size, filter_column, filter_by, sort_by, sort_order):
     try:
+        errors = []
 
-        clients = (
-            db.query(Clients)
-            .filter(
-                Clients.is_active.is_(True)
-            )
-            .all()
+        pagination_error = validate_pagination(page, page_size)
+        if pagination_error:
+            errors.append(pagination_error)
+
+        errors.extend(
+            validate_interview_columns(filter_column, sort_by)
         )
+
+        sort_error = validate_sort_order(sort_order)
+        if sort_error:
+            errors.append(sort_error)
+
+        if errors:
+            return {
+                "status_code": status.HTTP_400_BAD_REQUEST,
+                "errors": errors
+            }
+        query = (
+            db.query(Clients)
+            .filter(Clients.is_active.is_(True))
+        )
+
+        column_map = {
+            "company_name": Clients.company_name,
+            "contact_person": Clients.contact_person,
+            "email_address": Clients.email_address,
+            "phone_number": Clients.phone_number,
+            "location": Clients.location,
+        }
+
+        if filter_by and filter_column:
+            column = column_map.get(filter_column)
+
+            if column is not None:
+                query = query.filter(
+                    column.ilike(f"%{filter_by}%")
+                )
+
+        if sort_by:
+            column = column_map.get(sort_by)
+
+            if column is not None:
+                if sort_order and sort_order.lower() == "desc":
+                    query = query.order_by(desc(column))
+                else:
+                    query = query.order_by(asc(column))
+        else:
+            query = query.order_by(Clients.company_name.asc())
+
+        total_count = query.count()
+
+        # Pagination
+        if page and page_size:
+            offset = (page - 1) * page_size
+
+            query = query.offset(offset).limit(page_size)
+
+        clients = query.all()
 
         if not clients:
             return {
@@ -443,6 +495,9 @@ def view_clients():
         return {
             "status_code": status.HTTP_200_OK,
             "message": "Clients retrieved successfully.",
+            "page": page,
+            "page_size": page_size,
+            "total_records": total_count,
             "data": [
                 {
                     "client_id": str(client.client_id),
@@ -860,9 +915,29 @@ def remove_client(client_id, user_name):
     finally:
         db.close()
 
-def view_interviews():
+def view_interviews(page, page_size, filter_column, filter_by, sort_by, sort_order):
     try:
-        interviews = (
+        errors = []
+
+        pagination_error = validate_pagination(page, page_size)
+        if pagination_error:
+            errors.append(pagination_error)
+
+        errors.extend(
+            validate_interview_columns(filter_column, sort_by)
+        )
+
+        sort_error = validate_sort_order(sort_order)
+        if sort_error:
+            errors.append(sort_error)
+
+        if errors:
+            return {
+                "status_code": status.HTTP_400_BAD_REQUEST,
+                "errors": errors
+            }
+
+        query = (
             db.query(CandidateInterviews)
             .join(
                 Resume,
@@ -875,8 +950,47 @@ def view_interviews():
             .filter(
                 CandidateInterviews.is_active.is_(True)
             )
-            .all()
         )
+
+        column_map = {
+            "candidate_name": Candidate.name,
+            "role": CandidateInterviews.role,
+            "status": CandidateInterviews.status,
+            "experience": CandidateInterviews.experience,
+            "created_at": CandidateInterviews.created_at,
+        }
+
+        # Filtering
+        if filter_column and filter_by:
+            column = column_map.get(filter_column)
+
+            if column is not None:
+                query = query.filter(
+                    column.ilike(f"%{filter_by}%")
+                )
+
+        # Sorting
+        if sort_by:
+            column = column_map.get(sort_by)
+
+            if column is not None:
+                if sort_order and sort_order.lower() == "desc":
+                    query = query.order_by(desc(column))
+                else:
+                    query = query.order_by(asc(column))
+        else:
+            query = query.order_by(
+                CandidateInterviews.created_at.desc()
+            )
+
+        total_count = query.count()
+
+        # Pagination
+        if page and page_size:
+            offset = (page - 1) * page_size
+            query = query.offset(offset).limit(page_size)
+
+        interviews = query.all()
 
         if not interviews:
             return {
@@ -892,6 +1006,9 @@ def view_interviews():
         return {
             "status_code": status.HTTP_200_OK,
             "message": "Candidate interviews retrieved successfully.",
+            "page": page,
+            "page_size": page_size,
+            "total_records": total_count,
             "data": [
                 {
                     "interview_id": str(interview.interview_id),
@@ -899,8 +1016,7 @@ def view_interviews():
                     "client_id": str(interview.client_id),
                     "candidate_name": (
                         interview.resume.candidate.name
-                        if interview.resume
-                        and interview.resume.candidate
+                        if interview.resume and interview.resume.candidate
                         else None
                     ),
                     "experience": interview.experience,
@@ -911,7 +1027,7 @@ def view_interviews():
                     "is_active": interview.is_active,
                 }
                 for interview in interviews
-            ],
+            ]
         }
 
     except Exception as e:
