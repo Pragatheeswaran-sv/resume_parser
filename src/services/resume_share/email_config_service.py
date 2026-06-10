@@ -11,6 +11,7 @@ from typing import Any, Dict
 import logging
 
 from fastapi import status
+from sqlalchemy import asc, desc
 
 from db.connection import SessionLocal
 from src.resume_share.models import EmailProviderConfig, EmailTemplate
@@ -198,22 +199,216 @@ def create_email_provider_config(payload: dict) -> Dict[str, Any]:
         session.close()
 
 
-def list_email_provider_configs() -> Dict[str, Any]:
+def list_email_provider_configs(
+    page,
+    page_size,
+    filter_column,
+    filter_by,
+    sort_by,
+    sort_order
+) -> Dict[str, Any]:
+
     session = SessionLocal()
+
     try:
-        configs = session.query(EmailProviderConfig).all()
-        data = [_serialize_provider_config(c) for c in configs]
+        errors = []
+
+        allowed_columns = {
+            "provider_name": EmailProviderConfig.provider_name,
+            "from_email": EmailProviderConfig.from_email,
+            "host": EmailProviderConfig.host,
+            "port": EmailProviderConfig.port,
+            "username": EmailProviderConfig.username,
+            "active": EmailProviderConfig.active,
+        }
+
+        # =========================
+        # Pagination Validation
+        # =========================
+
+        if page is None:
+            errors.append({
+                "field": "page",
+                "message": "page is required"
+            })
+
+        elif not isinstance(page, int) or page < 1:
+            errors.append({
+                "field": "page",
+                "message": "page must be a positive integer"
+            })
+
+        if page_size is None:
+            errors.append({
+                "field": "page_size",
+                "message": "page_size is required"
+            })
+
+        elif not isinstance(page_size, int) or page_size < 1:
+            errors.append({
+                "field": "page_size",
+                "message": "page_size must be a positive integer"
+            })
+
+        elif page_size > 100:
+            errors.append({
+                "field": "page_size",
+                "message": "page_size cannot exceed 100"
+            })
+
+        # =========================
+        # Filter Validation
+        # =========================
+
+        if filter_column:
+
+            if filter_column not in allowed_columns:
+                errors.append({
+                    "field": "filter_column",
+                    "message": f"Invalid filter_column. Allowed values: {', '.join(allowed_columns.keys())}"
+                })
+
+            if filter_by in [None, ""]:
+                errors.append({
+                    "field": "filter_by",
+                    "message": "filter_by is required when filter_column is provided"
+                })
+
+        # =========================
+        # Sort Validation
+        # =========================
+
+        if sort_by:
+
+            if sort_by not in allowed_columns:
+                errors.append({
+                    "field": "sort_by",
+                    "message": f"Invalid sort_by. Allowed values: {', '.join(allowed_columns.keys())}"
+                })
+
+        if sort_order:
+
+            sort_order = sort_order.lower()
+
+            if sort_order not in ["asc", "desc"]:
+                errors.append({
+                    "field": "sort_order",
+                    "message": "sort_order must be either 'asc' or 'desc'"
+                })
+
+        # =========================
+        # Return Validation Errors
+        # =========================
+
+        if errors:
+            return {
+                "status_code": status.HTTP_400_BAD_REQUEST,
+                "errors": errors
+            }
+
+        # =========================
+        # Base Query
+        # =========================
+
+        query = session.query(EmailProviderConfig)
+
+        # =========================
+        # Filtering
+        # =========================
+
+        if filter_column and filter_by:
+
+            column = allowed_columns[filter_column]
+
+            query = query.filter(
+                column.ilike(f"%{filter_by}%")
+            )
+
+        # =========================
+        # Total Count
+        # =========================
+
+        total_records = query.count()
+
+        # =========================
+        # Sorting
+        # =========================
+
+        if sort_by:
+
+            sort_column = allowed_columns[sort_by]
+
+            if sort_order == "desc":
+                query = query.order_by(desc(sort_column))
+            else:
+                query = query.order_by(asc(sort_column))
+
+        else:
+            query = query.order_by(desc(EmailProviderConfig.created_at))
+
+        # =========================
+        # Pagination
+        # =========================
+
+        offset = (page - 1) * page_size
+
+        configs = (
+            query
+            .offset(offset)
+            .limit(page_size)
+            .all()
+        )
+
+        if not configs:
+            return {
+                "status": status.HTTP_404_NOT_FOUND,
+                "errors": [
+                    {
+                        "field": "email_provider_congigs",
+                        "message": "No data found"
+                    }
+                ]
+            }
+        
+        
+        # =========================
+        # Response
+        # =========================
+
         return {
             "status": status.HTTP_200_OK,
             "message": "Email provider configs retrieved successfully",
-            "data": data,
+            "data": [_serialize_provider_config(config) for config in configs],
+            "pagination": {
+                "page": page,
+                "page_size": page_size,
+                "total_records": total_records,
+                "total_pages": (
+                    (total_records + page_size - 1) // page_size
+                ),
+            },
         }
+
     except Exception as e:
-        logger.error("[list_email_provider_configs] Error: %s", str(e), exc_info=True)
-        raise ValueError(str(e))
+
+        logger.error(
+            "[list_email_provider_configs] Error: %s",
+            str(e),
+            exc_info=True
+        )
+
+        return {
+            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "errors": [
+                {
+                    "field": "server",
+                    "message": str(e)
+                }
+            ]
+        }
+
     finally:
         session.close()
-
 
 def get_email_provider_config(config_id: str) -> Dict[str, Any]:
     session = SessionLocal()
