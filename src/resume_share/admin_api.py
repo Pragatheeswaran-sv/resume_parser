@@ -58,10 +58,10 @@ def create_provider_config(
 
 
 @router.get("/admin/email-provider-config")
-def list_provider_configs(_admin=Depends(get_current_admin)):
+def list_provider_configs(page = 1, page_size = 10, filter_column = None, filter_by = None, sort_by = None, sort_order = None, _admin=Depends(get_current_admin)):
     """List all email provider configurations (admin only)."""
     try:
-        return list_email_provider_configs()
+        return list_email_provider_configs(int(page), int(page_size), filter_column, filter_by, sort_by, sort_order)
     except ValueError as e:
         logger.warning("[list_provider_configs] Error: %s", str(e), exc_info=True)
         raise HTTPException(

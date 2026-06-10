@@ -18,7 +18,7 @@ from src.auth.jwt import create_access_token, hash_password, verify_password
 from fastapi import status
 from src.client_track.models import CandidateInterviews, Clients, InterviewRounds, InterviewStatus
 from src.utils.helper import encrypt_data, decrypt_data
-from src.utils.client_track_validator import VALID_STATUSES, validate_add_client, validate_add_interview, validate_add_interview_status, validate_add_round, validate_interview_columns, validate_modify_client, validate_pagination, validate_required, validate_sort_order, validate_update_round, validate_user, validate_uuid
+from src.utils.client_track_validator import VALID_STATUSES, validate_add_client, validate_add_interview, validate_add_interview_status, validate_add_round, validate_client_columns, validate_interview_columns, validate_modify_client, validate_pagination, validate_required, validate_sort_order, validate_update_round, validate_user, validate_uuid
 from src.utils.response import internal_server_error_response, not_found_response, success_response, validation_error_response
 
 load_dotenv()
@@ -427,7 +427,7 @@ def view_clients(page, page_size, filter_column, filter_by, sort_by, sort_order)
             errors.append(pagination_error)
 
         errors.extend(
-            validate_interview_columns(filter_column, sort_by)
+            validate_client_columns(filter_column, sort_by)
         )
 
         sort_error = validate_sort_order(sort_order)

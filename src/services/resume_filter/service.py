@@ -17,7 +17,7 @@ from pypdf import PdfReader
 from docx import Document
 from db.connection import SessionLocal
 from src.resume_filter.models import Resume
-from sqlalchemy import JSON, Float, Integer, select, and_, cast, String, text, func, or_
+from sqlalchemy import JSON, Float, Integer, case, select, and_, cast, String, text, func, or_
 from sqlalchemy.dialects.postgresql import aggregate_order_by
 from sqlalchemy.orm import aliased, joinedload
 from src.email_reader.models import EmailLogs, Attachment
@@ -1110,7 +1110,15 @@ def search_resumes(filters: dict, export: bool = False) -> list:
                     func.json_build_object(
                         "resume_id", Resume.resume_id,
                         "candidate_role", Resume.candidate_role,
-                        "file_name", Attachment.file_name
+                        "file_name",
+                            case(
+                                (
+                                    (Resume.candidate_role.isnot(None)) &
+                                    (Resume.candidate_role != ""),
+                                    Resume.candidate_role
+                                ),
+                                else_="Resume_1"
+                            )
                     )
                 ).label("resumes")
             )
