@@ -1238,7 +1238,7 @@ def search_resumes(filters: dict, export: bool = False) -> list:
                 df = pd.DataFrame([row.candidate_info for row in all_data])
                 df.to_csv(export_file, index=False)
                 logger.info(f"Export completed successfully: {export_file}")
-                result = {"file_path": export_file[4:]} 
+                result = {"file_path": export_file} 
                 # print('export result-->', result)
                 return result
             else:

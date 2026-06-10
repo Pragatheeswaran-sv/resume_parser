@@ -7,7 +7,9 @@ Orchestrates:
 4. Paginated search execution    (reuses ``search_resumes``)
 """
 
+import base64
 import json
+import os
 import uuid
 import logging
 import datetime as dt
@@ -141,48 +143,121 @@ def _extract_and_resolve(user_query: str) -> tuple[dict, dict]:
 
 
 def _execute_search(
-    resolved_filters: dict,
+    resolved_filters: dict | None,
     page: int,
     page_size: int,
     sort_by: str | None,
     sort_order: str,
     export: bool = False,
-) -> tuple[list, int]:
-    """Validate, inject pagination, and delegate to the existing ``search_resumes``."""
-    filter_dict = dict(resolved_filters)
-    filter_dict["page"] = page
-    filter_dict["page_size"] = page_size
-    if sort_by:
-        filter_dict["sort_by"] = sort_by
-    filter_dict["sort_order"] = sort_order
+):
+    """
+    Validate filters, inject pagination,
+    and delegate to the existing search_resumes.
+    """
 
     try:
-        parsed = ResumeFilterRequest(**filter_dict).model_dump()
-    except ValidationError:
-        parsed = filter_dict
-    parsed["page"] = page
-    parsed["page_size"] = page_size
+        if resolved_filters is None:
+            resolved_filters = {}
 
-    rows = search_resumes(parsed, export)
-    if export:
-        response = {
-             "status": status.HTTP_200_OK,
-             "message": 'Export completed successfully',
-             "data": {
-                 "file_path": rows["file_path"],},
-        }
-        return response
-   
-    total_record = 0
-    candidates = []
-    if rows:
-        for item in rows:
-            if isinstance(item, dict) and "total_record" in item:
-                total_record = item["total_record"]
-            else:
-                candidates.append(item)
+        if not isinstance(resolved_filters, dict):
+            raise ValueError("resolved_filters must be a dictionary")
 
-    return candidates, total_record
+        filter_dict = dict(resolved_filters)
+
+        if not export:
+
+            if page is None:
+                raise ValueError("page is required")
+
+            if page_size is None:
+                raise ValueError("page_size is required")
+
+            if not isinstance(page, int):
+                raise ValueError("page must be an integer")
+
+            if not isinstance(page_size, int):
+                raise ValueError("page_size must be an integer")
+
+            if page < 1:
+                raise ValueError("page must be greater than 0")
+
+            if page_size < 1:
+                raise ValueError("page_size must be greater than 0")
+
+            if page_size > 100:
+                raise ValueError("page_size cannot exceed 100")
+
+            if sort_order:
+                sort_order = sort_order.lower().strip()
+
+                if sort_order not in ["asc", "desc"]:
+                    raise ValueError(
+                        "sort_order must be either 'asc' or 'desc'"
+                    )
+
+            filter_dict["page"] = page
+            filter_dict["page_size"] = page_size
+
+            if sort_by:
+                filter_dict["sort_by"] = sort_by
+
+            filter_dict["sort_order"] = sort_order
+
+        try:
+            parsed = ResumeFilterRequest(**filter_dict).model_dump()
+        except ValidationError:
+            parsed = filter_dict
+
+        if not export:
+            parsed["page"] = page
+            parsed["page_size"] = page_size
+
+        rows = search_resumes(parsed, export)
+
+        if export:
+
+            csv_file_path = rows.get("file_path")
+
+            if not csv_file_path:
+                return {
+                    "status": status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    "message": "Export file path not found",
+                }
+
+            if not os.path.exists(csv_file_path):
+                return {
+                    "status": status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    "message": "Export file does not exist",
+                }
+
+            with open(csv_file_path, "rb") as file:
+                base64_string = base64.b64encode(
+                    file.read()
+                ).decode("utf-8")
+
+            return {
+                "status": status.HTTP_200_OK,
+                "message": "Export completed successfully",
+                "data": {
+                    "content": base64_string,
+                },
+            }
+
+        total_record = 0
+        candidates = []
+
+        if rows:
+            for item in rows:
+                if isinstance(item, dict) and "total_record" in item:
+                    total_record = item["total_record"]
+                else:
+                    candidates.append(item)
+
+        return candidates, total_record
+
+    except Exception as e:
+        raise Exception(
+            f"Error while executing resume search: {str(e)}")
 
 
 # ---- public API ----------------------------------------------------------
