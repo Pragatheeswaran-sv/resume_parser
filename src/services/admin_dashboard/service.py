@@ -290,7 +290,7 @@ def admin_dashboard(admin_id):
 
         roles_data = [
             {
-                "role": row.role,
+                "role": str(row.role).capitalize(),
                 "no_of_candidate": row.role_count,
                 "percentage": f"{row.percentage}%"
             }
@@ -299,10 +299,70 @@ def admin_dashboard(admin_id):
 
         if others_count > 0:
             roles_data.append({
-                "role": "others",
+                "role": "Others",
                 "no_of_candidate": others_count,
                 "percentage": f"{others_percentage}%"
             })
+
+        skill_query = text("""
+            SELECT
+                LOWER(TRIM(s.skill)) AS skill,
+                COUNT(DISTINCT cs.candidate_id) AS candidate_count,
+                ROUND(
+                    COUNT(DISTINCT cs.candidate_id) * 100.0
+                    / SUM(COUNT(DISTINCT cs.candidate_id)) OVER (),
+                    2
+                ) AS percentage
+            FROM skills s
+            JOIN candidate_skills cs
+                ON cs.skill_id = s.skill_id
+            WHERE s.skill IS NOT NULL
+            AND TRIM(s.skill) <> ''
+            GROUP BY LOWER(TRIM(s.skill))
+            ORDER BY candidate_count DESC
+        """)
+
+        skill_result = db.execute(
+            skill_query
+        ).fetchall()
+
+        top_skills = skill_result[:10]
+
+        top_skill_count = sum(
+            skill.candidate_count for skill in top_skills
+        )
+
+        top_skill_percentage = sum(
+            skill.percentage for skill in top_skills
+        )
+
+        total_skill_count = sum(
+            skill.candidate_count for skill in skill_result
+        )
+
+        others_count = total_skill_count - top_skill_count
+
+        others_percentage = round(
+            100 - top_skill_percentage,
+            2
+        )
+
+        skill_data = [
+            {
+                "skill": str(skill.skill).capitalize(),
+                "no_of_candidate": skill.candidate_count,
+                "percentage": f"{skill.percentage}%"
+            }
+            for skill in top_skills
+        ]
+
+        if others_count > 0:
+            skill_data.append({
+                "skill": "Others",
+                "no_of_candidate": others_count,
+                "percentage": f"{others_percentage}%"
+            })
+
 
 
         recent_candidate_query = text("""
@@ -343,7 +403,7 @@ def admin_dashboard(admin_id):
             LEFT JOIN resumes r ON a.attachment_id = r.attachment_id
         """)
 
-        parsed_data = db.execute(parsed_query).fetchone()
+        # parsed_data = db.execute(parsed_query).fetchone()
 
         email_query = text("""
             SELECT COUNT(*) AS share_count
@@ -367,10 +427,11 @@ def admin_dashboard(admin_id):
                 "is_active": scheduler_data.is_active if scheduler_data else None,
             },
             "roles": roles_data,
+            "skills": skill_data,
             "recent_candidate": recent_candidate_data,
-            "parsed_success_count": parsed_data.parsed_success_count,
-            "parsed_fail_count": parsed_data.parsed_fail_count,
-            "total_parsed_count": (parsed_data.parsed_success_count + parsed_data.parsed_fail_count),
+            # "parsed_success_count": parsed_data.parsed_success_count,
+            # "parsed_fail_count": parsed_data.parsed_fail_count,
+            # "total_parsed_count": (parsed_data.parsed_success_count + parsed_data.parsed_fail_count),
             "email_share_success_count": email_data.share_count
         }
 
