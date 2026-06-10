@@ -378,7 +378,7 @@ def user_dashboard(user_mail):
 
         roles_data = [
             {
-                "role": row.role,
+                "role": str(row.role).capitalize(),
                 "no_of_candidate": row.role_count,
                 "percentage": f"{row.percentage}%"
             }
@@ -387,7 +387,7 @@ def user_dashboard(user_mail):
 
         if others_count > 0:
             roles_data.append({
-                "role": "others",
+                "role": "Others",
                 "no_of_candidate": others_count,
                 "percentage": f"{others_percentage}%"
             })
@@ -542,7 +542,7 @@ def user_dashboard(user_mail):
 
         skill_data = [
             {
-                "skill": skill.skill,
+                "skill": str(skill.skill).capitalize(),
                 "no_of_candidate": skill.candidate_count,
                 "percentage": f"{skill.percentage}%"
             }
@@ -551,7 +551,7 @@ def user_dashboard(user_mail):
 
         if others_count > 0:
             skill_data.append({
-                "skill": "others",
+                "skill": "Others",
                 "no_of_candidate": others_count,
                 "percentage": f"{others_percentage}%"
             })
@@ -658,9 +658,9 @@ def user_dashboard(user_mail):
                 ON a.attachment_id = r.attachment_id
         """)
 
-        parsed_data = db.execute(
-            parsed_query
-        ).fetchone()
+        # parsed_data = db.execute(
+        #     parsed_query
+        # ).fetchone()
 
         # ---------------- EMAIL SHARE COUNT ---------------- #
 
@@ -691,9 +691,9 @@ def user_dashboard(user_mail):
             },
             "skills": skill_data,
             "recent_candidate": recent_candidate_data,
-            "parsed_success_count": parsed_data.parsed_success_count,
-            "parsed_fail_count": parsed_data.parsed_fail_count,
-            "total_parsed_count": parsed_data.parsed_success_count + parsed_data.parsed_fail_count,
+            # "parsed_success_count": parsed_data.parsed_success_count,
+            # "parsed_fail_count": parsed_data.parsed_fail_count,
+            # "total_parsed_count": parsed_data.parsed_success_count + parsed_data.parsed_fail_count,
             "email_shared_count": email_data.share_count
         }
 
