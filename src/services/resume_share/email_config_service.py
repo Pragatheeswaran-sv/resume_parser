@@ -6,6 +6,7 @@ session and raises ``ValueError`` on validation failures so the
 API layer can translate them into appropriate HTTP responses.
 """
 
+import re
 from typing import Any, Dict
 import logging
 
@@ -18,9 +19,7 @@ from src.utils.response import serialize_response
 logger = logging.getLogger(__name__)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  Email Provider Config CRUD
-# ═══════════════════════════════════════════════════════════════════════════
+EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 def _serialize_provider_config(config: EmailProviderConfig) -> dict:
     """Convert an EmailProviderConfig row to a JSON-safe dict."""
@@ -41,25 +40,114 @@ def _serialize_provider_config(config: EmailProviderConfig) -> dict:
 
 def create_email_provider_config(payload: dict) -> Dict[str, Any]:
     session = SessionLocal()
+
     try:
+        errors = []
+
+        if not isinstance(payload, dict):
+            return {
+                "status_code": 400,
+                "errors": [
+                    {"field": "payload", "message": "Payload must be a dictionary"}
+                ],
+            }
+
         provider_name = (payload.get("provider_name") or "").strip()
         from_email = (payload.get("from_email") or "").strip()
         host = payload.get("host")
         port = payload.get("port")
+        username = payload.get("username")
+        password = payload.get("password")
+        is_active = payload.get("active", False)
+        tls_enabled = payload.get("tls_enabled", True)
 
         if not provider_name:
-            raise ValueError("provider_name is required")
-        if not from_email:
-            raise ValueError("from_email is required")
-        if provider_name.upper() == "SMTP" and not host:
-            raise ValueError("host is required for SMTP provider")
+            errors.append({
+                "field": "provider_name",
+                "message": "provider_name is required"
+            })
 
-        is_active = payload.get("active", False)
+        if not from_email:
+            errors.append({
+                "field": "from_email",
+                "message": "from_email is required"
+            })
+        elif not EMAIL_REGEX.match(from_email):
+            errors.append({
+                "field": "from_email",
+                "message": "Invalid email format"
+            })
+
+        allowed_providers = {"SMTP", "SENDGRID", "SES", "MAILGUN"}
+
+        provider_name_upper = provider_name.upper() if provider_name else ""
+
+        if provider_name and provider_name_upper not in allowed_providers:
+            errors.append({
+                "field": "provider_name",
+                "message": f"Invalid provider. Allowed: {list(allowed_providers)}"
+            })
+
+        if provider_name_upper == "SMTP":
+
+            if not host:
+                errors.append({
+                    "field": "host",
+                    "message": "host is required for SMTP provider"
+                })
+
+            if port is None:
+                errors.append({
+                    "field": "port",
+                    "message": "port is required for SMTP provider"
+                })
+            else:
+                try:
+                    port = int(port)
+                    if port <= 0 or port > 65535:
+                        errors.append({
+                            "field": "port",
+                            "message": "port must be between 1 and 65535"
+                        })
+                except Exception:
+                    errors.append({
+                        "field": "port",
+                        "message": "port must be a valid integer"
+                    })
+
+        if errors:
+            return {
+                "status_code": 400,
+                "errors": errors
+            }
+        
+        duplicate = (
+            session.query(EmailProviderConfig)
+            .filter(
+                # EmailProviderConfig.provider_name == provider_name,
+                EmailProviderConfig.from_email == from_email
+            )
+            .first()
+        )
+
+        if duplicate:
+            return {
+                "status_code": status.HTTP_409_CONFLICT,
+                "errors": [
+                    {
+                        "field": "provider_name",
+                        "message": f"Provider '{from_email}' already exists"
+                    }
+                ]
+            }
 
         if is_active:
             session.query(EmailProviderConfig).filter(
                 EmailProviderConfig.active.is_(True)
-            ).update({EmailProviderConfig.active: False}, synchronize_session=False)
+            ).update(
+                {EmailProviderConfig.active: False},
+                synchronize_session=False
+            )
             logger.info("Deactivated all existing email provider configs")
 
         new_config = EmailProviderConfig(
@@ -67,27 +155,45 @@ def create_email_provider_config(payload: dict) -> Dict[str, Any]:
             from_email=from_email,
             host=host,
             port=port,
-            username=payload.get("username"),
-            password=payload.get("password"),
-            tls_enabled=payload.get("tls_enabled", True),
-            active=is_active,
+            username=username,
+            password=password,
+            tls_enabled=bool(tls_enabled),
+            active=bool(is_active),
         )
+
         session.add(new_config)
         session.commit()
         session.refresh(new_config)
 
-        logger.info("Admin created email provider config id=%s", new_config.id)
+        logger.info(
+            "Admin created email provider config id=%s",
+            new_config.id
+        )
+
         return {
             "status": status.HTTP_201_CREATED,
             "message": "Email provider config created successfully",
             "data": _serialize_provider_config(new_config),
         }
-    except ValueError:
-        raise
+
     except Exception as e:
         session.rollback()
-        logger.error("[create_email_provider_config] Error: %s", str(e), exc_info=True)
-        raise ValueError(str(e))
+        logger.error(
+            "[create_email_provider_config] Error: %s",
+            str(e),
+            exc_info=True
+        )
+
+        return {
+            "status_code": 500,
+            "errors": [
+                {
+                    "field": "server",
+                    "message": str(e)
+                }
+            ]
+        }
+
     finally:
         session.close()
 
@@ -134,62 +240,216 @@ def get_email_provider_config(config_id: str) -> Dict[str, Any]:
 
 def update_email_provider_config(config_id: str, payload: dict) -> Dict[str, Any]:
     session = SessionLocal()
+
     try:
-        config = session.query(EmailProviderConfig).filter(
-            EmailProviderConfig.id == config_id
-        ).first()
+        errors = []
+
+        if not config_id:
+            errors.append({
+                "field": "config_id",
+                "message": "config_id is required"
+            })
+
+        if not isinstance(payload, dict):
+            return {
+                "status_code": status.HTTP_400_BAD_REQUEST,
+                "errors": [
+                    {
+                        "field": "payload",
+                        "message": "Payload must be a dictionary"
+                    }
+                ]
+            }
+
+        if errors:
+            return {
+                "status_code": status.HTTP_400_BAD_REQUEST,
+                "errors": errors
+            }
+
+        config = (
+            session.query(EmailProviderConfig)
+            .filter(EmailProviderConfig.id == config_id)
+            .first()
+        )
+
         if not config:
-            raise ValueError("Email provider config not found")
+            return {
+                "status_code": status.HTTP_404_NOT_FOUND,
+                "errors": [
+                    {
+                        "field": "config_id",
+                        "message": "Email provider config not found"
+                    }
+                ]
+            }
 
         provider_name = payload.get("provider_name")
+
         if provider_name is not None:
-            provider_name = provider_name.strip()
-            if not provider_name:
-                raise ValueError("provider_name cannot be empty")
-            config.provider_name = provider_name
+
+            if not isinstance(provider_name, str):
+                errors.append({
+                    "field": "provider_name",
+                    "message": "provider_name must be a string"
+                })
+            else:
+                provider_name = provider_name.strip()
+
+                if not provider_name:
+                    errors.append({
+                        "field": "provider_name",
+                        "message": "provider_name cannot be empty"
+                    })
 
         from_email = payload.get("from_email")
+
         if from_email is not None:
-            from_email = from_email.strip()
-            if not from_email:
-                raise ValueError("from_email cannot be empty")
-            config.from_email = from_email
+
+            if not isinstance(from_email, str):
+                errors.append({
+                    "field": "from_email",
+                    "message": "from_email must be a string"
+                })
+            else:
+                from_email = from_email.strip()
+
+                if not from_email:
+                    errors.append({
+                        "field": "from_email",
+                        "message": "from_email cannot be empty"
+                    })
+
+                elif not EMAIL_REGEX.match(from_email):
+                    errors.append({
+                        "field": "from_email",
+                        "message": "Invalid email format"
+                    })
+
+        if "port" in payload and payload["port"] is not None:
+
+            try:
+                port = int(payload["port"])
+
+                if port <= 0 or port > 65535:
+                    errors.append({
+                        "field": "port",
+                        "message": "port must be between 1 and 65535"
+                    })
+
+            except (ValueError, TypeError):
+                errors.append({
+                    "field": "port",
+                    "message": "port must be a valid integer"
+                })
+
+        if "tls_enabled" in payload and payload["tls_enabled"] is not None:
+            if not isinstance(payload["tls_enabled"], bool):
+                errors.append({
+                    "field": "tls_enabled",
+                    "message": "tls_enabled must be a boolean value"
+                })
+
+        if "active" in payload and payload["active"] is not None:
+            if not isinstance(payload["active"], bool):
+                errors.append({
+                    "field": "active",
+                    "message": "active must be a boolean value"
+                })
+
+        effective_provider = (
+            provider_name.strip().upper()
+            if provider_name is not None
+            else (config.provider_name or "").upper()
+        )
+
+        effective_host = (
+            payload.get("host")
+            if "host" in payload
+            else config.host
+        )
+
+        if effective_provider == "SMTP" and not effective_host:
+            errors.append({
+                "field": "host",
+                "message": "host is required for SMTP provider"
+            })
+
+        if errors:
+            return {
+                "status_code": status.HTTP_400_BAD_REQUEST,
+                "errors": errors
+            }
+
+        if provider_name is not None:
+            config.provider_name = provider_name.strip()
+
+        if from_email is not None:
+            config.from_email = from_email.strip()
 
         if "host" in payload:
             config.host = payload["host"]
+
         if "port" in payload:
             config.port = payload["port"]
+
         if "username" in payload:
             config.username = payload["username"]
+
         if "password" in payload:
             config.password = payload["password"]
+
         if "tls_enabled" in payload and payload["tls_enabled"] is not None:
             config.tls_enabled = payload["tls_enabled"]
 
         if "active" in payload and payload["active"] is not None:
+
             if payload["active"]:
                 session.query(EmailProviderConfig).filter(
                     EmailProviderConfig.id != config_id,
                     EmailProviderConfig.active.is_(True),
-                ).update({EmailProviderConfig.active: False}, synchronize_session=False)
+                ).update(
+                    {EmailProviderConfig.active: False},
+                    synchronize_session=False,
+                )
+
                 logger.info("Deactivated other email provider configs")
+
             config.active = payload["active"]
 
         session.commit()
         session.refresh(config)
 
-        logger.info("Admin updated email provider config id=%s", config_id)
+        logger.info(
+            "Admin updated email provider config id=%s",
+            config_id
+        )
+
         return {
             "status": status.HTTP_200_OK,
             "message": "Email provider config updated successfully",
             "data": _serialize_provider_config(config),
         }
-    except ValueError:
-        raise
+
     except Exception as e:
         session.rollback()
-        logger.error("[update_email_provider_config] Error: %s", str(e), exc_info=True)
-        raise ValueError(str(e))
+
+        logger.error(
+            "[update_email_provider_config] Error: %s",
+            str(e),
+            exc_info=True,
+        )
+
+        return {
+            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "errors": [
+                {
+                    "field": "server",
+                    "message": str(e)
+                }
+            ]
+        }
+
     finally:
         session.close()
 
@@ -220,11 +480,6 @@ def delete_email_provider_config(config_id: str) -> Dict[str, Any]:
     finally:
         session.close()
 
-
-# ═══════════════════════════════════════════════════════════════════════════
-#  Email Template CRUD
-# ═══════════════════════════════════════════════════════════════════════════
-
 def _serialize_template(template: EmailTemplate) -> dict:
     """Convert an EmailTemplate row to a JSON-safe dict."""
     return {
@@ -240,43 +495,114 @@ def _serialize_template(template: EmailTemplate) -> dict:
 
 def create_email_template(payload: dict) -> Dict[str, Any]:
     session = SessionLocal()
+
     try:
+        errors = []
+
+        if not isinstance(payload, dict):
+            return {
+                "status_code": status.HTTP_400_BAD_REQUEST,
+                "errors": [
+                    {
+                        "field": "payload",
+                        "message": "Payload must be a dictionary"
+                    }
+                ]
+            }
+
         template_name = (payload.get("template_name") or "").strip()
         body = (payload.get("body") or "").strip()
+        subject = payload.get("subject")
+        is_active = payload.get("is_active", True)
 
         if not template_name:
-            raise ValueError("template_name is required")
-        if not body:
-            raise ValueError("body is required")
+            errors.append({
+                "field": "template_name",
+                "message": "template_name is required"
+            })
 
-        duplicate = session.query(EmailTemplate).filter(
-            EmailTemplate.template_name == template_name
-        ).first()
+        if not body:
+            errors.append({
+                "field": "body",
+                "message": "body is required"
+            })
+
+        if subject is not None and not isinstance(subject, str):
+            errors.append({
+                "field": "subject",
+                "message": "subject must be a string"
+            })
+
+        if not isinstance(is_active, bool):
+            errors.append({
+                "field": "is_active",
+                "message": "is_active must be a boolean"
+            })
+
+        if errors:
+            return {
+                "status_code": status.HTTP_400_BAD_REQUEST,
+                "errors": errors
+            }
+
+        duplicate = (
+            session.query(EmailTemplate)
+            .filter(EmailTemplate.template_name == template_name, EmailTemplate.body == body)
+            .first()
+        )
+
         if duplicate:
-            raise ValueError(f"Template with name '{template_name}' already exists")
+            return {
+                "status_code": status.HTTP_409_CONFLICT,
+                "errors": [
+                    {
+                        "field": "template_name",
+                        "message": f"Template with name '{template_name}' already exists"
+                    }
+                ]
+            }
 
         new_template = EmailTemplate(
             template_name=template_name,
-            subject=payload.get("subject"),
+            subject=subject,
             body=body,
-            is_active=payload.get("is_active", True),
+            is_active=is_active,
         )
+
         session.add(new_template)
         session.commit()
         session.refresh(new_template)
 
-        logger.info("Admin created email template id=%s", new_template.id)
+        logger.info(
+            "Admin created email template id=%s",
+            new_template.id
+        )
+
         return {
             "status": status.HTTP_201_CREATED,
             "message": "Email template created successfully",
             "data": _serialize_template(new_template),
         }
-    except ValueError:
-        raise
+
     except Exception as e:
         session.rollback()
-        logger.error("[create_email_template] Error: %s", str(e), exc_info=True)
-        raise ValueError(str(e))
+
+        logger.error(
+            "[create_email_template] Error: %s",
+            str(e),
+            exc_info=True
+        )
+
+        return {
+            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "errors": [
+                {
+                    "field": "server",
+                    "message": str(e)
+                }
+            ]
+        }
+
     finally:
         session.close()
 
@@ -323,33 +649,131 @@ def get_email_template(template_id: str) -> Dict[str, Any]:
 
 def update_email_template(template_id: str, payload: dict) -> Dict[str, Any]:
     session = SessionLocal()
-    try:
-        template = session.query(EmailTemplate).filter(
-            EmailTemplate.id == template_id
-        ).first()
-        if not template:
-            raise ValueError("Email template not found")
 
-        template_name = payload.get("template_name")
-        if template_name is not None:
-            template_name = template_name.strip()
-            if not template_name:
-                raise ValueError("template_name cannot be empty")
-            duplicate = session.query(EmailTemplate).filter(
-                EmailTemplate.template_name == template_name,
-                EmailTemplate.id != template_id,
-            ).first()
-            if duplicate:
-                raise ValueError(f"Template with name '{template_name}' already exists")
-            template.template_name = template_name
+    try:
+        errors = []
+
+        if not template_id:
+            errors.append({
+                "field": "template_id",
+                "message": "template_id is required"
+            })
+
+        if not isinstance(payload, dict):
+            return {
+                "status_code": status.HTTP_400_BAD_REQUEST,
+                "errors": [
+                    {
+                        "field": "payload",
+                        "message": "Payload must be a dictionary"
+                    }
+                ]
+            }
+
+        if errors:
+            return {
+                "status_code": status.HTTP_400_BAD_REQUEST,
+                "errors": errors
+            }
+
+        template = (
+            session.query(EmailTemplate)
+            .filter(EmailTemplate.id == template_id)
+            .first()
+        )
+
+        if not template:
+            return {
+                "status_code": status.HTTP_404_NOT_FOUND,
+                "errors": [
+                    {
+                        "field": "template_id",
+                        "message": "Email template not found"
+                    }
+                ]
+            }
+
+        if "template_name" in payload:
+
+            template_name = payload.get("template_name")
+
+            if template_name is None:
+                errors.append({
+                    "field": "template_name",
+                    "message": "template_name cannot be null"
+                })
+            elif not isinstance(template_name, str):
+                errors.append({
+                    "field": "template_name",
+                    "message": "template_name must be a string"
+                })
+            else:
+                template_name = template_name.strip()
+
+                if not template_name:
+                    errors.append({
+                        "field": "template_name",
+                        "message": "template_name cannot be empty"
+                    })
+                else:
+                    duplicate = (
+                        session.query(EmailTemplate)
+                        .filter(
+                            EmailTemplate.template_name == template_name,
+                            EmailTemplate.id != template_id,
+                        )
+                        .first()
+                    )
+
+                    if duplicate:
+                        errors.append({
+                            "field": "template_name",
+                            "message": f"Template with name '{template_name}' already exists"
+                        })
+
+        if "body" in payload:
+
+            body = payload.get("body")
+
+            if body is None:
+                errors.append({
+                    "field": "body",
+                    "message": "body cannot be null"
+                })
+            elif not isinstance(body, str):
+                errors.append({
+                    "field": "body",
+                    "message": "body must be a string"
+                })
+            elif not body.strip():
+                errors.append({
+                    "field": "body",
+                    "message": "body cannot be empty"
+                })
+
+        if "is_active" in payload and payload.get("is_active") is not None:
+
+            if not isinstance(payload.get("is_active"), bool):
+                errors.append({
+                    "field": "is_active",
+                    "message": "is_active must be a boolean value"
+                })
+
+        if errors:
+            return {
+                "status_code": status.HTTP_400_BAD_REQUEST,
+                "errors": errors
+            }
+
+        if "template_name" in payload:
+            template.template_name = payload["template_name"].strip()
 
         if "subject" in payload:
             template.subject = payload["subject"]
-        if "body" in payload and payload["body"] is not None:
-            body = payload["body"].strip()
-            if not body:
-                raise ValueError("body cannot be empty")
-            template.body = body
+
+        if "body" in payload:
+            template.body = payload["body"].strip()
+
         if "is_active" in payload and payload["is_active"] is not None:
             template.is_active = payload["is_active"]
 
@@ -357,17 +781,32 @@ def update_email_template(template_id: str, payload: dict) -> Dict[str, Any]:
         session.refresh(template)
 
         logger.info("Admin updated email template id=%s", template_id)
+
         return {
             "status": status.HTTP_200_OK,
             "message": "Email template updated successfully",
             "data": _serialize_template(template),
         }
-    except ValueError:
-        raise
+
     except Exception as e:
         session.rollback()
-        logger.error("[update_email_template] Error: %s", str(e), exc_info=True)
-        raise ValueError(str(e))
+
+        logger.error(
+            "[update_email_template] Error: %s",
+            str(e),
+            exc_info=True
+        )
+
+        return {
+            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "errors": [
+                {
+                    "field": "server",
+                    "message": str(e)
+                }
+            ]
+        }
+
     finally:
         session.close()
 
