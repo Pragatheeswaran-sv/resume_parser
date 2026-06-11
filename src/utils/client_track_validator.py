@@ -1177,7 +1177,7 @@ def validate_pagination(page, per_page):
     return None
 
 CLIENT_COLUMNS = {
-    "company",
+    "company_name",
     "contact_person",
     "email_address",
     "phone_number",
