@@ -17,7 +17,7 @@ from fastapi import status
 from src.client_track.models import CandidateInterviews, Clients, InterviewRounds, InterviewStatus
 from src.utils.helper import encrypt_data, decrypt_data
 from src.utils.client_track_validator import VALID_STATUSES, validate_add_client, validate_add_interview, validate_add_interview_status, validate_add_round, validate_client_columns, validate_interview_columns, validate_modify_client, validate_pagination, validate_required, validate_sort_order, validate_update_round, validate_user, validate_uuid
-from src.utils.response import internal_server_error_response, not_found_response, success_response, validation_error_response
+from src.utils.response import internal_server_error_response, not_found_response, success_response, validation_error_response, error_response
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -36,15 +36,16 @@ def rounds():
         )
 
         if not interview_rounds:
-            return {
-                "status_code": status.HTTP_404_NOT_FOUND,
-                "errors": [
-                    {
-                        "field": "rounds",
-                        "message": "No interview rounds found.",
-                    }
-                ],
-            }
+            return not_found_response("rounds", "No interview rounds found.")
+            # return {
+            #     "status_code": status.HTTP_404_NOT_FOUND,
+            #     "errors": [
+            #         {
+            #             "field": "rounds",
+            #             "message": "No interview rounds found.",
+            #         }
+            #     ],
+            # }
 
         return {
             "status_code": status.HTTP_200_OK,
@@ -67,15 +68,7 @@ def rounds():
             f"Error while retrieving interview rounds: {str(e)}"
         )
 
-        return {
-            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "errors": [
-                {
-                    "field": "server",
-                    "message": "An unexpected error occurred.",
-                }
-            ],
-        }
+        return internal_server_error_response(str(e))
 
     finally:
         db.close()
@@ -89,10 +82,7 @@ def add_round(payload, user_name):
         )
 
         if errors:
-            return {
-                "status_code": status.HTTP_400_BAD_REQUEST,
-                "errors": errors,
-            }
+            return error_response(400, errors)
 
         round_name = payload.get(
             "round_name"
@@ -108,17 +98,26 @@ def add_round(payload, user_name):
         )
 
         if existing_round:
-            return {
-                "status_code": status.HTTP_409_CONFLICT,
-                "errors": [
+            return error_response(
+                409, [
                     {
                         "field": "round_name",
                         "message": (
                             "Interview round already exists."
                         ),
                     }
-                ],
-            }
+                ])
+            # return {
+            #     "status_code": status.HTTP_409_CONFLICT,
+            #     "errors": [
+            #         {
+            #             "field": "round_name",
+            #             "message": (
+            #                 "Interview round already exists."
+            #             ),
+            #         }
+            #     ],
+            # }
 
         interview_round = InterviewRounds(
             round_name=round_name,
@@ -162,19 +161,7 @@ def add_round(payload, user_name):
             f"Error while creating interview round: {str(e)}"
         )
 
-        return {
-            "status_code": (
-                status.HTTP_500_INTERNAL_SERVER_ERROR
-            ),
-            "errors": [
-                {
-                    "field": "server",
-                    "message": (
-                        "An unexpected error occurred."
-                    ),
-                }
-            ],
-        }
+        return internal_server_error_response(str(e))
 
     finally:
         db.close()
@@ -189,10 +176,7 @@ def update_round(payload, round_id, user_name):
         )
 
         if errors:
-            return {
-                "status_code": status.HTTP_400_BAD_REQUEST,
-                "errors": errors,
-            }
+            return error_response(400, errors)
 
         round_name = payload.get(
             "round_name"
@@ -208,29 +192,26 @@ def update_round(payload, round_id, user_name):
         )
 
         if not interview_round:
-            return {
-                "status_code": status.HTTP_404_NOT_FOUND,
-                "errors": [
-                    {
-                        "field": "round_id",
-                        "message": "Interview round not found.",
-                    }
-                ],
-            }
+            return not_found_response("round_id", "Interview round not found.")
 
         if (
             interview_round.round_name.strip().lower()
             == round_name.lower()
         ):
-            return {
-                "status_code": status.HTTP_409_CONFLICT,
-                "errors": [
-                    {
+            return error_response(
+                409, [{
                         "field": "round_name",
                         "message": "Round name is already the same as the existing value.",
-                    }
-                ],
-            }
+                    }])
+            # return {
+            #     "status_code": status.HTTP_409_CONFLICT,
+            #     "errors": [
+            #         {
+            #             "field": "round_name",
+            #             "message": "Round name is already the same as the existing value.",
+            #         }
+            #     ],
+            # }
 
         existing_round = (
             db.query(InterviewRounds)
@@ -243,15 +224,20 @@ def update_round(payload, round_id, user_name):
         )
 
         if existing_round:
-            return {
-                "status_code": status.HTTP_409_CONFLICT,
-                "errors": [
-                    {
+            return error_response(
+                409, [{
                         "field": "round_name",
                         "message": "Interview round already exists.",
-                    }
-                ],
-            }
+                    }])
+            # return {
+            #     "status_code": status.HTTP_409_CONFLICT,
+            #     "errors": [
+            #         {
+            #             "field": "round_name",
+            #             "message": "Interview round already exists.",
+            #         }
+            #     ],
+            # }
 
         interview_round.round_name = round_name
         interview_round.updated_by = user_name
@@ -280,15 +266,7 @@ def update_round(payload, round_id, user_name):
             f"Error while updating interview round: {str(e)}"
         )
 
-        return {
-            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "errors": [
-                {
-                    "field": "server",
-                    "message": "An unexpected error occurred.",
-                }
-            ],
-        }
+        return internal_server_error_response(str(e))
 
     finally:
         db.close()
@@ -323,10 +301,7 @@ def delete_round(round_id, user_name):
             errors.append(error)
 
         if errors:
-            return {
-                "status_code": status.HTTP_400_BAD_REQUEST,
-                "errors": errors,
-            }
+            return error_response(400, errors)
 
         interview_round = (
             db.query(InterviewRounds)
@@ -338,15 +313,16 @@ def delete_round(round_id, user_name):
         )
 
         if not interview_round:
-            return {
-                "status_code": status.HTTP_404_NOT_FOUND,
-                "errors": [
-                    {
-                        "field": "round_id",
-                        "message": "Interview round not found.",
-                    }
-                ],
-            }
+            return not_found_response("round_id", "Interview round not found.")
+            # return {
+            #     "status_code": status.HTTP_404_NOT_FOUND,
+            #     "errors": [
+            #         {
+            #             "field": "round_id",
+            #             "message": "Interview round not found.",
+            #         }
+            #     ],
+            # }
 
         active_interviews = (
             db.query(InterviewStatus)
@@ -358,18 +334,26 @@ def delete_round(round_id, user_name):
         )
 
         if active_interviews > 0:
-            return {
-                "status_code": status.HTTP_409_CONFLICT,
-                "errors": [
-                    {
+            return error_response(
+                409, [{
                         "field": "round_id",
                         "message": (
                             "Cannot delete round because "
                             "it is associated with interview statuses."
-                        ),
-                    }
-                ],
-            }
+                        )}]
+            )
+            # return {
+            #     "status_code": status.HTTP_409_CONFLICT,
+            #     "errors": [
+            #         {
+            #             "field": "round_id",
+            #             "message": (
+            #                 "Cannot delete round because "
+            #                 "it is associated with interview statuses."
+            #             ),
+            #         }
+            #     ],
+            # }
 
         interview_round.is_active = False
         interview_round.updated_by = user_name
@@ -398,15 +382,7 @@ def delete_round(round_id, user_name):
             f"Error while deleting interview round: {str(e)}"
         )
 
-        return {
-            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "errors": [
-                {
-                    "field": "server",
-                    "message": "An unexpected error occurred.",
-                }
-            ],
-        }
+        return internal_server_error_response(str(e))
 
     finally:
         db.close()
@@ -429,10 +405,8 @@ def view_clients(page, page_size, filter_column, filter_by, sort_by, sort_order)
             errors.append(sort_error)
 
         if errors:
-            return {
-                "status_code": status.HTTP_400_BAD_REQUEST,
-                "errors": errors
-            }
+            return error_response(400, errors)
+        
         query = (
             db.query(Clients)
             .filter(Clients.is_active.is_(True))
@@ -475,15 +449,16 @@ def view_clients(page, page_size, filter_column, filter_by, sort_by, sort_order)
         clients = query.all()
 
         if not clients:
-            return {
-                "status_code": status.HTTP_404_NOT_FOUND,
-                "errors": [
-                    {
-                        "field": "clients",
-                        "message": "No clients found."
-                    }
-                ]
-            }
+            return not_found_response("clients", "No clients found.")
+            # return {
+            #     "status_code": status.HTTP_404_NOT_FOUND,
+            #     "errors": [
+            #         {
+            #             "field": "clients",
+            #             "message": "No clients found."
+            #         }
+            #     ]
+            # }
 
         return {
             "status_code": status.HTTP_200_OK,
@@ -513,15 +488,7 @@ def view_clients(page, page_size, filter_column, filter_by, sort_by, sort_order)
             f"Error while retrieving clients: {str(e)}"
         )
 
-        return {
-            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "errors": [
-                {
-                    "field": "server",
-                    "message": "An unexpected error occurred."
-                }
-            ]
-        }
+        return internal_server_error_response(str(e))
 
     finally:
         db.close()
@@ -535,10 +502,7 @@ def add_client(payload, user_name):
         )
 
         if errors:
-            return {
-                "status_code": status.HTTP_400_BAD_REQUEST,
-                "errors": errors,
-            }
+            return error_response(400, errors)
 
         company_name = payload.get("company_name").strip()
         contact_person = payload.get("contact_person").strip()
@@ -579,10 +543,11 @@ def add_client(payload, user_name):
                     }
                 )
 
-            return {
-                "status_code": status.HTTP_409_CONFLICT,
-                "errors": validation_errors,
-            }
+            return error_response(409, validation_errors)
+            # return {
+            #     "status_code": status.HTTP_409_CONFLICT,
+            #     "errors": validation_errors,
+            # }
 
         new_client = Clients(
             company_name=company_name,
@@ -621,15 +586,7 @@ def add_client(payload, user_name):
             f"Error while creating client: {str(e)}"
         )
 
-        return {
-            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "errors": [
-                {
-                    "field": "server",
-                    "message": "An unexpected error occurred.",
-                }
-            ],
-        }
+        return internal_server_error_response(str(e))
 
     finally:
         db.close()
@@ -644,10 +601,7 @@ def modify_client(payload, client_id, user_name):
         )
 
         if errors:
-            return {
-                "status_code": status.HTTP_400_BAD_REQUEST,
-                "errors": errors,
-            }
+            return error_response(400, errors)
 
         client = (
             db.query(Clients)
@@ -659,15 +613,16 @@ def modify_client(payload, client_id, user_name):
         )
 
         if not client:
-            return {
-                "status_code": status.HTTP_404_NOT_FOUND,
-                "errors": [
-                    {
-                        "field": "client_id",
-                        "message": "Client not found.",
-                    }
-                ],
-            }
+            return not_found_response("client_id", "Client not found.")
+            # return {
+            #     "status_code": status.HTTP_404_NOT_FOUND,
+            #     "errors": [
+            #         {
+            #             "field": "client_id",
+            #             "message": "Client not found.",
+            #         }
+            #     ],
+            # }
 
         company_name = payload.get(
             "company_name",
@@ -701,15 +656,20 @@ def modify_client(payload, client_id, user_name):
             and client.email_address == email_address
             and client.phone_number == phone_number
         ):
-            return {
-                "status_code": status.HTTP_409_CONFLICT,
-                "errors": [
-                    {
+            return error_response(
+                409, [{
                         "field": "payload",
                         "message": "No changes detected.",
-                    }
-                ],
-            }
+                    }])
+            # return {
+            #     "status_code": status.HTTP_409_CONFLICT,
+            #     "errors": [
+            #         {
+            #             "field": "payload",
+            #             "message": "No changes detected.",
+            #         }
+            #     ],
+            # }
 
         duplicate_client = (
             db.query(Clients)
@@ -722,15 +682,20 @@ def modify_client(payload, client_id, user_name):
         )
 
         if duplicate_client:
-            return {
-                "status_code": status.HTTP_409_CONFLICT,
-                "errors": [
-                    {
+            return error_response(
+                409, [{
                         "field": "email_address",
                         "message": "Email address already exists.",
-                    }
-                ],
-            }
+                    }])
+            # return {
+            #     "status_code": status.HTTP_409_CONFLICT,
+            #     "errors": [
+            #         {
+            #             "field": "email_address",
+            #             "message": "Email address already exists.",
+            #         }
+            #     ],
+            # }
 
         client.company_name = company_name
         client.contact_person = contact_person
@@ -766,15 +731,7 @@ def modify_client(payload, client_id, user_name):
             f"Error while updating client: {str(e)}"
         )
 
-        return {
-            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "errors": [
-                {
-                    "field": "server",
-                    "message": "An unexpected error occurred.",
-                }
-            ],
-        }
+        return internal_server_error_response(str(e))
 
     finally:
         db.close()
@@ -809,10 +766,7 @@ def remove_client(client_id, user_name):
             errors.append(error)
 
         if errors:
-            return {
-                "status_code": status.HTTP_400_BAD_REQUEST,
-                "errors": errors,
-            }
+            return error_response(400, errors)
 
         client = (
             db.query(Clients)
@@ -824,15 +778,16 @@ def remove_client(client_id, user_name):
         )
 
         if not client:
-            return {
-                "status_code": status.HTTP_404_NOT_FOUND,
-                "errors": [
-                    {
-                        "field": "client_id",
-                        "message": "Client not found.",
-                    }
-                ],
-            }
+            return not_found_response("client_id", "Client not found.")
+            # return {
+            #     "status_code": status.HTTP_404_NOT_FOUND,
+            #     "errors": [
+            #         {
+            #             "field": "client_id",
+            #             "message": "Client not found.",
+            #         }
+            #     ],
+            # }
 
         active_interviews = (
             db.query(CandidateInterviews)
@@ -844,18 +799,26 @@ def remove_client(client_id, user_name):
         )
 
         if active_interviews > 0:
-            return {
-                "status_code": status.HTTP_409_CONFLICT,
-                "errors": [
-                    {
+            return error_response(
+                409, [{
                         "field": "client_id",
                         "message": (
                             "Cannot delete client because active "
                             "interviews exist."
                         ),
-                    }
-                ],
-            }
+                    }])
+            # return {
+            #     "status_code": status.HTTP_409_CONFLICT,
+            #     "errors": [
+            #         {
+            #             "field": "client_id",
+            #             "message": (
+            #                 "Cannot delete client because active "
+            #                 "interviews exist."
+            #             ),
+            #         }
+            #     ],
+            # }
 
         client.is_active = False
         client.updated_by = user_name
@@ -888,16 +851,8 @@ def remove_client(client_id, user_name):
             f"Error while deleting client: {str(e)}"
         )
 
-        return {
-            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "errors": [
-                {
-                    "field": "server",
-                    "message": "An unexpected error occurred.",
-                }
-            ],
-        }
-
+        return internal_server_error_response(str(e))
+    
     finally:
         db.close()
 
@@ -918,10 +873,7 @@ def view_interviews(page, page_size, filter_column, filter_by, sort_by, sort_ord
             errors.append(sort_error)
 
         if errors:
-            return {
-                "status_code": status.HTTP_400_BAD_REQUEST,
-                "errors": errors
-            }
+            return error_response(400, errors)
 
         query = (
             db.query(CandidateInterviews)
@@ -976,15 +928,16 @@ def view_interviews(page, page_size, filter_column, filter_by, sort_by, sort_ord
         interviews = query.all()
 
         if not interviews:
-            return {
-                "status_code": status.HTTP_404_NOT_FOUND,
-                "errors": [
-                    {
-                        "field": "interviews",
-                        "message": "No interviews found."
-                    }
-                ]
-            }
+            return not_found_response("interviews", "No interviews found.")
+            # return {
+            #     "status_code": status.HTTP_404_NOT_FOUND,
+            #     "errors": [
+            #         {
+            #             "field": "interviews",
+            #             "message": "No interviews found."
+            #         }
+            #     ]
+            # }
 
         return {
             "status_code": status.HTTP_200_OK,
@@ -1005,6 +958,7 @@ def view_interviews(page, page_size, filter_column, filter_by, sort_by, sort_ord
                     "experience": interview.experience,
                     "status": interview.status,
                     "role": interview.role,
+                    "started_at": interview.created_at,
                     "created_by": interview.created_by,
                     "updated_by": interview.updated_by,
                     "is_active": interview.is_active,
@@ -1019,15 +973,7 @@ def view_interviews(page, page_size, filter_column, filter_by, sort_by, sort_ord
             f"Error while fetching interviews: {str(e)}"
         )
 
-        return {
-            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "errors": [
-                {
-                    "field": "server",
-                    "message": "An unexpected error occurred."
-                }
-            ]
-        }
+        return internal_server_error_response(str(e))
 
     finally:
         db.close()
@@ -1041,10 +987,7 @@ def add_interview(payload, user_name):
         )
 
         if errors:
-            return {
-                "status_code": status.HTTP_400_BAD_REQUEST,
-                "errors": errors,
-            }
+            return error_response(400, errors)
 
         resume_id = payload.get("resume_id")
         client_id = payload.get("client_id")
@@ -1062,15 +1005,16 @@ def add_interview(payload, user_name):
         )
 
         if not resume:
-            return {
-                "status_code": status.HTTP_404_NOT_FOUND,
-                "errors": [
-                    {
-                        "field": "resume_id",
-                        "message": "Resume not found.",
-                    }
-                ],
-            }
+            return not_found_response("resume_id", "Resume not found.")
+            # return {
+            #     "status_code": status.HTTP_404_NOT_FOUND,
+            #     "errors": [
+            #         {
+            #             "field": "resume_id",
+            #             "message": "Resume not found.",
+            #         }
+            #     ],
+            # }
 
         existing_interview = (
             db.query(CandidateInterviews)
@@ -1083,15 +1027,20 @@ def add_interview(payload, user_name):
         )
 
         if existing_interview:
-            return {
-                "status_code": status.HTTP_409_CONFLICT,
-                "errors": [
-                    {
+            return error_response(
+                409, [{
                         "field": "resume_id",
                         "message": "Interview already exists for this resume and client.",
-                    }
-                ],
-            }
+                    }])
+            # return {
+            #     "status_code": status.HTTP_409_CONFLICT,
+            #     "errors": [
+            #         {
+            #             "field": "resume_id",
+            #             "message": "Interview already exists for this resume and client.",
+            #         }
+            #     ],
+            # }
 
         new_interview = CandidateInterviews(
             resume_id=resume_id,
@@ -1130,15 +1079,7 @@ def add_interview(payload, user_name):
             f"Error while creating interview: {str(e)}"
         )
 
-        return {
-            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "errors": [
-                {
-                    "field": "server",
-                    "message": "An unexpected error occurred.",
-                }
-            ],
-        }
+        return internal_server_error_response(str(e))
 
     finally:
         db.close()
@@ -1169,10 +1110,7 @@ def remove_interview(interview_id, user_name):
             })
 
         if errors:
-            return {
-                "status_code": status.HTTP_400_BAD_REQUEST,
-                "errors": errors,
-            }
+            return error_response(400, errors)
 
         interview = (
             db.query(CandidateInterviews)
@@ -1184,29 +1122,35 @@ def remove_interview(interview_id, user_name):
         )
 
         if not interview:
-            return {
-                "status_code": status.HTTP_404_NOT_FOUND,
-                "errors": [
-                    {
-                        "field": "interview_id",
-                        "message": "Interview not found.",
-                    }
-                ],
-            }
+            return not_found_response("interview_id", "Interview not found.")
+            # return {
+            #     "status_code": status.HTTP_404_NOT_FOUND,
+            #     "errors": [
+            #         {
+            #             "field": "interview_id",
+            #             "message": "Interview not found.",
+            #         }
+            #     ],
+            # }
 
         if interview.status and interview.status.lower() in [
             "rejected",
             "cleared",
         ]:
-            return {
-                "status_code": status.HTTP_400_BAD_REQUEST,
-                "errors": [
-                    {
+            return error_response(
+                400, [{
                         "field": "status",
                         "message": f"Cannot delete interview with status '{interview.status}'.",
-                    }
-                ],
-            }
+                    }])
+            # return {
+            #     "status_code": status.HTTP_400_BAD_REQUEST,
+            #     "errors": [
+            #         {
+            #             "field": "status",
+            #             "message": f"Cannot delete interview with status '{interview.status}'.",
+            #         }
+            #     ],
+            # }
 
         interview.is_active = False
         interview.updated_by = user_name
@@ -1250,15 +1194,7 @@ def remove_interview(interview_id, user_name):
             f"Error while deleting interview: {str(e)}"
         )
 
-        return {
-            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "errors": [
-                {
-                    "field": "server",
-                    "message": "An unexpected error occurred.",
-                }
-            ],
-        }
+        return internal_server_error_response(str(e))
 
     finally:
         db.close()
@@ -1286,7 +1222,7 @@ def view_interview_status(interview_id):
                 errors.append(uuid_error)
 
         if errors:
-            return validation_error_response(errors)
+            return validation_error_response(400, errors)
 
         # interview_status = (
         #     db.query(InterviewStatus)
@@ -1346,9 +1282,9 @@ def view_interview_status(interview_id):
             ]
         )
 
-    except Exception:
+    except Exception as e:
         logger.exception("Error while retrieving interview status")
-        return internal_server_error_response()
+        return internal_server_error_response(str(e))
 
     finally:
         db.close()
@@ -1358,10 +1294,7 @@ def add_interview_status(payload, user_name):
         errors = validate_add_interview_status(payload, user_name)
 
         if errors:
-            return {
-                "status_code": status.HTTP_400_BAD_REQUEST,
-                "errors": errors,
-            }
+            return error_response(400, errors)
 
         interview_id = payload.get("interview_id")
         round_id = payload.get("round_id")
@@ -1381,15 +1314,16 @@ def add_interview_status(payload, user_name):
         )
 
         if not candidate_interview:
-            return {
-                "status_code": status.HTTP_404_NOT_FOUND,
-                "errors": [
-                    {
-                        "field": "interview_id",
-                        "message": "Interview not found.",
-                    }
-                ],
-            }
+            return not_found_response("interview_id", "Interview not found.")
+            # return {
+            #     "status_code": status.HTTP_404_NOT_FOUND,
+            #     "errors": [
+            #         {
+            #             "field": "interview_id",
+            #             "message": "Interview not found.",
+            #         }
+            #     ],
+            # }
 
         latest_status = (
             db.query(InterviewStatus)
@@ -1440,36 +1374,49 @@ def add_interview_status(payload, user_name):
             )
 
         if validation_errors:
-            return {
-                "status_code": status.HTTP_409_CONFLICT,
-                "errors": validation_errors,
-            }
+            return error_response(
+                409, validation_errors
+            )
+            # return {
+            #     "status_code": status.HTTP_409_CONFLICT,
+            #     "errors": validation_errors,
+            # }
 
         if latest_status:
 
             previous_status = (latest_status.status or "").lower()
 
             if previous_status == "rejected":
-                return {
-                    "status_code": status.HTTP_400_BAD_REQUEST,
-                    "errors": [
-                        {
+                return error_response(
+                    409, [{
                             "field": "status",
                             "message": "Cannot schedule interview. Candidate was rejected in the previous round.",
-                        }
-                    ],
-                }
+                        }])
+                # return {
+                #     "status_code": status.HTTP_400_BAD_REQUEST,
+                #     "errors": [
+                #         {
+                #             "field": "status",
+                #             "message": "Cannot schedule interview. Candidate was rejected in the previous round.",
+                #         }
+                #     ],
+                # }
 
             if previous_status != "cleared":
-                return {
-                    "status_code": status.HTTP_400_BAD_REQUEST,
-                    "errors": [
-                        {
+                return error_response(
+                    400, [{
                             "field": "status",
                             "message": "Cannot schedule interview. Previous round has not been cleared.",
-                        }
-                    ],
-                }
+                        }])
+                # return {
+                #     "status_code": status.HTTP_400_BAD_REQUEST,
+                #     "errors": [
+                #         {
+                #             "field": "status",
+                #             "message": "Cannot schedule interview. Previous round has not been cleared.",
+                #         }
+                #     ],
+                # }
 
         new_interview_status = InterviewStatus(
             interview_id=interview_id,
@@ -1512,15 +1459,7 @@ def add_interview_status(payload, user_name):
             f"Error occurred while adding interview status: {str(e)}"
         )
 
-        return {
-            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "errors": [
-                {
-                    "field": "server",
-                    "message": "An unexpected error occurred.",
-                }
-            ],
-        }
+        return internal_server_error_response(str(e))
 
     finally:
         db.close()
@@ -1597,10 +1536,7 @@ def modify_interview_status(payload, interview_status_id, user_name):
             })
 
         if errors:
-            return {
-                "status_code": status.HTTP_400_BAD_REQUEST,
-                "errors": errors,
-            }
+            return error_response(400, errors)
 
         interview_status = (
             db.query(InterviewStatus)
@@ -1612,37 +1548,48 @@ def modify_interview_status(payload, interview_status_id, user_name):
         )
 
         if not interview_status:
-            return {
-                "status_code": status.HTTP_404_NOT_FOUND,
-                "errors": [
-                    {
-                        "field": "interview_status_id",
-                        "message": "Interview status not found.",
-                    }
-                ],
-            }
+            return not_found_response("interview_status_id", "Interview status not found.")
+            # return {
+            #     "status_code": status.HTTP_404_NOT_FOUND,
+            #     "errors": [
+            #         {
+            #             "field": "interview_status_id",
+            #             "message": "Interview status not found.",
+            #         }
+            #     ],
+            # }
         
         if interview_status.status and interview_status.status.lower() == "rejected":
-            return {
-                "status_code": status.HTTP_400_BAD_REQUEST,
-                "errors": [
-                    {
+            return error_response(
+                400, [{
                         "field": "status",
                         "message": "Interview status cannot be modified because the candidate has already been rejected."
-                    }
-                ]
-            }
+                    }])
+            # return {
+            #     "status_code": status.HTTP_400_BAD_REQUEST,
+            #     "errors": [
+            #         {
+            #             "field": "status",
+            #             "message": "Interview status cannot be modified because the candidate has already been rejected."
+            #         }
+            #     ]
+            # }
         
         if interview_status.status and interview_status.status.lower() == "cleared":
-            return {
-                "status_code": status.HTTP_400_BAD_REQUEST,
-                "errors": [
-                    {
+            return error_response(
+                400, [{
                         "field": "status",
                         "message": "Interview status cannot be modified because the candidate has already cleard the round."
-                    }
-                ]
-            }
+                    }])
+            # return {
+            #     "status_code": status.HTTP_400_BAD_REQUEST,
+                # "errors": [
+                #     {
+                #         "field": "status",
+                #         "message": "Interview status cannot be modified because the candidate has already cleard the round."
+                #     }
+                # ]
+            # }
 
         feedback = payload.get("feedback", interview_status.feedback)
         scheduled_date = payload.get(
@@ -1664,15 +1611,20 @@ def modify_interview_status(payload, interview_status_id, user_name):
             and interview_status.status == status_value
             and interview_status.feedback == feedback
         ):
-            return {
-                "status_code": status.HTTP_409_CONFLICT,
-                "errors": [
-                    {
+            return error_response(
+                409, [{
                         "field": "payload",
                         "message": "No changes detected.",
-                    }
-                ],
-            }
+                    }])
+            # return {
+            #     "status_code": status.HTTP_409_CONFLICT,
+            #     "errors": [
+            #         {
+            #             "field": "payload",
+            #             "message": "No changes detected.",
+            #         }
+            #     ],
+            # }
 
         interview_status.scheduled_date = scheduled_date
         interview_status.feedback = feedback
@@ -1744,15 +1696,7 @@ def modify_interview_status(payload, interview_status_id, user_name):
             f"Error while updating interview status: {str(e)}"
         )
 
-        return {
-            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "errors": [
-                {
-                    "field": "server",
-                    "message": "An unexpected error occurred.",
-                }
-            ],
-        }
+        return internal_server_error_response(str(e))
 
     finally:
         db.close()

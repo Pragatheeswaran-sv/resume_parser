@@ -609,6 +609,21 @@ VALID_SORT_ORDERS = {"asc", "desc"}
 
 def validate_required(value, field_name, display_name=None):
     display_name = display_name or field_name.replace("_", " ").title()
+    if display_name == 'Round Name':
+        try:
+            data = int(value)
+            print(data)
+            if data:
+                return {
+                    "field": field_name,
+                    "message": f"{display_name} should not contain only numbers."
+                }
+        except Exception as e:
+            if not str(value).isalnum():
+                return {
+                    "field": field_name,
+                    "message": f"{display_name} should not contain special characters."
+                }
 
     if value is None:
         return {
@@ -637,6 +652,12 @@ def validate_uuid(value, field_name, display_name=None):
             "message": f"{display_name} must be a valid UUID."
         }
 
+def validate_alphanumeric(value, field_name, errors):
+    if value and not re.fullmatch(r"[A-Za-z0-9]+", str(value).strip()):
+        errors.append({
+            "field": field_name,
+            "message": f"{field_name.replace('_', ' ').title()} must be alphanumeric."
+        })
 
 def validate_email(email, field_name="email_address"):
     if email and not re.match(EMAIL_REGEX, str(email)):
@@ -696,6 +717,7 @@ def validate_add_round(payload, user_name):
         "round_name",
         "Round Name"
     )
+
 
     if error:
         errors.append(error)
