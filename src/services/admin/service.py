@@ -34,6 +34,7 @@ from src.auth.models import RefreshToken
 from fastapi import status
 from src.admin.models import Admin, AiModel, AiModelConfig, AiModelversion, Users
 from src.utils.helper import encrypt_data, decrypt_data
+from src.utils.admin_validation import validate_active_model, validate_create_model, validate_delete_user, validate_get_model, validate_get_user, validate_get_user_by_id, validate_list_user, validate_model_config, validate_model_version, validate_new_auth, validate_new_job, validate_toggle_model, validate_update_user
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -508,14 +509,29 @@ def new_admin(payload: dict) -> Dict[str, Any]:
     finally:
         session.close()
 
-def list_user(page, page_size, sort_by, sort_order, filter_column, filter_value) -> Dict[str, Any]:
+def list_user(page, page_size, sort_by, sort_order, filter_column, filter_value):
     session = SessionLocal()
+
     try:
+        validation_error = validate_list_user(
+            page=page,
+            page_size=page_size,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            filter_column=filter_column,
+            filter_value=filter_value
+        )
+
+        if validation_error:
+            return validation_error
+
         page = int(page)
         page_size = int(page_size)
         offset = (page - 1) * page_size
 
-        query = session.query(Users).filter(Users.is_active == True)
+        query = session.query(Users).filter(
+            Users.is_active == True
+        )
 
         filterable_columns = {
             "name": Users.name,
@@ -523,23 +539,37 @@ def list_user(page, page_size, sort_by, sort_order, filter_column, filter_value)
             "phone_number": Users.phone_number,
             "is_blocked": Users.is_blocked,
         }
-        
+
         if filter_column and filter_value:
             column = filterable_columns.get(filter_column)
 
-            if column is None:
-                raise ValueError(f"Invalid filter column: {filter_column}")
-
             if hasattr(column.type, "python_type") and column.type.python_type == str:
-                query = query.filter(column.ilike(f"%{filter_value}%"))
+                query = query.filter(
+                    column.ilike(f"%{filter_value}%")
+                )
             else:
-                query = query.filter(cast(column, String).ilike(f"%{filter_value}%"))
+                query = query.filter(
+                    cast(column, String).ilike(f"%{filter_value}%")
+                )
 
-        if query.count() == 0:
-            return{
+        total_users = query.count()
+
+        if total_users == 0:
+            return {
                 "status": status.HTTP_200_OK,
                 "message": "No users found",
-                "data": [],
+                "data": []
+            }
+
+        if offset >= total_users:
+            return {
+                "status_code": status.HTTP_400_BAD_REQUEST,
+                "errors": [
+                    {
+                        "field": "page",
+                        "message": "No data found for the requested page."
+                    }
+                ]
             }
 
         sort_map = {
@@ -553,40 +583,41 @@ def list_user(page, page_size, sort_by, sort_order, filter_column, filter_value)
         if sort_by in sort_map:
             sort_col = sort_map[sort_by]
             query = query.order_by(
-                sort_col.desc() if sort_order == "desc" else sort_col.asc()
+                sort_col.desc() if sort_order == "desc"
+                else sort_col.asc()
             )
 
-        total_users = query.count()
-
-        if total_users == 0:
-            raise ValueError("No Users found")
-
-        if offset >= total_users:
-            raise ValueError("Invalid page number")
-
         users = query.limit(page_size).offset(offset).all()
-        
-        
+
         data = []
+
         for user in users:
-            # Fetch OAuth credentials for this user
+
             cred = session.query(OauthCredentials).filter(
                 OauthCredentials.email == user.email_address,
                 OauthCredentials.is_active == True
             ).first()
-            
-            # Get last_processed_at from OauthCredentials
-            last_sync_time = cred.last_processed_at if cred and cred.last_processed_at else None
-            
-            # Convert UTC to IST
+
+            last_sync_time = (
+                cred.last_processed_at
+                if cred and cred.last_processed_at
+                else None
+            )
+
             if last_sync_time:
                 if last_sync_time.tzinfo is None:
-                    last_sync_time = last_sync_time.replace(tzinfo=timezone.utc)
-                ist_time = last_sync_time.astimezone(ZoneInfo("Asia/Kolkata"))
+                    last_sync_time = last_sync_time.replace(
+                        tzinfo=timezone.utc
+                    )
+
+                ist_time = last_sync_time.astimezone(
+                    ZoneInfo("Asia/Kolkata")
+                )
+
                 last_sync_at = ist_time.isoformat()
             else:
                 last_sync_at = None
-            
+
             data.append({
                 "user_id": str(user.user_id),
                 "name": user.name,
@@ -595,7 +626,7 @@ def list_user(page, page_size, sort_by, sort_order, filter_column, filter_value)
                 "is_blocked": user.is_blocked,
                 "last_sync_at": last_sync_at,
             })
-        
+
         return {
             "status": status.HTTP_200_OK,
             "message": "Users retrieved successfully",
@@ -603,53 +634,125 @@ def list_user(page, page_size, sort_by, sort_order, filter_column, filter_value)
             "total_records": total_users,
         }
 
-    except ValueError:
-        raise
     except Exception as e:
-        logger.warning("[mail] Error: %s", str(e), exc_info=True)
-        raise ValueError(str(e))
+        logger.warning(
+            "[mail] Error: %s",
+            str(e),
+            exc_info=True
+        )
+
+        return {
+            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "errors": [
+                {
+                    "field": "server",
+                    "message": str(e)
+                }
+            ]
+        }
+
     finally:
         session.close()
 
 def get_user(user_id):
     db = SessionLocal()
+
     try:
-        if not user_id:
-            raise ValueError("User ID not found")
-        
-        user  = db.query(Users).filter_by(user_id = user_id).first()
-        
-        return{
+        validation_error = validate_get_user(user_id)
+
+        if validation_error:
+            return validation_error
+
+        user = db.query(Users).filter_by(
+            user_id=user_id
+        ).first()
+
+        if not user:
+            return {
+                "status_code": status.HTTP_404_NOT_FOUND,
+                "errors": [
+                    {
+                        "field": "user_id",
+                        "message": "User not found."
+                    }
+                ]
+            }
+
+        return {
             "status": status.HTTP_200_OK,
             "message": "User profile retrieved successfully",
-            
-            "data" : {
-                'user_id' : str(user.user_id), 
-                'user_name' : user.name,
-                'user_email' : user.email_address,
-                'user_phone_number' : user.phone_number,
+            "data": {
+                "user_id": str(user.user_id),
+                "user_name": user.name,
+                "user_email": user.email_address,
+                "user_phone_number": user.phone_number,
             }
         }
-    except ValueError:
-        raise
+
     except Exception as e:
-        logger.warning("[admin_check] Error: %s", str(e), exc_info=True)
-        raise ValueError(str(e))
+        logger.warning(
+            "[get_user] Error: %s",
+            str(e),
+            exc_info=True
+        )
+
+        return {
+            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "errors": [
+                {
+                    "field": "server",
+                    "message": str(e)
+                }
+            ]
+        }
+
     finally:
         db.close()
 
 def get_user_by_id(user_id, admin_id):
+    db = SessionLocal()
+
     try:
-        db = SessionLocal()
-        admin = db.query(Admin).filter(admin_id == admin_id).first()
+        validation_error = validate_get_user_by_id(
+            user_id=user_id,
+            admin_id=admin_id
+        )
+
+        if validation_error:
+            return validation_error
+
+        admin = db.query(Admin).filter(
+            Admin.admin_id == admin_id
+        ).first()
+
         if not admin:
-            raise Exception("user has no access to delete account")
-        
-        user = db.query(Users).filter(Users.user_id == user_id, Users.is_active == True).first()
+            return {
+                "status_code": status.HTTP_403_FORBIDDEN,
+                "errors": [
+                    {
+                        "field": "admin_id",
+                        "message": "User has no access to view user details."
+                    }
+                ]
+            }
+
+        user = db.query(Users).filter(
+            Users.user_id == user_id,
+            Users.is_active == True
+        ).first()
+
         if not user:
-            raise Exception("User not found")
-        
-        return{
+            return {
+                "status_code": status.HTTP_404_NOT_FOUND,
+                "errors": [
+                    {
+                        "field": "user_id",
+                        "message": "User not found."
+                    }
+                ]
+            }
+
+        return {
             "status": status.HTTP_200_OK,
             "message": "User retrieved successfully",
             "data": {
@@ -659,48 +762,66 @@ def get_user_by_id(user_id, admin_id):
                 "phone_number": user.phone_number,
             },
         }
+
     except Exception as e:
-        logger.warning("[particular_user] Error: %s", str(e), exc_info=True)
-        raise ValueError(str(e))
+        logger.warning(
+            "[particular_user] Error: %s",
+            str(e),
+            exc_info=True
+        )
+
+        return {
+            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "errors": [
+                {
+                    "field": "server",
+                    "message": str(e)
+                }
+            ]
+        }
+
     finally:
         db.close()
 
-# def new_auth(payload: dict, admin_id) -> Dict[str, Any]:
-def new_auth(payload: dict, admin_id) -> Dict[str, Any]:
-    """Register a new authorized email account for IMAP extraction.
 
-    Args:
-        payload: Dictionary with ``email``, optional ``imap_password``,
-            and ``connect_with`` metadata.
+def new_auth(payload: dict, admin_id):
+    session = SessionLocal()
 
-    Returns:
-        Dict with the newly created User's ID and details.
-
-    Raises:
-        ValueError: If email is missing or already registered.
-    """
-    session = SessionLocal()   
     try:
-        if not admin_id:
-            raise ValueError("Admin ID must be provided")
-        name = payload.get("name")
-        email_address = payload.get("email")
-        phone_number = payload.get("phone_number")
+        validation_error = validate_new_auth(payload, admin_id)
 
-        if not email_address or not name or not phone_number or email_address.strip() == "" or name.strip() == "" or phone_number.strip() == "":
-            raise ValueError("Email, name, and phone number are required")
+        if validation_error:
+            return validation_error
 
-        users = session.query(Users).filter_by(email_address=email_address).first()
+        name = payload.get("name").strip()
+        email_address = payload.get("email").strip().lower()
+        phone_number = payload.get("phone_number").strip()
+
+        users = session.query(Users).filter(
+            Users.email_address == email_address
+        ).first()
+
         if users:
-            raise ValueError("User with this email already exists")
+            return {
+                "status_code": status.HTTP_400_BAD_REQUEST,
+                "errors": [
+                    {
+                        "field": "email",
+                        "message": "User with this email already exists."
+                    }
+                ]
+            }
+
         new_users = Users(
             name=name,
             email_address=email_address,
             phone_number=phone_number,
         )
+
         session.add(new_users)
         session.commit()
         session.refresh(new_users)
+
         return {
             "status": status.HTTP_201_CREATED,
             "message": "User created successfully",
@@ -711,54 +832,101 @@ def new_auth(payload: dict, admin_id) -> Dict[str, Any]:
                 "phone_number": new_users.phone_number,
             },
         }
-    except ValueError:
-        raise
+
     except Exception as e:
         session.rollback()
-        logger.warning("[new_auth] Error: %s", str(e), exc_info=True)
-        raise ValueError(str(e))
+
+        logger.warning(
+            "[new_auth] Error: %s",
+            str(e),
+            exc_info=True
+        )
+
+        return {
+            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "errors": [
+                {
+                    "field": "server",
+                    "message": str(e)
+                }
+            ]
+        }
+
     finally:
         session.close()
 
-
-# def delete_user(user_id: str) -> Dict[str, Any]:
-def delete_user(user_id: str, admin_id) -> Dict[str, Any]:
-    """Soft-delete an authorized email account by setting ``is_active = False``.
-
-    Args:
-        user_id: UUID string of the User to deactivate.
-
-    Returns:
-        Dict confirming deletion.
-
-    Raises:
-        ValueError: If the User ID is not found.
-    """
+def delete_user(user_id: str, admin_id):
     session = SessionLocal()
+
     try:
-        admin = session.query(Admin).filter(admin_id == admin_id).first()
+        validation_error = validate_delete_user(
+            user_id=user_id,
+            admin_id=admin_id
+        )
+
+        if validation_error:
+            return validation_error
+
+        admin = session.query(Admin).filter(
+            Admin.admin_id == admin_id
+        ).first()
+
         if not admin:
-            raise Exception("user has no access to delete account")
+            return {
+                "status_code": status.HTTP_403_FORBIDDEN,
+                "errors": [
+                    {
+                        "field": "admin_id",
+                        "message": "User has no access to delete account."
+                    }
+                ]
+            }
 
-        if not user_id or not user_id.strip():
-            raise Exception("user_id is required")
+        users = session.query(Users).filter(
+            Users.user_id == user_id,
+            Users.is_active == True
+        ).first()
 
-        users = session.query(Users).filter_by(user_id=user_id, is_active = True).first()
         if not users:
-            raise Exception("User not found")
+            return {
+                "status_code": status.HTTP_404_NOT_FOUND,
+                "errors": [
+                    {
+                        "field": "user_id",
+                        "message": "User not found."
+                    }
+                ]
+            }
+
         users.is_blocked = True
         users.is_active = False
+
         session.commit()
+
         return {
             "status": status.HTTP_200_OK,
-            "message": "User deleted successfully",
+            "message": "User deleted successfully"
         }
-    except ValueError:
-        raise
+
     except Exception as e:
         session.rollback()
-        logger.warning("[delete_user] Error: %s", str(e), exc_info=True)
-        raise ValueError(str(e))
+
+        logger.warning(
+            "[delete_user] Error: %s",
+            str(e),
+            exc_info=True
+        )
+
+        return {
+            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "errors": [
+                {
+                    "field": "server",
+                    "message": str(e)
+                }
+            ]
+        }
+
     finally:
         session.close()
 
@@ -782,6 +950,16 @@ def update_user(payload: dict, user_id: str, current_user_id: str, role: str) ->
     """
     session = SessionLocal()
     try:
+        validation_error = validate_update_user(
+            payload=payload,
+            user_id=user_id,
+            current_user_id=current_user_id,
+            role=role
+        )
+
+        if validation_error:
+            return validation_error
+
         if not current_user_id:
             return {
                         "status": status.HTTP_401_UNAUTHORIZED,
@@ -809,7 +987,17 @@ def update_user(payload: dict, user_id: str, current_user_id: str, role: str) ->
                         "message": "User activated successfully",
                     }
         # else:
-        users = session.query(Users).filter_by(user_id=user_id).first()
+        users = session.query(Users).filter(Users.user_id==user_id).first()
+        # if not users:
+        #     return {
+        #         "status_code": status.HTTP_404_NOT_FOUND,
+        #         "errors": [
+        #             {
+        #                 "field": "user_id",
+        #                 "message": "User not found."
+        #             }
+        #         ]
+        #     }
         if "is_blocked" in payload:
             return {
                     "status": status.HTTP_401_UNAUTHORIZED,
@@ -832,7 +1020,16 @@ def update_user(payload: dict, user_id: str, current_user_id: str, role: str) ->
         if users:
             duplicate = session.query(Users).filter_by(email_address=email_address, phone_number=phone_number, name=name).first()
             if duplicate and str(duplicate.user_id) != user_id:
-                raise ValueError("User with this email and phone number already exists, nothing to update")
+                return {
+                    "status_code": status.HTTP_409_CONFLICT,
+                    "errors": [
+                        {
+                            "field": "email",
+                            "message": "User with this email and phone number already exists."
+                        }
+                    ]
+                }
+            
             users.name = name
             users.email_address = email_address
             users.phone_number = phone_number
@@ -842,9 +1039,14 @@ def update_user(payload: dict, user_id: str, current_user_id: str, role: str) ->
                     users.imap_password = encrypt_data(new_password)
                 else:
                     return {
-                    "status": status.HTTP_406_NOT_ACCEPTABLE,
-                    "message": "user password not matched, password not updated",
-                }
+                        "status_code": status.HTTP_406_NOT_ACCEPTABLE,
+                        "errors": [
+                            {
+                                "field": "old_password",
+                                "message": "Old password does not match."
+                            }
+                        ]
+                    }
             session.commit()
             return {
                 "status": status.HTTP_200_OK,
@@ -1250,17 +1452,44 @@ def trigger_extraction(user_id: Optional[str] = None) -> Dict[str, Any]:
         session.close()
 
 def new_job(payload, admin_id):
+    db =SessionLocal()
     try:
         payload = payload.dict()
-        db =SessionLocal()
 
-        admin = db.query(Admin).filter(admin_id == admin_id).first()
+        validation_error = validate_new_job(
+            payload=payload,
+            admin_id=admin_id
+        )
+
+        if validation_error:
+            return validation_error
+        
+
+        admin = db.query(Admin).filter(
+            Admin.admin_id == admin_id
+        ).first()
         if not admin:
-            raise Exception("User are restricted to schedule job")
+            return {
+                "status_code": status.HTTP_403_FORBIDDEN,
+                "errors": [
+                    {
+                        "field": "admin_id",
+                        "message": "User is restricted from scheduling jobs."
+                    }
+                ]
+            }
         
         duplicate = db.query(ExtractionConfig).all()
-        if len(duplicate) > 1:
-            raise Exception("can't create more than one job")
+        if len(duplicate) > 0:
+            return {
+                "status_code": status.HTTP_409_CONFLICT,
+                "errors": [
+                    {
+                        "field": "config",
+                        "message": "Only one job configuration can be created."
+                    }
+                ]
+            }
         
         interval_minutes = payload.get('interval_minutes') or None
         is_paused = payload.get('is_paused') or None
@@ -1301,74 +1530,120 @@ def new_job(payload, admin_id):
         raise ValueError(str(e))
     finally:
         db.close()
-
-    
+ 
 def list_model():
+    db = SessionLocal()
+
     try:
-        db = SessionLocal()
-        models = db.query(AiModel).filter(AiModel.is_active == True).all()
+        models = (
+            db.query(AiModel)
+            .filter(AiModel.is_active == True)
+            .all()
+        )
+
         if not models:
-            raise ValueError("No models found")
-        
+            return {
+                "status_code": status.HTTP_404_NOT_FOUND,
+                "errors": [
+                    {
+                        "field": "model",
+                        "message": "No models found."
+                    }
+                ]
+            }
+
         return {
             "status": status.HTTP_200_OK,
             "message": "Models retrieved successfully",
             "data": [
                 {
-                    "model_id": model.ai_model_id,
+                    "model_id": str(model.ai_model_id),
                     "model_name": model.model_name,
                 }
                 for model in models
             ]
         }
+
     except Exception as e:
-        logger.warning("[list_model] Error: %s", str(e), exc_info=True)
-        raise ValueError(str(e))
+        logger.warning(
+            "[list_model] Error: %s",
+            str(e),
+            exc_info=True
+        )
+
+        return {
+            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "errors": [
+                {
+                    "field": "server",
+                    "message": str(e)
+                }
+            ]
+        }
+
     finally:
         db.close()
     
 def create_model(payload):
-    """Create a new AI model entry.
+    db = SessionLocal()
 
-    Returns a standard response dict with ``status``, ``message``, and created model ``data``.
-    Raises ``ValueError`` for invalid payload or duplicate model names.
-    """
     try:
-        db = SessionLocal()
-        model_name = (payload.get("model_name") or "").strip()
+        validation_error = validate_create_model(payload)
 
-        if not model_name:
-            raise ValueError("Provided model name")
+        if validation_error:
+            return validation_error
+
+        model_name = payload.get("model_name").strip()
+        version_name = payload.get("version_name").strip()
 
         existing_model = (
             db.query(AiModel)
-            .filter(AiModel.model_name == model_name, AiModel.is_active == True)
+            .filter(
+                AiModel.model_name == model_name,
+                AiModel.is_active == True
+            )
             .first()
         )
+
         if not existing_model:
-            new_model = AiModel(model_name=model_name)
+            new_model = AiModel(
+                model_name=model_name
+            )
+
             db.add(new_model)
             db.commit()
             db.refresh(new_model)
+
             model_id = new_model.ai_model_id
-            model_name = new_model.model_name
+
         else:
             model_id = existing_model.ai_model_id
-            model_name = existing_model.model_name
 
-        version_name = payload.get("version_name") if payload.get("version_name") else None
-        
-        version = db.query(AiModelversion).filter_by(version_name = version_name, is_active = True).first()
-        if version:
-            raise ValueError("Model version with this name already exists")
-        
-        if not version_name or version_name.strip() == "" or version_name == None:
-            raise ValueError("Provided version name")
-        
-        new_version = AiModelversion(
-            ai_model_id = model_id,
-            version_name = version_name,
+        existing_version = (
+            db.query(AiModelversion)
+            .filter(
+                AiModelversion.version_name == version_name,
+                AiModelversion.is_active == True
+            )
+            .first()
         )
+
+        if existing_version:
+            return {
+                "status_code": status.HTTP_409_CONFLICT,
+                "errors": [
+                    {
+                        "field": "version_name",
+                        "message": "Model version with this name already exists."
+                    }
+                ]
+            }
+
+        new_version = AiModelversion(
+            ai_model_id=model_id,
+            version_name=version_name
+        )
+
         db.add(new_version)
         db.commit()
         db.refresh(new_version)
@@ -1381,38 +1656,109 @@ def create_model(payload):
                 "model_name": model_name,
                 "model_version_id": str(new_version.ai_model_version_id),
                 "version_name": new_version.version_name,
-            },
+            }
         }
+
     except Exception as e:
-        logger.warning("[create_model] Error: %s", str(e), exc_info=True)
-        raise ValueError(str(e))
+        db.rollback()
+
+        logger.warning(
+            "[create_model] Error: %s",
+            str(e),
+            exc_info=True
+        )
+
+        return {
+            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "errors": [
+                {
+                    "field": "server",
+                    "message": str(e)
+                }
+            ]
+        }
+
     finally:
         db.close()
 
 def model_version(model_id):
+    db = SessionLocal()
+
     try:
-        db = SessionLocal()
-        id = str(model_id)
-        model = db.query(AiModel).filter_by(ai_model_id=id, is_active=True).all()
+        validation_error = validate_model_version(model_id)
+
+        if validation_error:
+            return validation_error
+
+        model = (
+            db.query(AiModel)
+            .filter(
+                AiModel.ai_model_id == model_id,
+                AiModel.is_active == True
+            )
+            .first()
+        )
+
         if not model:
-            raise ValueError("No model found for the given model ID")
-        model_versions = db.query(AiModelversion).filter_by(ai_model_id=id, is_active=True).all()
+            return {
+                "status_code": status.HTTP_404_NOT_FOUND,
+                "errors": [
+                    {
+                        "field": "model_id",
+                        "message": "No model found for the given model ID."
+                    }
+                ]
+            }
+
+        model_versions = (
+            db.query(AiModelversion)
+            .filter(
+                AiModelversion.ai_model_id == model_id,
+                AiModelversion.is_active == True
+            )
+            .all()
+        )
+
         if not model_versions:
-            raise ValueError("No model versions found for the given model ID")
+            return {
+                "status_code": status.HTTP_404_NOT_FOUND,
+                "errors": [
+                    {
+                        "field": "model_id",
+                        "message": "No model versions found for the given model ID."
+                    }
+                ]
+            }
+
         return {
             "status": status.HTTP_200_OK,
             "message": "Model versions retrieved successfully",
             "data": [
                 {
-                    "model_version_id": str(model_version.ai_model_version_id),
-                    "version_name": model_version.version_name,
+                    "model_version_id": str(version.ai_model_version_id),
+                    "version_name": version.version_name,
                 }
-                for model_version in model_versions
+                for version in model_versions
             ]
-        }             
+        }
+
     except Exception as e:
-        logger.warning("[model_version] Error: %s", str(e), exc_info=True)
-        raise ValueError(str(e))
+        logger.warning(
+            "[model_version] Error: %s",
+            str(e),
+            exc_info=True
+        )
+
+        return {
+            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "errors": [
+                {
+                    "field": "server",
+                    "message": str(e)
+                }
+            ]
+        }
+
     finally:
         db.close()
 
@@ -1453,6 +1799,14 @@ def model_version(model_id):
 # def model_config(payload, admin_id):
 def model_config(payload, admin_id):
     try:
+        validation_error = validate_model_config(
+            payload=payload,
+            admin_id=admin_id
+        )
+
+        if validation_error:
+            return validation_error
+
         db = SessionLocal()
         model_version_id = payload.get("model_version_id") 
         ai_model_id = payload.get("model_id") 
@@ -1460,24 +1814,59 @@ def model_config(payload, admin_id):
         version = payload.get("version") if payload.get("version") else None
         max_tokens = payload.get("max_tokens") if payload.get("max_tokens") else None
         temperature = payload.get("temperature") if payload.get("temperature") else None
-        if not admin_id:
-            raise ValueError("Admin ID must be provided")
         
         model = db.query(AiModel).filter_by(ai_model_id=ai_model_id, is_active=True).first()
         if not model:
-            raise ValueError("No model found for the given model ID")
+            return {
+                "status_code": status.HTTP_404_NOT_FOUND,
+                "errors": [
+                    {
+                        "field": "model_id",
+                        "message": "No model found for the given model ID."
+                    }
+                ]
+            }
 
         model_version = db.query(AiModelversion).filter_by(ai_model_version_id=model_version_id, is_active=True).first()
         if not model_version:
-            raise ValueError("No model version found for the given model version ID")
+            return {
+                "status_code": status.HTTP_404_NOT_FOUND,
+                "errors": [
+                    {
+                        "field": "model_version_id",
+                        "message": "No model version found for the given model version ID."
+                    }
+                ]
+            }
         
-        duplicate_config = db.query(AiModelConfig).filter_by(ai_model_version_id = model_version_id, ai_model_id = ai_model_id, apikey = apikey).first()
-        if duplicate_config:
-            raise ValueError("Model with APIKEY is already exist")
+        configs = db.query(AiModelConfig).filter(
+            AiModelConfig.ai_model_id == ai_model_id,
+            AiModelConfig.ai_model_version_id == model_version_id
+        ).all()
+
+        for config in configs:
+            if decrypt_data(config.apikey) == apikey:
+                return {
+                    "status_code": status.HTTP_409_CONFLICT,
+                    "errors": [
+                        {
+                            "field": "apikey",
+                            "message": "Model configuration with this API key already exists."
+                        }
+                    ]
+                }
         
         encrtyped_key = encrypt_data(apikey)
         if not encrtyped_key:
-            raise ValueError("Error encrypting API key")
+            return {
+                "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
+                "errors": [
+                    {
+                        "field": "apikey",
+                        "message": "Failed to encrypt API key."
+                    }
+                ]
+            }
         
         new_config = AiModelConfig(
             ai_model_version_id = model_version_id,
@@ -1514,12 +1903,22 @@ def model_config(payload, admin_id):
 def get_model(page, page_size, sort_by, sort_order, filter_column, filter_value, admin_id):
     db = SessionLocal()
     try:
+        validation_error = validate_get_model(
+            page=page,
+            page_size=page_size,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            filter_column=filter_column,
+            filter_value=filter_value,
+            admin_id=admin_id
+        )
+
+        if validation_error:
+            return validation_error
+        
         page = int(page)
         page_size = int(page_size)
         offset = (page - 1) * page_size
-
-        if not admin_id:
-            raise ValueError("Admin ID must be provided")
 
         # def _mask_apikey(raw_apikey):
         #     if not raw_apikey:
@@ -1608,8 +2007,6 @@ def get_model(page, page_size, sort_by, sort_order, filter_column, filter_value,
         if filter_column and filter_value:
             column = filterable_columns.get(filter_column)
 
-            if column is None:
-                raise ValueError(f"Invalid filter column: {filter_column}")
 
             if hasattr(column.type, "python_type") and column.type.python_type == str:
                 query = query.filter(column.ilike(f"%{filter_value}%"))
@@ -1644,10 +2041,20 @@ def get_model(page, page_size, sort_by, sort_order, filter_column, filter_value,
         total_record = query.count()
 
         if total_record == 0:
-            raise ValueError("No model config found for the given admin ID")
+            return {
+                "status": status.HTTP_200_OK,
+                "message": "No model config found",
+                "data": [],
+                "total_record": 0
+            }
 
         if offset >= total_record:
-            raise ValueError("Invalid page number")
+            return {
+                "status": status.HTTP_200_OK,
+                "message": "No model config found",
+                "data": [],
+                "total_record": total_record
+            }
 
         model_config = query.limit(page_size).offset(offset).all()
         data = []
@@ -1675,16 +2082,65 @@ def get_model(page, page_size, sort_by, sort_order, filter_column, filter_value,
         }
 
     except Exception as e:
-        logger.warning("[get_model] Error: %s", str(e), exc_info=True)
-        raise ValueError(str(e))
+        logger.warning(
+            "[get_model] Error: %s",
+            str(e),
+            exc_info=True
+        )
+
+        return {
+            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "errors": [
+                {
+                    "field": "server",
+                    "message": str(e)
+                }
+            ]
+        }
     finally:
         db.close()
 
 def toggle_model(model_config_id, admin_id):
     try:
+        validation_error = validate_toggle_model(
+            model_config_id=model_config_id,
+            admin_id=admin_id
+        )
+
+        if validation_error:
+            return validation_error
+        
         db = SessionLocal()
-        if not admin_id:
-            raise ValueError("Admin ID must be provided")
+
+        admin = db.query(Admin).filter(
+            Admin.admin_id == admin_id
+        ).first()
+
+        if not admin:
+            return {
+                "status_code": status.HTTP_403_FORBIDDEN,
+                "errors": [
+                    {
+                        "field": "admin_id",
+                        "message": "Admin not found."
+                    }
+                ]
+            }
+        
+        model_config = db.query(AiModelConfig).filter(
+            AiModelConfig.ai_model_config_id == model_config_id
+        ).first()
+
+        if not model_config:
+            return {
+                "status_code": status.HTTP_404_NOT_FOUND,
+                "errors": [
+                    {
+                        "field": "model_config_id",
+                        "message": "Model configuration not found."
+                    }
+                ]
+            }
         
         disable_all = db.query(AiModelConfig).filter(
             AiModelConfig.ai_model_config_id != model_config_id
@@ -1738,19 +2194,51 @@ def toggle_model(model_config_id, admin_id):
             "data": data
         }
     except Exception as e:
-        logger.warning("[enable/disable model] Error: %s", str(e), exc_info=True)
-        raise ValueError(str(e))
+        db.rollback()
+
+        logger.warning(
+            "[toggle_model] Error: %s",
+            str(e),
+            exc_info=True
+        )
+
+        return {
+            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "errors": [
+                {
+                    "field": "server",
+                    "message": str(e)
+                }
+            ]
+        }
     finally:
         db.close()
 
 def active_model(admin_id):
     try:
+
+        validation_error = validate_active_model(admin_id)
+
+        if validation_error:
+            return validation_error
+
         db = SessionLocal()
-        if not admin_id:
+        
+        admin = db.query(Admin).filter(
+            Admin.admin_id == admin_id
+        ).first()
+
+        if not admin:
             return {
-                "status": status.HTTP_401_UNAUTHORIZED,
-                "message": "Admin ID must be provided",
+                "status_code": status.HTTP_403_FORBIDDEN,
+                "errors": [
+                    {
+                        "field": "admin_id",
+                        "message": "Admin not found."
+                    }
+                ]
             }
+        
         active_model = (
             db.query(
                 func.json_build_object(
@@ -1780,6 +2268,18 @@ def active_model(admin_id):
             )
             .first()
         )
+
+        if not active_model:
+            return {
+                "status_code": status.HTTP_404_NOT_FOUND,
+                "errors": [
+                    {
+                        "field": "model",
+                        "message": "No active model found."
+                    }
+                ]
+            }
+
         masked_api_key = None
         if active_model and active_model[0]['apikey']:
             try:
@@ -1810,5 +2310,18 @@ def active_model(admin_id):
                 "is_active": active_model[0]['is_active']}   
         }
     except Exception as e:
-        logger.warning("[active_model] Error: %s", str(e), exc_info=True)
-        raise ValueError(str(e))
+        logger.warning(
+            "[active_model] Error: %s",
+            str(e),
+            exc_info=True
+        )
+
+        return {
+            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "errors": [
+                {
+                    "field": "server",
+                    "message": str(e)
+                }
+            ]
+        }

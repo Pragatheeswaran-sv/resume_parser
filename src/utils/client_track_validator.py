@@ -571,14 +571,6 @@ import re
 
 EMAIL_REGEX = r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$"
 
-VALID_INTERVIEW_STATUSES = {
-    "scheduled",
-    "in_progress",
-    "completed",
-    "rejected",
-    "cancelled",
-}
-
 VALID_STATUSES = {
     "scheduled",
     "cleared",
@@ -587,6 +579,33 @@ VALID_STATUSES = {
     "cancelled",
     "completed",
 }
+
+VALID_INTERVIEW_STATUSES = {
+    "scheduled",
+    "in_progress",
+    "completed",
+    "cleared",
+    "rejected",
+    "cancelled",
+}
+
+PAGINATION_VALIDATION = {
+    "page": {
+        "required": False,
+        "type": int,
+        "min": 1,
+        "default": 1,
+    },
+    "per_page": {
+        "required": False,
+        "type": int,
+        "min": 1,
+        "max": 100,
+        "default": 10,
+    }
+}
+
+VALID_SORT_ORDERS = {"asc", "desc"}
 
 def validate_required(value, field_name, display_name=None):
     display_name = display_name or field_name.replace("_", " ").title()
@@ -672,7 +691,6 @@ def validate_add_round(payload, user_name):
 
     round_name = payload.get("round_name")
 
-    # Required validation
     error = validate_required(
         round_name,
         "round_name",
@@ -682,13 +700,11 @@ def validate_add_round(payload, user_name):
     if error:
         errors.append(error)
 
-    # User validation
     error = validate_user(user_name)
 
     if error:
         errors.append(error)
 
-    # Round name validation
     if round_name:
 
         round_name = round_name.strip()
@@ -722,7 +738,6 @@ def validate_update_round(payload, round_id, user_name):
 
     round_name = payload.get("round_name")
 
-    # Round ID required
     error = validate_required(
         round_id,
         "round_id",
@@ -732,7 +747,6 @@ def validate_update_round(payload, round_id, user_name):
     if error:
         errors.append(error)
 
-    # Round ID UUID validation
     elif round_id:
         error = validate_uuid(
             round_id,
@@ -743,7 +757,6 @@ def validate_update_round(payload, round_id, user_name):
         if error:
             errors.append(error)
 
-    # Round name required
     error = validate_required(
         round_name,
         "round_name",
@@ -753,13 +766,11 @@ def validate_update_round(payload, round_id, user_name):
     if error:
         errors.append(error)
 
-    # User validation
     error = validate_user(user_name)
 
     if error:
         errors.append(error)
 
-    # Round name validation
     if round_name:
 
         round_name = round_name.strip()
@@ -852,16 +863,6 @@ def validate_modify_client(payload, client_id, user_name):
 
     return errors
 
-VALID_INTERVIEW_STATUSES = {
-    "scheduled",
-    "in_progress",
-    "completed",
-    "cleared",
-    "rejected",
-    "cancelled",
-}
-
-
 def validate_add_interview(payload, user_name):
     errors = []
 
@@ -871,7 +872,6 @@ def validate_add_interview(payload, user_name):
     status_value = payload.get("status")
     role = payload.get("role")
 
-    # Required field validations
     required_fields = {
         "resume_id": resume_id,
         "client_id": client_id,
@@ -891,13 +891,11 @@ def validate_add_interview(payload, user_name):
         if error:
             errors.append(error)
 
-    # User validation
     error = validate_user(user_name)
 
     if error:
         errors.append(error)
 
-    # UUID validations
     if resume_id:
 
         error = validate_uuid(
@@ -920,7 +918,6 @@ def validate_add_interview(payload, user_name):
         if error:
             errors.append(error)
 
-    # Experience validation
     if experience is not None:
 
         try:
@@ -950,7 +947,6 @@ def validate_add_interview(payload, user_name):
                 }
             )
 
-    # Role validation
     if role:
 
         role = role.strip()
@@ -971,7 +967,6 @@ def validate_add_interview(payload, user_name):
                 }
             )
 
-    # Status validation
     if (
         status_value
         and status_value.lower()
@@ -1000,7 +995,6 @@ def validate_add_interview_status(payload, user_name):
     status_value = payload.get("status")
     feedback = payload.get("feedback")
 
-    # Required fields
     required_fields = {
         "interview_id": interview_id,
         "round_id": round_id,
@@ -1021,7 +1015,6 @@ def validate_add_interview_status(payload, user_name):
                 }
             )
 
-    # User validation
     if not user_name or not str(user_name).strip():
         errors.append(
             {
@@ -1030,7 +1023,6 @@ def validate_add_interview_status(payload, user_name):
             }
         )
 
-    # UUID validation
     for field, value in {
         "interview_id": interview_id,
         "round_id": round_id,
@@ -1046,7 +1038,6 @@ def validate_add_interview_status(payload, user_name):
                     }
                 )
 
-    # Round number validation
     if round_no is not None:
 
         if not isinstance(round_no, str):
@@ -1081,7 +1072,6 @@ def validate_add_interview_status(payload, user_name):
                 }
             )
 
-    # Meeting URL validation
     if meeting_link:
         parsed = urlparse(str(meeting_link))
 
@@ -1093,33 +1083,28 @@ def validate_add_interview_status(payload, user_name):
                 }
             )
 
-    # Scheduled date validation
     if scheduled_date:
-        try:
-            if isinstance(scheduled_date, str):
-                interview_date = datetime.fromisoformat(
-                    scheduled_date.replace("Z", "+00:00")
-                )
-            else:
-                interview_date = scheduled_date
+            try:
+                if isinstance(scheduled_date, str):
+                    interview_date = datetime.strptime(
+                        scheduled_date,
+                        "%Y-%m-%d %H:%M:%S"
+                    )
+                else:
+                    interview_date = scheduled_date
 
-            if interview_date < datetime.now(interview_date.tzinfo):
-                errors.append(
-                    {
+                if interview_date < datetime.now():
+                    errors.append({
                         "field": "scheduled_date",
                         "message": "Interview date cannot be in the past.",
-                    }
-                )
+                    })
 
-        except Exception:
-            errors.append(
-                {
+            except ValueError:
+                errors.append({
                     "field": "scheduled_date",
-                    "message": "Scheduled date must be a valid datetime.",
-                }
-            )
+                    "message": "Scheduled date must be in format YYYY-MM-DD HH:MM:SS.",
+                })
 
-    # Status validation
     if status_value and status_value.lower() not in VALID_STATUSES:
         errors.append(
             {
@@ -1128,7 +1113,6 @@ def validate_add_interview_status(payload, user_name):
             }
         )
 
-    # Feedback validation
     if feedback and len(str(feedback)) > 2000:
         errors.append(
             {
@@ -1138,22 +1122,6 @@ def validate_add_interview_status(payload, user_name):
         )
 
     return errors
-
-PAGINATION_VALIDATION = {
-    "page": {
-        "required": False,
-        "type": int,
-        "min": 1,
-        "default": 1,
-    },
-    "per_page": {
-        "required": False,
-        "type": int,
-        "min": 1,
-        "max": 100,
-        "default": 10,
-    }
-}
 
 def validate_pagination(page, per_page):
     if page is not None and page < 1:
@@ -1177,7 +1145,7 @@ def validate_pagination(page, per_page):
     return None
 
 CLIENT_COLUMNS = {
-    "company",
+    "company_name",
     "contact_person",
     "email_address",
     "phone_number",
@@ -1225,8 +1193,6 @@ def validate_interview_columns(filter_column, sort_by):
         })
 
     return errors
-
-VALID_SORT_ORDERS = {"asc", "desc"}
 
 def validate_sort_order(sort_order):
     if sort_order and sort_order.lower() not in VALID_SORT_ORDERS:
