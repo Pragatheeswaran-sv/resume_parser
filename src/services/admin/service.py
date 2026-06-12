@@ -1452,6 +1452,7 @@ def trigger_extraction(user_id: Optional[str] = None) -> Dict[str, Any]:
         session.close()
 
 def new_job(payload, admin_id):
+    db =SessionLocal()
     try:
         payload = payload.dict()
 
@@ -1463,7 +1464,6 @@ def new_job(payload, admin_id):
         if validation_error:
             return validation_error
         
-        db =SessionLocal()
 
         admin = db.query(Admin).filter(
             Admin.admin_id == admin_id
@@ -1530,8 +1530,7 @@ def new_job(payload, admin_id):
         raise ValueError(str(e))
     finally:
         db.close()
-
-    
+ 
 def list_model():
     db = SessionLocal()
 

@@ -311,6 +311,8 @@
 
 #     return None
 
+from datetime import datetime
+
 from fastapi import status
 from uuid import UUID
 import re
@@ -318,13 +320,11 @@ import re
 
 EMAIL_REGEX = r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$"
 
-
 def build_error(field, message):
     return {
         "field": field,
         "message": message
     }
-
 
 def validation_response(errors):
     if errors:
@@ -333,7 +333,6 @@ def validation_response(errors):
             "errors": errors
         }
     return None
-
 
 def validate_uuid(value, field_name, errors):
     if not value:
@@ -345,7 +344,6 @@ def validate_uuid(value, field_name, errors):
     except (ValueError, TypeError):
         errors.append(build_error(field_name, f"Invalid {field_name.replace('_', ' ').title()} format."))
 
-
 def validate_email(email, errors):
     if not email or not str(email).strip():
         errors.append(build_error("email", "Email is required."))
@@ -353,7 +351,6 @@ def validate_email(email, errors):
 
     if not re.match(EMAIL_REGEX, email):
         errors.append(build_error("email", "Invalid email format."))
-
 
 def validate_phone(phone, errors):
     if not phone or not str(phone).strip():
@@ -432,29 +429,29 @@ def validate_list_user(
     validate_positive_integer(page, "page", errors)
     validate_positive_integer(page_size, "page_size", errors)
 
-    allowed_sort_columns = {
+    allowed_columns = {
         "name",
         "email",
         "phone_number",
         "created_at",
         "updated_at"
     }
-
-    if sort_by and sort_by not in allowed_sort_columns:
-        errors.append(
-            build_error(
-                "sort_by",
-                f"Sort by must be one of {', '.join(allowed_sort_columns)}."
+    if sort_by:
+        if sort_by not in allowed_columns:
+            errors.append(
+                build_error(
+                    "sort_by",
+                    f"Sort by must be one of {', '.join(allowed_columns)}."
+                )
             )
-        )
 
-    if sort_order and sort_order.lower() not in {"asc", "desc"}:
-        errors.append(
-            build_error(
-                "sort_order",
-                "Sort order must be either 'asc' or 'desc'."
+        if sort_order and sort_order.lower() not in {"asc", "desc"}:
+            errors.append(
+                build_error(
+                    "sort_order",
+                    "Sort order must be either 'asc' or 'desc'."
+                )
             )
-        )
 
     allowed_filter_columns = {
         "name",
@@ -463,23 +460,24 @@ def validate_list_user(
         "is_blocked"
     }
 
-    if filter_column and filter_column not in allowed_filter_columns:
-        errors.append(
-            build_error(
-                "filter_column",
-                f"Filter column must be one of {', '.join(allowed_filter_columns)}."
+    if filter_column:
+        if filter_column not in allowed_filter_columns:
+            errors.append(
+                build_error(
+                    "filter_column",
+                    f"Filter column must be one of {', '.join(allowed_filter_columns)}."
+                )
             )
-        )
 
-    if filter_column and not filter_value:
-        errors.append(
-            build_error(
-                "filter_value",
-                "Filter value is required when filter column is provided."
+        if filter_value is None or str(filter_value).strip() == "":
+            errors.append(
+                build_error(
+                    "filter_value",
+                    "Filter value is required when filter column is provided."
+                )
             )
-        )
 
-    if filter_value and not filter_column:
+    elif filter_value:
         errors.append(
             build_error(
                 "filter_column",
@@ -625,75 +623,125 @@ def validate_new_job(payload, admin_id):
     schedule_type = payload.get("schedule_type")
     weekday = payload.get("weekday")
 
-    # interval_minutes
-    if interval_minutes is not None:
-        try:
-            interval_minutes = int(interval_minutes)
+    allowed_schedule_types = ["hourly", "daily", "weekly"]
 
-            if interval_minutes <= 0:
-                errors.append({
-                    "field": "interval_minutes",
-                    "message": "Interval minutes must be greater than 0."
-                })
+    if not schedule_type:
+        errors.append({
+            "field": "schedule_type",
+            "message": "Schedule type is required."
+        })
+    elif schedule_type not in allowed_schedule_types:
+        errors.append({
+            "field": "schedule_type",
+            "message": f"schedule_type must be one of {allowed_schedule_types}."
+        })
 
-        except (ValueError, TypeError):
-            errors.append({
-                "field": "interval_minutes",
-                "message": "Interval minutes must be a valid integer."
-            })
-
-    # is_paused
     if is_paused is not None and not isinstance(is_paused, bool):
         errors.append({
             "field": "is_paused",
             "message": "is_paused must be true or false."
         })
 
-    # window_enabled
     if window_enabled is not None and not isinstance(window_enabled, bool):
         errors.append({
             "field": "window_enabled",
             "message": "window_enabled must be true or false."
         })
 
-    # window_start_time required
-    if window_enabled is True and not window_start_time:
-        errors.append({
-            "field": "window_start_time",
-            "message": "window_start_time is required when window is enabled."
-        })
+    if schedule_type == "hourly":
 
-    # schedule_type
-    allowed_schedule_types = ["daily", "weekly"]
+        if weekday or window_start_time:
+            errors.append({
+                "field": "schedule_type",
+                "message": "For hourly schedule, weekday and window_start_time are not allowed."
+            })
 
-    if schedule_type and schedule_type not in allowed_schedule_types:
-        errors.append({
-            "field": "schedule_type",
-            "message": f"schedule_type must be one of {allowed_schedule_types}."
-        })
+        if interval_minutes is None:
+            errors.append({
+                "field": "interval_minutes",
+                "message": "interval_minutes is required for hourly schedule."
+            })
+        else:
+            try:
+                interval_minutes = int(interval_minutes)
 
-    # weekday required
-    if schedule_type == "weekly" and not weekday:
-        errors.append({
-            "field": "weekday",
-            "message": "weekday is required for weekly schedule."
-        })
+                if interval_minutes <= 0:
+                    errors.append({
+                        "field": "interval_minutes",
+                        "message": "interval_minutes must be greater than 0."
+                    })
 
-    allowed_weekdays = [
-        "monday",
-        "tuesday",
-        "wednesday",
-        "thursday",
-        "friday",
-        "saturday",
-        "sunday"
-    ]
+            except (ValueError, TypeError):
+                errors.append({
+                    "field": "interval_minutes",
+                    "message": "interval_minutes must be a valid integer."
+                })
 
-    if weekday and weekday.lower() not in allowed_weekdays:
-        errors.append({
-            "field": "weekday",
-            "message": f"weekday must be one of {allowed_weekdays}."
-        })
+    elif schedule_type == "daily":
+
+        if weekday or window_start_time:
+            errors.append({
+                "field": "schedule_type",
+                "message": "For daily schedule, weekday are not allowed."
+            })
+
+        if not window_start_time:
+            errors.append({
+                "field": "window_start_time",
+                "message": "window_start_time is required for daily schedule."
+            })
+        else:
+            try:
+                datetime.strptime(
+                    str(window_start_time),
+                    "%H:%M:%S"
+                )
+            except ValueError:
+                errors.append({
+                    "field": "window_start_time",
+                    "message": "Time must be in HH:MM:SS format."
+                })
+
+    elif schedule_type == "weekly":
+
+        allowed_weekdays = [
+            "monday",
+            "tuesday",
+            "wednesday",
+            "thursday",
+            "friday",
+            "saturday",
+            "sunday"
+        ]
+
+        if not weekday:
+            errors.append({
+                "field": "weekday",
+                "message": "weekday is required for weekly schedule."
+            })
+
+        elif weekday.lower() not in allowed_weekdays:
+            errors.append({
+                "field": "weekday",
+                "message": f"weekday must be one of {allowed_weekdays}."
+            })
+
+        if not window_start_time:
+            errors.append({
+                "field": "window_start_time",
+                "message": "window_start_time is required for weekly schedule."
+            })
+        else:
+            try:
+                datetime.strptime(
+                    str(window_start_time),
+                    "%H:%M:%S"
+                )
+            except ValueError:
+                errors.append({
+                    "field": "window_start_time",
+                    "message": "Time must be in HH:MM:SS format."
+                })
 
     if errors:
         return {
@@ -702,7 +750,6 @@ def validate_new_job(payload, admin_id):
         }
 
     return None
-
 
 def validate_alpha(value, field_name, errors):
     if value and not re.fullmatch(r"[A-Za-z ]+", str(value).strip()):
@@ -725,7 +772,6 @@ def validate_create_model(payload):
     model_name = payload.get("model_name")
     version_name = payload.get("version_name")
 
-    # Required Validation
     if not model_name or not str(model_name).strip():
         errors.append({
             "field": "model_name",
@@ -811,23 +857,18 @@ def validate_model_config(payload, admin_id):
     max_tokens = payload.get("max_tokens")
     temperature = payload.get("temperature")
 
-    # Admin ID
     validate_uuid(admin_id, "admin_id", errors)
 
-    # Model ID
     validate_uuid(model_id, "model_id", errors)
 
-    # Model Version ID
     validate_uuid(model_version_id, "model_version_id", errors)
 
-    # API Key
     if not apikey or not str(apikey).strip():
         errors.append({
             "field": "apikey",
             "message": "API key is required."
         })
 
-    # Max Tokens
     if max_tokens is not None:
         try:
             max_tokens = int(max_tokens)
@@ -844,7 +885,6 @@ def validate_model_config(payload, admin_id):
                 "message": "Max tokens must be a valid integer."
             })
 
-    # Temperature
     if temperature is not None:
         try:
             temperature = float(temperature)

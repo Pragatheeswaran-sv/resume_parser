@@ -125,11 +125,11 @@ class Validate_new_job(BaseModel):
     interval_minutes: int
     is_paused: bool
     window_enabled: bool
-    window_start_time: str
+    window_start_time: str | None = None
     # window_end_time: str
     # window_timezone: Optional[str]
     schedule_type: str
-    weekday: str
+    weekday: str | None = None
 
 class CreateModelValidate(BaseModel):
     model_name : str

@@ -1,13 +1,11 @@
 from typing import Any, Dict, List, Optional
 import logging
-import datetime
-from datetime import timezone
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 from src.candidate.models import Candidate
 from src.resume_filter.models import Resume
 from src.auth.models import OauthCredentials
-from datetime import timezone
+from datetime import datetime
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from db.connection import SessionLocal
@@ -234,7 +232,6 @@ def update_round(payload, round_id, user_name):
                 ],
             }
 
-        # Check duplicate round name
         existing_round = (
             db.query(InterviewRounds)
             .filter(
@@ -301,7 +298,6 @@ def delete_round(round_id, user_name):
 
         errors = []
 
-        # Round ID validation
         error = validate_required(
             round_id,
             "round_id",
@@ -321,7 +317,6 @@ def delete_round(round_id, user_name):
             if error:
                 errors.append(error)
 
-        # User validation
         error = validate_user(user_name)
 
         if error:
@@ -353,7 +348,6 @@ def delete_round(round_id, user_name):
                 ],
             }
 
-        # Business Validation
         active_interviews = (
             db.query(InterviewStatus)
             .filter(
@@ -473,7 +467,6 @@ def view_clients(page, page_size, filter_column, filter_by, sort_by, sort_order)
 
         total_count = query.count()
 
-        # Pagination
         if page and page_size:
             offset = (page - 1) * page_size
 
@@ -553,7 +546,6 @@ def add_client(payload, user_name):
         email_address = payload.get("email_address").strip().lower()
         phone_number = str(payload.get("phone_number")).strip()
 
-        # Duplicate validation
         existing_client = (
             db.query(Clients)
             .filter(
@@ -702,7 +694,6 @@ def modify_client(payload, client_id, user_name):
             client.phone_number,
         )
 
-        # No changes detected
         if (
             client.company_name == company_name
             and client.contact_person == contact_person
@@ -720,7 +711,6 @@ def modify_client(payload, client_id, user_name):
                 ],
             }
 
-        # Duplicate company/email validation
         duplicate_client = (
             db.query(Clients)
             .filter(
@@ -794,7 +784,6 @@ def remove_client(client_id, user_name):
 
         errors = []
 
-        # Client ID required validation
         error = validate_required(
             client_id,
             "client_id",
@@ -804,7 +793,6 @@ def remove_client(client_id, user_name):
         if error:
             errors.append(error)
 
-        # Client ID UUID validation
         elif client_id:
             error = validate_uuid(
                 client_id,
@@ -815,7 +803,6 @@ def remove_client(client_id, user_name):
             if error:
                 errors.append(error)
 
-        # User validation
         error = validate_user(user_name)
 
         if error:
@@ -847,7 +834,6 @@ def remove_client(client_id, user_name):
                 ],
             }
 
-        # Business Validation
         active_interviews = (
             db.query(CandidateInterviews)
             .filter(
@@ -960,7 +946,6 @@ def view_interviews(page, page_size, filter_column, filter_by, sort_by, sort_ord
             "created_at": CandidateInterviews.created_at,
         }
 
-        # Filtering
         if filter_column and filter_by:
             column = column_map.get(filter_column)
 
@@ -969,7 +954,6 @@ def view_interviews(page, page_size, filter_column, filter_by, sort_by, sort_ord
                     column.ilike(f"%{filter_by}%")
                 )
 
-        # Sorting
         if sort_by:
             column = column_map.get(sort_by)
 
@@ -985,7 +969,6 @@ def view_interviews(page, page_size, filter_column, filter_by, sort_by, sort_ord
 
         total_count = query.count()
 
-        # Pagination
         if page and page_size:
             offset = (page - 1) * page_size
             query = query.offset(offset).limit(page_size)
@@ -1069,7 +1052,6 @@ def add_interview(payload, user_name):
         status_value = payload.get("status")
         role = payload.get("role")
 
-        # Resume validation
         resume = (
             db.query(Resume)
             .filter(
@@ -1090,7 +1072,6 @@ def add_interview(payload, user_name):
                 ],
             }
 
-        # Duplicate interview validation
         existing_interview = (
             db.query(CandidateInterviews)
             .filter(
@@ -1167,7 +1148,6 @@ def remove_interview(interview_id, user_name):
     try:
         errors = []
 
-        # interview_id validation
         if not interview_id:
             errors.append({
                 "field": "interview_id",
@@ -1182,7 +1162,6 @@ def remove_interview(interview_id, user_name):
                     "message": "Interview ID must be a valid UUID.",
                 })
 
-        # user validation
         if not user_name or not str(user_name).strip():
             errors.append({
                 "field": "user_name",
@@ -1215,9 +1194,6 @@ def remove_interview(interview_id, user_name):
                 ],
             }
 
-        # Optional business rule:
-        # Prevent deletion if candidate already cleared/rejected
-
         if interview.status and interview.status.lower() in [
             "rejected",
             "cleared",
@@ -1237,7 +1213,6 @@ def remove_interview(interview_id, user_name):
 
         db.add(interview)
 
-        # Optional: deactivate all interview statuses
         db.query(InterviewStatus).filter(
             InterviewStatus.interview_id == interview_id,
             InterviewStatus.is_active.is_(True),
@@ -1426,7 +1401,6 @@ def add_interview_status(payload, user_name):
             .first()
         )
 
-        # Check duplicate round_id
         existing_round_id = (
             db.query(InterviewStatus)
             .filter(
@@ -1437,7 +1411,6 @@ def add_interview_status(payload, user_name):
             .first()
         )
 
-        # Check duplicate round_no
         existing_round_no = (
             db.query(InterviewStatus)
             .filter(
@@ -1556,7 +1529,6 @@ def modify_interview_status(payload, interview_status_id, user_name):
     try:
         errors = []
 
-        # interview_status_id validation
         if not interview_status_id:
             errors.append({
                 "field": "interview_status_id",
@@ -1571,14 +1543,12 @@ def modify_interview_status(payload, interview_status_id, user_name):
                     "message": "Interview status ID must be a valid UUID.",
                 })
 
-        # user_name validation
         if not user_name or not str(user_name).strip():
             errors.append({
                 "field": "user_name",
                 "message": "User name is required.",
             })
 
-        # payload validations
         feedback = payload.get("feedback")
         scheduled_date = payload.get("scheduled_date")
         meeting_link = payload.get("meeting_link")
@@ -1601,22 +1571,23 @@ def modify_interview_status(payload, interview_status_id, user_name):
         if scheduled_date:
             try:
                 if isinstance(scheduled_date, str):
-                    interview_date = datetime.fromisoformat(
-                        scheduled_date.replace("Z", "+00:00")
+                    interview_date = datetime.strptime(
+                        scheduled_date,
+                        "%Y-%m-%d %H:%M:%S"
                     )
                 else:
                     interview_date = scheduled_date
 
-                if interview_date < datetime.now(interview_date.tzinfo):
+                if interview_date < datetime.now():
                     errors.append({
                         "field": "scheduled_date",
                         "message": "Interview date cannot be in the past.",
                     })
 
-            except Exception:
+            except ValueError:
                 errors.append({
                     "field": "scheduled_date",
-                    "message": "Scheduled date must be a valid datetime.",
+                    "message": "Scheduled date must be in format YYYY-MM-DD HH:MM:SS.",
                 })
 
         if status_value and status_value.lower() not in VALID_STATUSES:
@@ -1687,7 +1658,6 @@ def modify_interview_status(payload, interview_status_id, user_name):
             interview_status.status,
         )
 
-        # No changes check
         if (
             interview_status.scheduled_date == scheduled_date
             and interview_status.meeting_link == meeting_link
