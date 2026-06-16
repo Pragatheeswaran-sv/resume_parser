@@ -15,7 +15,7 @@ from sqlalchemy import asc, desc
 
 from db.connection import SessionLocal
 from src.resume_share.models import EmailProviderConfig, EmailTemplate
-from src.utils.response import serialize_response
+from src.utils.response import internal_server_error_response, serialize_response, error_response, not_found_response
 
 logger = logging.getLogger(__name__)
 
@@ -46,12 +46,16 @@ def create_email_provider_config(payload: dict) -> Dict[str, Any]:
         errors = []
 
         if not isinstance(payload, dict):
-            return {
-                "status_code": 400,
-                "errors": [
+            return error_response(
+                400, [
                     {"field": "payload", "message": "Payload must be a dictionary"}
-                ],
-            }
+                ])
+            # return {
+            #     "status_code": 400,
+            #     "errors": [
+            #         {"field": "payload", "message": "Payload must be a dictionary"}
+            #     ],
+            # }
 
         provider_name = (payload.get("provider_name") or "").strip()
         from_email = (payload.get("from_email") or "").strip()
@@ -117,10 +121,11 @@ def create_email_provider_config(payload: dict) -> Dict[str, Any]:
                     })
 
         if errors:
-            return {
-                "status_code": 400,
-                "errors": errors
-            }
+            return error_response(400, errors)
+            # return {
+            #     "status_code": 400,
+            #     "errors": errors
+            # }
         
         duplicate = (
             session.query(EmailProviderConfig)
@@ -132,15 +137,20 @@ def create_email_provider_config(payload: dict) -> Dict[str, Any]:
         )
 
         if duplicate:
-            return {
-                "status_code": status.HTTP_409_CONFLICT,
-                "errors": [
-                    {
+            return error_response(
+                409, [{
                         "field": "provider_name",
                         "message": f"Provider '{from_email}' already exists"
-                    }
-                ]
-            }
+                        }])
+            # return {
+            #     "status_code": status.HTTP_409_CONFLICT,
+            #     "errors": [
+            #         {
+            #             "field": "provider_name",
+            #             "message": f"Provider '{from_email}' already exists"
+            #         }
+            #     ]
+            # }
 
         if is_active:
             session.query(EmailProviderConfig).filter(
@@ -185,15 +195,16 @@ def create_email_provider_config(payload: dict) -> Dict[str, Any]:
             exc_info=True
         )
 
-        return {
-            "status_code": 500,
-            "errors": [
-                {
-                    "field": "server",
-                    "message": str(e)
-                }
-            ]
-        }
+        return internal_server_error_response(str(e))
+        # return {
+        #     "status_code": 500,
+        #     "errors": [
+        #         {
+        #             "field": "server",
+        #             "message": str(e)
+        #         }
+        #     ]
+        # }
 
     finally:
         session.close()
@@ -301,10 +312,11 @@ def list_email_provider_configs(
         # =========================
 
         if errors:
-            return {
-                "status_code": status.HTTP_400_BAD_REQUEST,
-                "errors": errors
-            }
+            return error_response(400, errors)
+            # return {
+            #     "status_code": status.HTTP_400_BAD_REQUEST,
+            #     "errors": errors
+            # }
 
         # =========================
         # Base Query
@@ -360,15 +372,16 @@ def list_email_provider_configs(
         )
 
         if not configs:
-            return {
-                "status": status.HTTP_404_NOT_FOUND,
-                "errors": [
-                    {
-                        "field": "email_provider_congigs",
-                        "message": "No data found"
-                    }
-                ]
-            }
+            return not_found_response("email_provider_congigs", "No data found")
+            # return {
+            #     "status": status.HTTP_404_NOT_FOUND,
+            #     "errors": [
+            #         {
+            #             "field": "email_provider_congigs",
+            #             "message": "No data found"
+            #         }
+            #     ]
+            # }
         
         
         # =========================
@@ -397,15 +410,7 @@ def list_email_provider_configs(
             exc_info=True
         )
 
-        return {
-            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "errors": [
-                {
-                    "field": "server",
-                    "message": str(e)
-                }
-            ]
-        }
+        return internal_server_error_response(str(e))
 
     finally:
         session.close()
@@ -417,7 +422,8 @@ def get_email_provider_config(config_id: str) -> Dict[str, Any]:
             EmailProviderConfig.id == config_id
         ).first()
         if not config:
-            raise ValueError("Email provider config not found")
+            # raise ValueError("Email provider config not found")
+            return not_found_response("config_id", "Email provider config not found")
 
         return {
             "status": status.HTTP_200_OK,
@@ -428,7 +434,8 @@ def get_email_provider_config(config_id: str) -> Dict[str, Any]:
         raise
     except Exception as e:
         logger.error("[get_email_provider_config] Error: %s", str(e), exc_info=True)
-        raise ValueError(str(e))
+        # raise ValueError(str(e))
+        return internal_server_error_response(str(e))
     finally:
         session.close()
 
@@ -446,21 +453,27 @@ def update_email_provider_config(config_id: str, payload: dict) -> Dict[str, Any
             })
 
         if not isinstance(payload, dict):
-            return {
-                "status_code": status.HTTP_400_BAD_REQUEST,
-                "errors": [
-                    {
+            return error_response(
+                400, [{
                         "field": "payload",
                         "message": "Payload must be a dictionary"
-                    }
-                ]
-            }
+                    }])
+            # return {
+            #     "status_code": status.HTTP_400_BAD_REQUEST,
+            #     "errors": [
+            #         {
+            #             "field": "payload",
+            #             "message": "Payload must be a dictionary"
+            #         }
+            #     ]
+            # }
 
         if errors:
-            return {
-                "status_code": status.HTTP_400_BAD_REQUEST,
-                "errors": errors
-            }
+            return error_response(400, errors)
+            # return {
+            #     "status_code": status.HTTP_400_BAD_REQUEST,
+            #     "errors": errors
+            # }
 
         config = (
             session.query(EmailProviderConfig)
@@ -469,15 +482,16 @@ def update_email_provider_config(config_id: str, payload: dict) -> Dict[str, Any
         )
 
         if not config:
-            return {
-                "status_code": status.HTTP_404_NOT_FOUND,
-                "errors": [
-                    {
-                        "field": "config_id",
-                        "message": "Email provider config not found"
-                    }
-                ]
-            }
+            return not_found_response("config_id", "Email provider config not found")
+            # return {
+            #     "status_code": status.HTTP_404_NOT_FOUND,
+            #     "errors": [
+            #         {
+            #             "field": "config_id",
+            #             "message": "Email provider config not found"
+            #         }
+            #     ]
+            # }
 
         provider_name = payload.get("provider_name")
 
@@ -571,10 +585,11 @@ def update_email_provider_config(config_id: str, payload: dict) -> Dict[str, Any
             })
 
         if errors:
-            return {
-                "status_code": status.HTTP_400_BAD_REQUEST,
-                "errors": errors
-            }
+            return error_response(400, errors)
+            # return {
+            #     "status_code": status.HTTP_400_BAD_REQUEST,
+            #     "errors": errors
+            # }
 
         if provider_name is not None:
             config.provider_name = provider_name.strip()
@@ -635,15 +650,7 @@ def update_email_provider_config(config_id: str, payload: dict) -> Dict[str, Any
             exc_info=True,
         )
 
-        return {
-            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "errors": [
-                {
-                    "field": "server",
-                    "message": str(e)
-                }
-            ]
-        }
+        return internal_server_error_response(str(e))
 
     finally:
         session.close()
@@ -656,7 +663,8 @@ def delete_email_provider_config(config_id: str) -> Dict[str, Any]:
             EmailProviderConfig.id == config_id
         ).first()
         if not config:
-            raise ValueError("Email provider config not found")
+            # raise ValueError("Email provider config not found")
+            return not_found_response("config_id", "Email provider config not found")
 
         session.delete(config)
         session.commit()
@@ -671,7 +679,7 @@ def delete_email_provider_config(config_id: str) -> Dict[str, Any]:
     except Exception as e:
         session.rollback()
         logger.error("[delete_email_provider_config] Error: %s", str(e), exc_info=True)
-        raise ValueError(str(e))
+        return internal_server_error_response(str(e))
     finally:
         session.close()
 
@@ -695,15 +703,20 @@ def create_email_template(payload: dict) -> Dict[str, Any]:
         errors = []
 
         if not isinstance(payload, dict):
-            return {
-                "status_code": status.HTTP_400_BAD_REQUEST,
-                "errors": [
-                    {
+            # return {
+            #     "status_code": status.HTTP_400_BAD_REQUEST,
+            #     "errors": [
+            #         {
+            #             "field": "payload",
+            #             "message": "Payload must be a dictionary"
+            #         }
+            #     ]
+            # }
+            return error_response(
+                400, [{
                         "field": "payload",
                         "message": "Payload must be a dictionary"
-                    }
-                ]
-            }
+                    }])
 
         template_name = (payload.get("template_name") or "").strip()
         body = (payload.get("body") or "").strip()
@@ -735,10 +748,12 @@ def create_email_template(payload: dict) -> Dict[str, Any]:
             })
 
         if errors:
-            return {
-                "status_code": status.HTTP_400_BAD_REQUEST,
-                "errors": errors
-            }
+            return error_response(400, errors)
+        #     return {
+        #         "status_code": status.HTTP_400_BAD_REQUEST,
+        #         "errors": errors
+        #     }
+            
 
         duplicate = (
             session.query(EmailTemplate)
@@ -747,15 +762,20 @@ def create_email_template(payload: dict) -> Dict[str, Any]:
         )
 
         if duplicate:
-            return {
-                "status_code": status.HTTP_409_CONFLICT,
-                "errors": [
-                    {
+            return error_response(
+                409, [{
                         "field": "template_name",
                         "message": f"Template with name '{template_name}' already exists"
-                    }
-                ]
-            }
+                    }])
+            # return {
+            #     "status_code": status.HTTP_409_CONFLICT,
+            #     "errors": [
+            #         {
+            #             "field": "template_name",
+            #             "message": f"Template with name '{template_name}' already exists"
+            #         }
+            #     ]
+            # }
 
         new_template = EmailTemplate(
             template_name=template_name,
@@ -788,15 +808,7 @@ def create_email_template(payload: dict) -> Dict[str, Any]:
             exc_info=True
         )
 
-        return {
-            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "errors": [
-                {
-                    "field": "server",
-                    "message": str(e)
-                }
-            ]
-        }
+        return internal_server_error_response(str(e))
 
     finally:
         session.close()
@@ -814,7 +826,7 @@ def list_email_templates() -> Dict[str, Any]:
         }
     except Exception as e:
         logger.error("[list_email_templates] Error: %s", str(e), exc_info=True)
-        raise ValueError(str(e))
+        return internal_server_error_response(str(e))
     finally:
         session.close()
 
@@ -826,7 +838,8 @@ def get_email_template(template_id: str) -> Dict[str, Any]:
             EmailTemplate.id == template_id
         ).first()
         if not template:
-            raise ValueError("Email template not found")
+            # raise ValueError("Email template not found")
+            return not_found_response("template_id", "Email template not found")
 
         return {
             "status": status.HTTP_200_OK,
@@ -837,7 +850,7 @@ def get_email_template(template_id: str) -> Dict[str, Any]:
         raise
     except Exception as e:
         logger.error("[get_email_template] Error: %s", str(e), exc_info=True)
-        raise ValueError(str(e))
+        return internal_server_error_response(str(e))
     finally:
         session.close()
 
@@ -855,21 +868,27 @@ def update_email_template(template_id: str, payload: dict) -> Dict[str, Any]:
             })
 
         if not isinstance(payload, dict):
-            return {
-                "status_code": status.HTTP_400_BAD_REQUEST,
-                "errors": [
-                    {
+            return error_response(
+                400, [{
                         "field": "payload",
                         "message": "Payload must be a dictionary"
-                    }
-                ]
-            }
+                    }])
+            # return {
+            #     "status_code": status.HTTP_400_BAD_REQUEST,
+            #     "errors": [
+            #         {
+            #             "field": "payload",
+            #             "message": "Payload must be a dictionary"
+            #         }
+            #     ]
+            # }
 
         if errors:
-            return {
-                "status_code": status.HTTP_400_BAD_REQUEST,
-                "errors": errors
-            }
+            # return {
+            #     "status_code": status.HTTP_400_BAD_REQUEST,
+            #     "errors": errors
+            # }
+            return error_response(400, errors)
 
         template = (
             session.query(EmailTemplate)
@@ -878,15 +897,16 @@ def update_email_template(template_id: str, payload: dict) -> Dict[str, Any]:
         )
 
         if not template:
-            return {
-                "status_code": status.HTTP_404_NOT_FOUND,
-                "errors": [
-                    {
-                        "field": "template_id",
-                        "message": "Email template not found"
-                    }
-                ]
-            }
+            # return {
+            #     "status_code": status.HTTP_404_NOT_FOUND,
+            #     "errors": [
+            #         {
+            #             "field": "template_id",
+            #             "message": "Email template not found"
+            #         }
+            #     ]
+            # }
+            return not_found_response("template_id", "Email template not found")
 
         if "template_name" in payload:
 
@@ -955,10 +975,11 @@ def update_email_template(template_id: str, payload: dict) -> Dict[str, Any]:
                 })
 
         if errors:
-            return {
-                "status_code": status.HTTP_400_BAD_REQUEST,
-                "errors": errors
-            }
+            # return {
+            #     "status_code": status.HTTP_400_BAD_REQUEST,
+            #     "errors": errors
+            # }
+            return error_response(400, errors)
 
         if "template_name" in payload:
             template.template_name = payload["template_name"].strip()
@@ -992,15 +1013,7 @@ def update_email_template(template_id: str, payload: dict) -> Dict[str, Any]:
             exc_info=True
         )
 
-        return {
-            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "errors": [
-                {
-                    "field": "server",
-                    "message": str(e)
-                }
-            ]
-        }
+        return internal_server_error_response(str(e))
 
     finally:
         session.close()
@@ -1013,10 +1026,12 @@ def delete_email_template(template_id: str) -> Dict[str, Any]:
             EmailTemplate.id == template_id
         ).first()
         if not template:
-            raise ValueError("Email template not found")
+            # raise ValueError("Email template not found")
+            return not_found_response("template_id", "Email template not found")
 
-        if template.template_name == "Resume Template":
-            raise ValueError("Cannot delete the default system template 'Resume Template'")
+        # if template.template_name == "Resume Template":
+            # raise ValueError("Cannot delete the default system template 'Resume Template'")
+            
 
         session.delete(template)
         session.commit()
@@ -1031,6 +1046,6 @@ def delete_email_template(template_id: str) -> Dict[str, Any]:
     except Exception as e:
         session.rollback()
         logger.error("[delete_email_template] Error: %s", str(e), exc_info=True)
-        raise ValueError(str(e))
+        return internal_server_error_response(str(e))
     finally:
         session.close()
