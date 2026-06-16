@@ -19,7 +19,7 @@ from src.resume_filter.models import Resume
 from src.email_reader.models import Attachment
 from src.resume_share.models import EmailNotification, EmailProviderConfig, EmailTemplate
 from src.services.resume_share.email_sender import send_email
-
+from src.utils.response import internal_server_error_response, serialize_response, error_response, not_found_response
 logger = logging.getLogger(__name__)
 
 ATTACHMENT_DIR = os.getenv("ATTACHMENT_DIR", "attachments")
@@ -36,7 +36,8 @@ def _fetch_candidate_details(db: Session, candidate_id: str) -> dict:
 	"""Return a dict of candidate fields; only populated values are included."""
 	candidate = db.query(Candidate).filter_by(candidate_id=candidate_id).first()
 	if not candidate:
-		raise ResumeShareError("Candidate not found", status_code=404)
+		# raise ResumeShareError("Candidate not found", status_code=404)
+		return not_found_response("candidate_id", "Candidate not found")
 
 	details = {}
 	if candidate.name:
@@ -99,21 +100,26 @@ def _fetch_resume_and_attachment(db: Session, resume_id: str, candidate_id: str)
 	"""Return (file_path, file_name, candidate_role) for the given resume."""
 	resume = db.query(Resume).filter_by(resume_id=resume_id).first()
 	if not resume:
-		raise ResumeShareError("Resume not found", status_code=404)
+		# raise ResumeShareError("Resume not found", status_code=404)
+		return not_found_response("resume_id", "Resume not found")
 
 	if str(resume.candidate_id) != str(candidate_id):
-		raise ResumeShareError("Resume does not belong to the specified candidate", status_code=400)
+		# raise ResumeShareError("Resume does not belong to the specified candidate", status_code=400)
+		return error_response(400, "Resume does not belong to the specified candidate")
 
 	if not resume.attachment_id:
-		raise ResumeShareError("Resume has no attached file", status_code=404)
+		# raise ResumeShareError("Resume has no attached file", status_code=404)
+		return not_found_response("attachment_id", "Resume has no attached file")
 
 	attachment = db.query(Attachment).filter_by(attachment_id=resume.attachment_id).first()
 	if not attachment:
-		raise ResumeShareError("Attachment record not found", status_code=404)
+		# raise ResumeShareError("Attachment record not found", status_code=404)
+		return not_found_response("attachment_id", "Attachment record not found")
 
 	file_path = os.path.join(ATTACHMENT_DIR, attachment.file_name)
 	if not os.path.exists(file_path):
-		raise ResumeShareError(f"Attachment file not found on disk: {attachment.file_name}", status_code=404)
+		# raise ResumeShareError(f"Attachment file not found on disk: {attachment.file_name}", status_code=404)
+		return not_found_response("attachment_id", f"Attachment file not found on disk: {attachment.file_name}")
 
 	return file_path, attachment.file_name, resume.candidate_role
 
@@ -176,7 +182,8 @@ def share_resume_via_email(
 
 		provider_config = db.query(EmailProviderConfig).filter_by(active=True).first()
 		if not provider_config:
-			raise ResumeShareError("No active email provider configuration found", status_code=400)
+			# raise ResumeShareError("No active email provider configuration found", status_code=400)
+			return error_response(400, "No active email provider configuration found")
 		logger.info("Email provider selected: %s", provider_config.provider_name)
 
 		candidate_details = _fetch_candidate_details(db, candidate_id)
@@ -189,7 +196,8 @@ def share_resume_via_email(
 
 		template = db.query(EmailTemplate).filter_by(template_name="Resume Template", is_active=True).first()
 		if not template:
-			raise ResumeShareError("Email template 'Resume Template' not found", status_code=404)
+			# raise ResumeShareError("Email template 'Resume Template' not found", status_code=404)
+			return not_found_response("template_name", "Email template 'Resume Template' not found")
 		logger.info("Template loaded: %s", template.template_name)
 
 		email_body = _render_template(template.body, candidate_details)
@@ -232,7 +240,8 @@ def share_resume_via_email(
 
 		if not result["success"]:
 			logger.error("Email send failed: %s", result["error"])
-			raise ResumeShareError(f"Email send failed: {result['error']}", status_code=500)
+			# raise ResumeShareError(f"Email send failed: {result['error']}", status_code=500)
+			return internal_server_error_response(f"Email send failed: {result['error']}")
 
 		logger.info("Email sent successfully: %s", result)
 		logger.info("Email sent successfully — message_id=%s", result["message_id"])

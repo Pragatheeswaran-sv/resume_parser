@@ -312,13 +312,17 @@
 #     return None
 
 from datetime import datetime
-
+from fastapi.responses import JSONResponse
 from fastapi import status
 from uuid import UUID
 import re
 
+from src.utils.response import error_response
+
 
 EMAIL_REGEX = r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$"
+ALPHA_REGEX = r"^[A-Za-z ]+$"
+ALPHA_COLUMNS = ["name"]
 
 def build_error(field, message):
     return {
@@ -328,10 +332,11 @@ def build_error(field, message):
 
 def validation_response(errors):
     if errors:
-        return {
-            "status_code": status.HTTP_400_BAD_REQUEST,
-            "errors": errors
-        }
+        # return JSONResponse({
+        #     "status_code": status.HTTP_400_BAD_REQUEST,
+        #     "errors": errors
+        # })
+        return error_response(400, errors)
     return None
 
 def validate_uuid(value, field_name, errors):
@@ -499,6 +504,13 @@ def validate_new_auth(payload, admin_id):
         )
 
     name = payload.get("name")
+    if "name" in ALPHA_COLUMNS:
+        if bool(re.match(ALPHA_REGEX, name)) == False:
+            # return JSONResponse({
+            #     "field": "name",
+            #     "message": f"{"Name"} should not allow numbers/special_characters."
+            # })
+            return error_response(400, f"{"Name"} should not allow numbers/special_characters.")
 
     if not name or not str(name).strip():
         errors.append(
@@ -562,6 +574,17 @@ def validate_update_user(payload, user_id, current_user_id, role):
                 "Name cannot be empty."
             )
         )
+    name = str(payload.get("name", "")).strip()
+    if "name" in ALPHA_COLUMNS and name != '':
+        
+        if bool(re.match(ALPHA_REGEX, name)) == False:
+            
+            errors.append(
+                build_error(
+                    "name",
+                    f"{"Name"} should not allow numbers/special_characters."
+                )
+            )
 
     old_password = payload.get("old_password")
     new_password = payload.get("new_password")
@@ -744,10 +767,11 @@ def validate_new_job(payload, admin_id):
                 })
 
     if errors:
-        return {
-            "status_code": status.HTTP_400_BAD_REQUEST,
-            "errors": errors
-        }
+        # return JSONResponse({
+        #     "status_code": status.HTTP_400_BAD_REQUEST,
+        #     "errors": errors
+        # })
+        return error_response(400, errors)
 
     return None
 
@@ -797,10 +821,11 @@ def validate_create_model(payload):
         )
 
     if errors:
-        return {
-            "status_code": status.HTTP_400_BAD_REQUEST,
-            "errors": errors
-        }
+        # return JSONResponse({
+        #     "status_code": status.HTTP_400_BAD_REQUEST,
+        #     "errors": errors
+        # })
+        return error_response(400, errors)
     return None
 
 def validate_create_model(payload):
@@ -834,10 +859,11 @@ def validate_create_model(payload):
         )
 
     if errors:
-        return {
-            "status_code": status.HTTP_400_BAD_REQUEST,
-            "errors": errors
-        }
+        # return JSONResponse({
+        #     "status_code": status.HTTP_400_BAD_REQUEST,
+        #     "errors": errors
+        # })
+        return error_response(400, errors)
 
     return None
 

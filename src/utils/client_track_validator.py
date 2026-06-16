@@ -606,24 +606,35 @@ PAGINATION_VALIDATION = {
 }
 
 VALID_SORT_ORDERS = {"asc", "desc"}
+# ALPHA_VALUR_COLUMN = ["company_name", "contact_person", "status", "candidate_name", "role", "round_name"]
+alpha_column = ["company_name", "contact_person", "status", "candidate_name", "role", "round_name"]
 
 def validate_required(value, field_name, display_name=None):
-    display_name = display_name or field_name.replace("_", " ").title()
-    if display_name == 'Round Name':
-        try:
-            data = int(value)
-            print(data)
-            if data:
-                return {
-                    "field": field_name,
-                    "message": f"{display_name} should not contain only numbers."
-                }
-        except Exception as e:
-            if not str(value).isalnum():
-                return {
-                    "field": field_name,
-                    "message": f"{display_name} should not contain special characters."
-                }
+    display_name = display_name or str(field_name).lower() #field_name.replace("_", " ").title()
+    pattern = r"^[A-Za-z ]+$"
+    if display_name in alpha_column:
+        
+        if bool(re.match(pattern, value)) == False:
+            return {
+                "field": field_name,
+                "message": f"{display_name} should not allow numbers/special_characters."
+            }
+    # print(display_name)
+    # if display_name in alpha_column:
+    #     try:
+    #         data = int(value)
+    #         print(data)
+    #         if data:
+    #             return {
+    #                 "field": field_name,
+    #                 "message": f"{display_name} should not contain only numbers."
+    #             }
+        # except Exception as e:
+        #     if not str(value).isalnum():
+        #         return {
+        #             "field": field_name,
+        #             "message": f"{display_name} should not contain special characters."
+        #         }
 
     if value is None:
         return {
@@ -704,7 +715,7 @@ def validate_user(user_name):
     return validate_required(
         user_name,
         "user_name",
-        "User Name"
+        # "User Name"
     )
 
 def validate_add_round(payload, user_name):
@@ -715,7 +726,7 @@ def validate_add_round(payload, user_name):
     error = validate_required(
         round_name,
         "round_name",
-        "Round Name"
+        # "Round Name"
     )
 
 
@@ -763,7 +774,7 @@ def validate_update_round(payload, round_id, user_name):
     error = validate_required(
         round_id,
         "round_id",
-        "Round ID",
+        # "Round ID",
     )
 
     if error:
@@ -782,7 +793,7 @@ def validate_update_round(payload, round_id, user_name):
     error = validate_required(
         round_name,
         "round_name",
-        "Round Name",
+        # "Round Name",
     )
 
     if error:
@@ -907,7 +918,7 @@ def validate_add_interview(payload, user_name):
         error = validate_required(
             value,
             field,
-            field.replace("_", " ").title()
+            # field.replace("_", " ").title()
         )
 
         if error:

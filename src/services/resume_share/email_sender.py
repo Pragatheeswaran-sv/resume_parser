@@ -7,6 +7,7 @@ from email.mime.base import MIMEBase
 from email import encoders
 from email.utils import make_msgid
 from typing import List, Optional
+from src.utils.response import internal_server_error_response, serialize_response, error_response, not_found_response
 
 logger = logging.getLogger(__name__)
 
@@ -45,20 +46,23 @@ def _send_smtp(config: dict, to_address: str, cc_address: Optional[List[str]],
 
         server.login(config["username"], config["password"])
     except smtplib.SMTPAuthenticationError:
-        return {
-            "success": False,
-            "error": "Invalid Gmail credentials or App Password required"
-        }
+        # return {
+        #     "success": False,
+        #     "error": "Invalid Gmail credentials or App Password required"
+        # }
+        return error_response(401, "Invalid Gmail credentials or App Password required")
     except smtplib.SMTPConnectError:
-        return {
-            "success": False,
-            "error": "SMTP server connection failed"
-        }
+        # return {
+        #     "success": False,
+        #     "error": "SMTP server connection failed"
+        # }
+        return internal_server_error_response("SMTP server connection failed")
     except Exception as e:
-        return {
-            "success": False,
-            "error": str(e)
-        }
+        # return {
+        #     "success": False,
+        #     "error": str(e)
+        # }
+        return internal_server_error_response(str(e))
 
     
     server.sendmail(config["from_email"], recipients, msg.as_string())

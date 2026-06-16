@@ -6,6 +6,7 @@ database session and raises ``ValueError`` on validation failures so the
 API layer can translate them into appropriate HTTP responses.
 """
 
+import re
 from typing import Any, Dict, List, Optional
 import logging
 import datetime
@@ -35,9 +36,11 @@ from fastapi import status
 from src.admin.models import Admin, AiModel, AiModelConfig, AiModelversion, Users
 from src.utils.helper import encrypt_data, decrypt_data
 from src.utils.admin_validation import validate_active_model, validate_create_model, validate_delete_user, validate_get_model, validate_get_user, validate_get_user_by_id, validate_list_user, validate_model_config, validate_model_version, validate_new_auth, validate_new_job, validate_toggle_model, validate_update_user
+from src.utils.response import error_response, internal_server_error_response, not_found_response
 
 load_dotenv()
 logger = logging.getLogger(__name__)
+
 
 
 def admin_check(email: str, password: str) -> Dict[str, Any]:
@@ -57,14 +60,17 @@ def admin_check(email: str, password: str) -> Dict[str, Any]:
     try:
         
         if email == "" or password == "" or not email or not password:
-            raise ValueError("Email and password must be provided")
+            # raise ValueError("Email and password must be provided")
+            return error_response(400, "Email and password must be provided")
 
         admin = session.query(Admin).filter_by(email_address=email).first()
         if not admin:
-            raise ValueError("Invalid email or password")
+            # raise ValueError("Invalid email or password")
+            return not_found_response("email", "user not found")
 
         if not admin.password or not verify_password(password, admin.password):
-            raise ValueError("Invalid email or password")
+            # raise ValueError("Invalid email or password")
+            return error_response(401, "Invalid email or password")
 
         token = create_access_token({
             "sub": str(admin.admin_id),
@@ -101,7 +107,7 @@ def admin_check(email: str, password: str) -> Dict[str, Any]:
     except Exception as e:
         session.rollback()
         logger.warning("[admin_check] Error: %s", str(e), exc_info=True)
-        raise ValueError(str(e))
+        return internal_server_error_response(e)
     finally:
         session.close()
 
@@ -110,11 +116,13 @@ def profile(admin_id):
     db = SessionLocal()
     try:
         if not admin_id:
-            raise ValueError("Admin ID must be provided")
+            # raise ValueError("Admin ID must be provided")
+            return error_response(400, "Admin ID must be provided")
         
         admin  = db.query(Admin).filter_by(admin_id = admin_id ).first()
         if not admin:
-            raise ValueError("Admin not found")
+            # raise ValueError("Admin not found")
+            return not_found_response("email", "Admin not found")
         return{
             "status": status.HTTP_200_OK,
             "message": "Admin profile retrieved successfully",
@@ -130,7 +138,7 @@ def profile(admin_id):
         raise
     except Exception as e:
         logger.warning("[admin_check] Error: %s", str(e), exc_info=True)
-        raise ValueError(str(e))
+        return internal_server_error_response(str(e))
     finally:
         db.close()
 
@@ -138,10 +146,10 @@ def update_admin_profile(admin_id, payload):
     db = SessionLocal()
     try:
         if not admin_id:
-            raise ValueError("Admin ID must be provided")
+            return error_response(400, "Admin ID must be provided")
         admin = db.query(Admin).filter_by(admin_id=admin_id).first()
         if not admin:
-            raise ValueError("Admin not found")
+            return not_found_response("email", "Admin not found")
 
         # ── Extract payload fields ───────────────────────
         name         = payload.get("name",         admin.name)
@@ -154,26 +162,32 @@ def update_admin_profile(admin_id, payload):
         has_password_change = bool(new_password)
 
         if not has_profile_changes and not has_password_change:
-            raise ValueError("No changes detected. Nothing to update")
+            # raise ValueError("No changes detected. Nothing to update")
+            return error_response(304, "No changes detected. Nothing to update")
 
         # ── Password change logic ────────────────────────
         if has_password_change:
             if not old_password:
-                raise ValueError("Old password is required to change password")
+                # raise ValueError("Old password is required to change password")
+                return error_response(400, "Old password is required to change password")
 
             if not admin.password:
-                raise ValueError("This account has no password. Use SSO login")
+                # raise ValueError("This account has no password. Use SSO login")
+                return error_response(400, "This account has no password. Use SSO login")
 
             if not verify_password(old_password, admin.password):
-                raise ValueError("Old password is incorrect")
+                # raise ValueError("Old password is incorrect")
+                return error_response(403, "Old password is incorrect")
 
             if verify_password(new_password, admin.password):
-                raise ValueError("New password must be different from the old password")
+                # raise ValueError("New password must be different from the old password")
+                return error_response(400, "New password must be different from the old password")
 
             admin.password = hash_password(new_password)   
 
         if old_password and not new_password:
-            raise ValueError("You provided old password but no new password")
+            # raise ValueError("You provided old password but no new password")
+            return error_response(400, "You provided old password but no new password")
 
         # ── Profile field update ─────────────────────────
         if has_profile_changes:
@@ -196,7 +210,7 @@ def update_admin_profile(admin_id, payload):
     except Exception as e:
         db.rollback()
         logger.warning("[update_admin_profile] Unexpected error: %s", str(e), exc_info=True)
-        raise ValueError(str(e))
+        return internal_server_error_response(str(e))
     finally:
         db.close()
 
@@ -231,17 +245,22 @@ def sso_user_login(
     session = SessionLocal()
     try:
         if not email or not email.strip():
-            raise ValueError("Email must be provided")
+            # raise ValueError("Email must be provided")
+            return error_response(400, "Email must be provided")
         email = email.strip().lower()
 
         normalized_provider: Optional[str] = None
         if provider:
             normalized_provider = provider.strip().lower()
             if normalized_provider not in SUPPORTED_SSO_PROVIDERS:
-                raise ValueError(
-                    f"Unsupported SSO provider: {provider}. "
+                # raise ValueError(
+                    # f"Unsupported SSO provider: {provider}. "
+                    # f"Supported providers: {', '.join(sorted(SUPPORTED_SSO_PROVIDERS))}"
+                # )
+                return error_response(
+                    400, f"Unsupported SSO provider: {provider}. "
                     f"Supported providers: {', '.join(sorted(SUPPORTED_SSO_PROVIDERS))}"
-                )
+                    )
 
         account = (
             session.query(Users)
@@ -253,7 +272,8 @@ def sso_user_login(
             .first()
         )
         if not account:
-            raise ValueError("Access denied: email not approved or account blocked")
+            # raise ValueError("Access denied: email not approved or account blocked")
+            return error_response(401, "Access denied: email not approved or account blocked")
 
         token_payload: Dict[str, Any] = {
             "sub": str(account.user_id),
@@ -296,7 +316,7 @@ def sso_user_login(
     except Exception as e:
         session.rollback()
         logger.warning("[sso_user_login] Error: %s", str(e), exc_info=True)
-        raise ValueError(str(e))
+        return internal_server_error_response(str(e))
     finally:
         session.close()
 
@@ -321,7 +341,7 @@ def rotate_refresh_token(raw_token: str) -> Dict[str, Any]:
     session = SessionLocal()
     try:
         if not raw_token or not raw_token.strip():
-            raise ValueError("Refresh token is required")
+            return error_response(400, "Refresh token is required")
 
         token_hash = hash_refresh_token(raw_token)
         stored = (
@@ -331,20 +351,23 @@ def rotate_refresh_token(raw_token: str) -> Dict[str, Any]:
         )
 
         if not stored:
-            raise ValueError("Invalid refresh token")
+            # raise ValueError("Invalid refresh token")
+            return error_response(400, "Invalid refresh token")
 
         if stored.is_revoked:
             session.query(RefreshToken).filter(
                 RefreshToken.family_id == stored.family_id
             ).update({"is_revoked": True})
             session.commit()
-            raise ValueError("Refresh token reuse detected — family revoked, please log in again")
+            # raise ValueError("Refresh token reuse detected — family revoked, please log in again")
+            return error_response(403, "Refresh token reuse detected — family revoked, please log in again")
 
         now_utc = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
         if stored.expires_at < now_utc:
             stored.is_revoked = True
             session.commit()
-            raise ValueError("Refresh token has expired — please log in again")
+            # raise ValueError("Refresh token has expired — please log in again")
+            return error_response(403, "Refresh token has expired — please log in again")
 
         stored.is_revoked = True
 
@@ -356,7 +379,8 @@ def rotate_refresh_token(raw_token: str) -> Dict[str, Any]:
             )
             if not account:
                 session.commit()
-                raise ValueError("Admin account not found or deactivated")
+                # raise ValueError("Admin account not found or deactivated")
+                return not_found_response("admin_id", "Admin account not found or deactivated")
             payload: Dict[str, Any] = {
                 "sub": str(account.admin_id),
                 "email": account.email_address,
@@ -374,7 +398,8 @@ def rotate_refresh_token(raw_token: str) -> Dict[str, Any]:
             )
             if not account:
                 session.commit()
-                raise ValueError("User account not found, blocked, or deactivated")
+                # raise ValueError("User account not found, blocked, or deactivated")
+                return not_found_response("user_id", "User account not found, blocked, or deactivated")
             payload = {
                 "sub": str(account.user_id),
                 "email": account.email_address,
@@ -408,7 +433,7 @@ def rotate_refresh_token(raw_token: str) -> Dict[str, Any]:
     except Exception as e:
         session.rollback()
         logger.warning("[rotate_refresh_token] Error: %s", str(e), exc_info=True)
-        raise ValueError(str(e))
+        return internal_server_error_response(str(e))
     finally:
         session.close()
 
@@ -428,7 +453,8 @@ def revoke_refresh_tokens(raw_token: str) -> Dict[str, Any]:
     session = SessionLocal()
     try:
         if not raw_token or not raw_token.strip():
-            raise ValueError("Refresh token is required")
+            # raise ValueError("Refresh token is required")
+            return (400, "Refresh token is required")
 
         token_hash = hash_refresh_token(raw_token)
         stored = (
@@ -438,7 +464,8 @@ def revoke_refresh_tokens(raw_token: str) -> Dict[str, Any]:
         )
 
         if not stored:
-            raise ValueError("Invalid refresh token")
+            # raise ValueError("Invalid refresh token")
+            return error_response(400, "Invalid refresh token")
 
         session.query(RefreshToken).filter(
             RefreshToken.family_id == stored.family_id
@@ -454,7 +481,7 @@ def revoke_refresh_tokens(raw_token: str) -> Dict[str, Any]:
     except Exception as e:
         session.rollback()
         logger.warning("[revoke_refresh_tokens] Error: %s", str(e), exc_info=True)
-        raise ValueError(str(e))
+        return internal_server_error_response(str(e))
     finally:
         session.close()
 
@@ -478,11 +505,13 @@ def new_admin(payload: dict) -> Dict[str, Any]:
         name = payload.get("name")
 
         if not email or not password:
-            raise ValueError("Email and password are required")
+            # raise ValueError("Email and password are required")
+            return error_response(400, "Email and password are required")
 
         admin = session.query(Admin).filter_by(email_address=email).first()
         if admin:
-            raise ValueError("Admin with this email already exists")
+            # raise ValueError("Admin with this email already exists")
+            return error_response(409, "Admin with this email already exists")
 
         new_admin_obj = Admin(
             name=name,
@@ -505,7 +534,7 @@ def new_admin(payload: dict) -> Dict[str, Any]:
     except Exception as e:
         session.rollback()
         logger.warning("[new_admin] Error: %s", str(e), exc_info=True)
-        raise ValueError(str(e))
+        return internal_server_error_response(str(e))
     finally:
         session.close()
 
@@ -555,22 +584,28 @@ def list_user(page, page_size, sort_by, sort_order, filter_column, filter_value)
         total_users = query.count()
 
         if total_users == 0:
-            return {
-                "status": status.HTTP_200_OK,
-                "message": "No users found",
-                "data": []
-            }
+            # return {
+            #     "status": status.HTTP_200_OK,
+            #     "message": "No users found",
+            #     "data": []
+            # }
+            return not_found_response("user_id", "No users found")
 
         if offset >= total_users:
-            return {
-                "status_code": status.HTTP_400_BAD_REQUEST,
-                "errors": [
-                    {
+            # return {
+            #     "status_code": status.HTTP_400_BAD_REQUEST,
+            #     "errors": [
+            #         {
+            #             "field": "page",
+            #             "message": "No data found for the requested page."
+            #         }
+            #     ]
+            # }
+            return error_response(
+                400, [{
                         "field": "page",
                         "message": "No data found for the requested page."
-                    }
-                ]
-            }
+                    }])
 
         sort_map = {
             "name": Users.name,
@@ -641,15 +676,16 @@ def list_user(page, page_size, sort_by, sort_order, filter_column, filter_value)
             exc_info=True
         )
 
-        return {
-            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "errors": [
-                {
-                    "field": "server",
-                    "message": str(e)
-                }
-            ]
-        }
+        # return {
+        #     "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
+        #     "errors": [
+        #         {
+        #             "field": "server",
+        #             "message": str(e)
+        #         }
+        #     ]
+        # }
+        return internal_server_error_response(str(e))
 
     finally:
         session.close()
@@ -668,15 +704,16 @@ def get_user(user_id):
         ).first()
 
         if not user:
-            return {
-                "status_code": status.HTTP_404_NOT_FOUND,
-                "errors": [
-                    {
-                        "field": "user_id",
-                        "message": "User not found."
-                    }
-                ]
-            }
+            # return {
+            #     "status_code": status.HTTP_404_NOT_FOUND,
+            #     "errors": [
+            #         {
+            #             "field": "user_id",
+            #             "message": "User not found."
+            #         }
+            #     ]
+            # }
+            return not_found_response("user_id", "User not found.")
 
         return {
             "status": status.HTTP_200_OK,
@@ -696,15 +733,16 @@ def get_user(user_id):
             exc_info=True
         )
 
-        return {
-            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "errors": [
-                {
-                    "field": "server",
-                    "message": str(e)
-                }
-            ]
-        }
+        # return {
+        #     "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
+        #     "errors": [
+        #         {
+        #             "field": "server",
+        #             "message": str(e)
+        #         }
+        #     ]
+        # }
+        return internal_server_error_response(str(e))
 
     finally:
         db.close()
@@ -726,15 +764,20 @@ def get_user_by_id(user_id, admin_id):
         ).first()
 
         if not admin:
-            return {
-                "status_code": status.HTTP_403_FORBIDDEN,
-                "errors": [
-                    {
+            # return {
+            #     "status_code": status.HTTP_403_FORBIDDEN,
+            #     "errors": [
+            #         {
+            #             "field": "admin_id",
+            #             "message": "User has no access to view user details."
+            #         }
+            #     ]
+            # }
+            return error_response(
+                403, [{
                         "field": "admin_id",
                         "message": "User has no access to view user details."
-                    }
-                ]
-            }
+                    }])
 
         user = db.query(Users).filter(
             Users.user_id == user_id,
@@ -742,15 +785,16 @@ def get_user_by_id(user_id, admin_id):
         ).first()
 
         if not user:
-            return {
-                "status_code": status.HTTP_404_NOT_FOUND,
-                "errors": [
-                    {
-                        "field": "user_id",
-                        "message": "User not found."
-                    }
-                ]
-            }
+            # return {
+            #     "status_code": status.HTTP_404_NOT_FOUND,
+            #     "errors": [
+            #         {
+            #             "field": "user_id",
+            #             "message": "User not found."
+            #         }
+            #     ]
+            # }
+            return not_found_response("user_id", "User not found.")
 
         return {
             "status": status.HTTP_200_OK,
@@ -770,15 +814,7 @@ def get_user_by_id(user_id, admin_id):
             exc_info=True
         )
 
-        return {
-            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "errors": [
-                {
-                    "field": "server",
-                    "message": str(e)
-                }
-            ]
-        }
+        return internal_server_error_response(str(e))
 
     finally:
         db.close()
@@ -801,16 +837,23 @@ def new_auth(payload: dict, admin_id):
             Users.email_address == email_address
         ).first()
 
+        
+
         if users:
-            return {
-                "status_code": status.HTTP_400_BAD_REQUEST,
-                "errors": [
-                    {
+            # return {
+            #     "status_code": status.HTTP_400_BAD_REQUEST,
+                # "errors": [
+                #     {
+                #         "field": "email",
+                #         "message": "User with this email already exists."
+                #     }
+                # ]
+            # }
+            return error_response(
+                400, [{
                         "field": "email",
                         "message": "User with this email already exists."
-                    }
-                ]
-            }
+                        }])
 
         new_users = Users(
             name=name,
@@ -842,15 +885,7 @@ def new_auth(payload: dict, admin_id):
             exc_info=True
         )
 
-        return {
-            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "errors": [
-                {
-                    "field": "server",
-                    "message": str(e)
-                }
-            ]
-        }
+        return internal_server_error_response(str(e))
 
     finally:
         session.close()
@@ -872,15 +907,20 @@ def delete_user(user_id: str, admin_id):
         ).first()
 
         if not admin:
-            return {
-                "status_code": status.HTTP_403_FORBIDDEN,
-                "errors": [
-                    {
+            # return {
+            #     "status_code": status.HTTP_403_FORBIDDEN,
+                # "errors": [
+                #     {
+                #         "field": "admin_id",
+                #         "message": "User has no access to delete account."
+                #     }
+                # ]
+            # }
+            return error_response(
+                403, [{
                         "field": "admin_id",
                         "message": "User has no access to delete account."
-                    }
-                ]
-            }
+                    }])
 
         users = session.query(Users).filter(
             Users.user_id == user_id,
@@ -888,15 +928,16 @@ def delete_user(user_id: str, admin_id):
         ).first()
 
         if not users:
-            return {
-                "status_code": status.HTTP_404_NOT_FOUND,
-                "errors": [
-                    {
-                        "field": "user_id",
-                        "message": "User not found."
-                    }
-                ]
-            }
+            # return {
+            #     "status_code": status.HTTP_404_NOT_FOUND,
+            #     "errors": [
+            #         {
+            #             "field": "user_id",
+            #             "message": "User not found."
+            #         }
+            #     ]
+            # }
+            return not_found_response("user_id", "User not found.")
 
         users.is_blocked = True
         users.is_active = False
@@ -917,15 +958,7 @@ def delete_user(user_id: str, admin_id):
             exc_info=True
         )
 
-        return {
-            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "errors": [
-                {
-                    "field": "server",
-                    "message": str(e)
-                }
-            ]
-        }
+        return internal_server_error_response(str(e))
 
     finally:
         session.close()
@@ -961,10 +994,11 @@ def update_user(payload: dict, user_id: str, current_user_id: str, role: str) ->
             return validation_error
 
         if not current_user_id:
-            return {
-                        "status": status.HTTP_401_UNAUTHORIZED,
-                        "message": f"{role} id is required",
-                    }
+            # return {
+            #             "status": status.HTTP_401_UNAUTHORIZED,
+            #             "message": f"{role} id is required",
+            #         }
+            return error_response(401, f"{role} id is required")
 
         if role == 'admin':
             users = session.query(Users).filter_by(user_id=user_id).first()
@@ -999,10 +1033,11 @@ def update_user(payload: dict, user_id: str, current_user_id: str, role: str) ->
         #         ]
         #     }
         if "is_blocked" in payload:
-            return {
-                    "status": status.HTTP_401_UNAUTHORIZED,
-                    "message": "Only admin can block or unblock a user",
-                }
+            # return {
+            #         "status": status.HTTP_401_UNAUTHORIZED,
+            #         "message": "Only admin can block or unblock a user",
+            #     }
+            return error_response(401, "Only admin can block or unblock a user")
 
         name = payload.get("name") or users.name
         email_address = payload.get("email") if payload.get("email") else users.email_address
@@ -1012,23 +1047,29 @@ def update_user(payload: dict, user_id: str, current_user_id: str, role: str) ->
         phone_number = payload.get("phone_number") if payload.get("phone_number") else users.phone_number
 
         if not users:
-            return {
-                    "status": status.HTTP_404_NOT_FOUND,
-                    "message": "User not found",
-                }
+            # return {
+            #         "status": status.HTTP_404_NOT_FOUND,
+            #         "message": "User not found",
+            #     }
+            return not_found_response("user_id", "User not found")
 
         if users:
             duplicate = session.query(Users).filter_by(email_address=email_address, phone_number=phone_number, name=name).first()
             if duplicate and str(duplicate.user_id) != user_id:
-                return {
-                    "status_code": status.HTTP_409_CONFLICT,
-                    "errors": [
-                        {
+                # return {
+                #     "status_code": status.HTTP_409_CONFLICT,
+                #     "errors": [
+                #         {
+                #             "field": "email",
+                #             "message": "User with this email and phone number already exists."
+                #         }
+                #     ]
+                # }
+                return error_response(
+                    409, [{
                             "field": "email",
                             "message": "User with this email and phone number already exists."
-                        }
-                    ]
-                }
+                            }])
             
             users.name = name
             users.email_address = email_address
@@ -1057,7 +1098,7 @@ def update_user(payload: dict, user_id: str, current_user_id: str, role: str) ->
     except Exception as e:
         session.rollback()
         logger.warning("[update_user] Error: %s", str(e), exc_info=True)
-        raise ValueError(str(e))
+        return internal_server_error_response(str(e))
     finally:
         session.close()
 
@@ -1128,7 +1169,8 @@ def toggle_extraction(user_id: str, enabled: bool) -> Dict[str, Any]:
     try:
         account = session.query(Users).filter_by(user_id=user_id).first()
         if not account:
-            raise ValueError("Email account not found")
+            # raise ValueError("Email account not found")
+            return not_found_response("email", "Email account not found")
         account.extraction_enabled = enabled
         session.commit()
         label = "enabled" if enabled else "disabled"
@@ -1138,7 +1180,7 @@ def toggle_extraction(user_id: str, enabled: bool) -> Dict[str, Any]:
     except Exception as e:
         session.rollback()
         logger.error("[toggle_extraction] %s", e, exc_info=True)
-        raise ValueError(str(e))
+        return internal_server_error_response(str(e))
     finally:
         session.close()
 
@@ -1160,7 +1202,7 @@ def toggle_block(user_id: str, blocked: bool) -> Dict[str, Any]:
     try:
         account = session.query(Users).filter_by(user_id=user_id).first()
         if not account:
-            raise ValueError("Email account not found")
+            return not_found_response("email_id", "Email account not found")
         account.is_blocked = blocked
         session.commit()
         label = "blocked" if blocked else "unblocked"
@@ -1170,7 +1212,7 @@ def toggle_block(user_id: str, blocked: bool) -> Dict[str, Any]:
     except Exception as e:
         session.rollback()
         logger.error("[toggle_block] %s", e, exc_info=True)
-        raise ValueError(str(e))
+        return internal_server_error_response(str(e))
     finally:
         session.close()
 
@@ -1329,7 +1371,8 @@ def update_extraction_config(
         cfg = _get_or_create_config(session)
         if interval_minutes is not None:
             if interval_minutes < 1:
-                raise ValueError("Interval must be at least 1 minute")
+                # raise ValueError("Interval must be at least 1 minute")
+                return error_response(400, "Interval must be at least 1 minute")
             cfg.interval_minutes = interval_minutes
         if is_paused is not None:
             cfg.is_paused = is_paused
@@ -1379,7 +1422,7 @@ def update_extraction_config(
     except Exception as e:
         session.rollback()
         logger.error("[update_extraction_config] %s", e, exc_info=True)
-        raise ValueError(str(e))
+        return internal_server_error_response(str(e))
     finally:
         session.close()
 
@@ -1423,11 +1466,13 @@ def trigger_extraction(user_id: Optional[str] = None) -> Dict[str, Any]:
         if user_id:
             account = session.query(Users).filter_by(user_id=user_id).first()
             if not account:
-                raise ValueError("Email account not found")
+                return not_found_response("email_id", "Email account not found")
             if account.is_blocked:
-                raise ValueError("Account is blocked — cannot trigger extraction")
+                # raise ValueError("Account is blocked — cannot trigger extraction")
+                return error_response(400, "Account is blocked — cannot trigger extraction")
             if not account.extraction_enabled:
-                raise ValueError("Extraction is disabled for this account")
+                # raise ValueError("Extraction is disabled for this account")
+                return error_response(403, "Extraction is disabled for this account")
 
         result = fetch_emails()
 
@@ -1447,7 +1492,7 @@ def trigger_extraction(user_id: Optional[str] = None) -> Dict[str, Any]:
     except Exception as e:
         session.rollback()
         logger.error("[trigger_extraction] %s", e, exc_info=True)
-        raise ValueError(str(e))
+        return internal_server_error_response(str(e))
     finally:
         session.close()
 
@@ -1469,27 +1514,37 @@ def new_job(payload, admin_id):
             Admin.admin_id == admin_id
         ).first()
         if not admin:
-            return {
-                "status_code": status.HTTP_403_FORBIDDEN,
-                "errors": [
-                    {
+            # return {
+            #     "status_code": status.HTTP_403_FORBIDDEN,
+            #     "errors": [
+            #         {
+            #             "field": "admin_id",
+            #             "message": "User is restricted from scheduling jobs."
+            #         }
+            #     ]
+            # }
+            return error_response(
+                403, [{
                         "field": "admin_id",
                         "message": "User is restricted from scheduling jobs."
-                    }
-                ]
-            }
+                    }])
         
         duplicate = db.query(ExtractionConfig).all()
         if len(duplicate) > 0:
-            return {
-                "status_code": status.HTTP_409_CONFLICT,
-                "errors": [
-                    {
+            # return {
+            #     "status_code": status.HTTP_409_CONFLICT,
+            #     "errors": [
+            #         {
+            #             "field": "config",
+            #             "message": "Only one job configuration can be created."
+            #         }
+            #     ]
+            # }
+            return error_response(
+                409, [{
                         "field": "config",
                         "message": "Only one job configuration can be created."
-                    }
-                ]
-            }
+                    }])
         
         interval_minutes = payload.get('interval_minutes') or None
         is_paused = payload.get('is_paused') or None
@@ -1500,10 +1555,12 @@ def new_job(payload, admin_id):
         weekday = payload.get('weekday') or None
 
         if window_enabled and not window_start_time:
-            raise Exception("window_start_time required when window is enabled")
+            # raise Exception("window_start_time required when window is enabled")
+            return error_response(400, "window_start_time required when window is enabled")
 
         if schedule_type == "weekly" and not weekday:
-            raise Exception("weekday required for weekly schedule")
+            # raise Exception("weekday required for weekly schedule")
+            return error_response(400, "weekday required for weekly schedule")
         
         job = ExtractionConfig(
             interval_minutes = interval_minutes,
@@ -1527,7 +1584,7 @@ def new_job(payload, admin_id):
         }
     except Exception as e:
         logger.warning("[new_job] Error: %s", str(e), exc_info=True)
-        raise ValueError(str(e))
+        return internal_server_error_response(str(e))
     finally:
         db.close()
  
@@ -1542,15 +1599,16 @@ def list_model():
         )
 
         if not models:
-            return {
-                "status_code": status.HTTP_404_NOT_FOUND,
-                "errors": [
-                    {
-                        "field": "model",
-                        "message": "No models found."
-                    }
-                ]
-            }
+            # return {
+            #     "status_code": status.HTTP_404_NOT_FOUND,
+            #     "errors": [
+            #         {
+            #             "field": "model",
+            #             "message": "No models found."
+            #         }
+            #     ]
+            # }
+            return not_found_response("model", "No models found.")
 
         return {
             "status": status.HTTP_200_OK,
@@ -1571,15 +1629,7 @@ def list_model():
             exc_info=True
         )
 
-        return {
-            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "errors": [
-                {
-                    "field": "server",
-                    "message": str(e)
-                }
-            ]
-        }
+        return internal_server_error_response(str(e))
 
     finally:
         db.close()
@@ -1629,15 +1679,20 @@ def create_model(payload):
         )
 
         if existing_version:
-            return {
-                "status_code": status.HTTP_409_CONFLICT,
-                "errors": [
-                    {
+            # return {
+            #     "status_code": status.HTTP_409_CONFLICT,
+            #     "errors": [
+            #         {
+            #             "field": "version_name",
+            #             "message": "Model version with this name already exists."
+            #         }
+            #     ]
+            # }
+            return error_response(
+                409, [{
                         "field": "version_name",
                         "message": "Model version with this name already exists."
-                    }
-                ]
-            }
+                    }])
 
         new_version = AiModelversion(
             ai_model_id=model_id,
@@ -1668,15 +1723,7 @@ def create_model(payload):
             exc_info=True
         )
 
-        return {
-            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "errors": [
-                {
-                    "field": "server",
-                    "message": str(e)
-                }
-            ]
-        }
+        return internal_server_error_response(str(e))
 
     finally:
         db.close()
@@ -1700,15 +1747,16 @@ def model_version(model_id):
         )
 
         if not model:
-            return {
-                "status_code": status.HTTP_404_NOT_FOUND,
-                "errors": [
-                    {
-                        "field": "model_id",
-                        "message": "No model found for the given model ID."
-                    }
-                ]
-            }
+            # return {
+            #     "status_code": status.HTTP_404_NOT_FOUND,
+            #     "errors": [
+            #         {
+            #             "field": "model_id",
+            #             "message": "No model found for the given model ID."
+            #         }
+            #     ]
+            # }
+            return not_found_response("model_id", "No model found for the given model ID.")
 
         model_versions = (
             db.query(AiModelversion)
@@ -1720,15 +1768,16 @@ def model_version(model_id):
         )
 
         if not model_versions:
-            return {
-                "status_code": status.HTTP_404_NOT_FOUND,
-                "errors": [
-                    {
-                        "field": "model_id",
-                        "message": "No model versions found for the given model ID."
-                    }
-                ]
-            }
+            # return {
+            #     "status_code": status.HTTP_404_NOT_FOUND,
+            #     "errors": [
+            #         {
+            #             "field": "model_id",
+            #             "message": "No model versions found for the given model ID."
+            #         }
+            #     ]
+            # }
+            return not_found_response("model_id", "No model versions found for the given model ID.")
 
         return {
             "status": status.HTTP_200_OK,
@@ -1749,15 +1798,7 @@ def model_version(model_id):
             exc_info=True
         )
 
-        return {
-            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "errors": [
-                {
-                    "field": "server",
-                    "message": str(e)
-                }
-            ]
-        }
+        return internal_server_error_response(str(e))
 
     finally:
         db.close()
@@ -1817,27 +1858,29 @@ def model_config(payload, admin_id):
         
         model = db.query(AiModel).filter_by(ai_model_id=ai_model_id, is_active=True).first()
         if not model:
-            return {
-                "status_code": status.HTTP_404_NOT_FOUND,
-                "errors": [
-                    {
-                        "field": "model_id",
-                        "message": "No model found for the given model ID."
-                    }
-                ]
-            }
+            # return {
+            #     "status_code": status.HTTP_404_NOT_FOUND,
+            #     "errors": [
+            #         {
+            #             "field": "model_id",
+            #             "message": "No model found for the given model ID."
+            #         }
+            #     ]
+            # }
+            return not_found_response("model_id", "No model found for the given model ID.")
 
         model_version = db.query(AiModelversion).filter_by(ai_model_version_id=model_version_id, is_active=True).first()
         if not model_version:
-            return {
-                "status_code": status.HTTP_404_NOT_FOUND,
-                "errors": [
-                    {
-                        "field": "model_version_id",
-                        "message": "No model version found for the given model version ID."
-                    }
-                ]
-            }
+            # return {
+            #     "status_code": status.HTTP_404_NOT_FOUND,
+            #     "errors": [
+            #         {
+            #             "field": "model_version_id",
+            #             "message": "No model version found for the given model version ID."
+            #         }
+            #     ]
+            # }
+            return not_found_response("model_version_id", "No model version found for the given model version ID.")
         
         configs = db.query(AiModelConfig).filter(
             AiModelConfig.ai_model_id == ai_model_id,
@@ -1846,27 +1889,24 @@ def model_config(payload, admin_id):
 
         for config in configs:
             if decrypt_data(config.apikey) == apikey:
-                return {
-                    "status_code": status.HTTP_409_CONFLICT,
-                    "errors": [
-                        {
+                # return {
+                #     "status_code": status.HTTP_409_CONFLICT,
+                #     "errors": [
+                #         {
+                #             "field": "apikey",
+                #             "message": "Model configuration with this API key already exists."
+                #         }
+                #     ]
+                # }
+                return error_response(
+                    409, [{
                             "field": "apikey",
                             "message": "Model configuration with this API key already exists."
-                        }
-                    ]
-                }
+                        }])
         
         encrtyped_key = encrypt_data(apikey)
         if not encrtyped_key:
-            return {
-                "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
-                "errors": [
-                    {
-                        "field": "apikey",
-                        "message": "Failed to encrypt API key."
-                    }
-                ]
-            }
+            return internal_server_error_response(str(e))
         
         new_config = AiModelConfig(
             ai_model_version_id = model_version_id,
@@ -1896,7 +1936,7 @@ def model_config(payload, admin_id):
         }             
     except Exception as e:
         logger.warning("[model_config] Error: %s", str(e), exc_info=True)
-        raise ValueError(str(e))
+        return internal_server_error_response(str(e))
     finally:
         db.close()
     
@@ -2014,11 +2054,7 @@ def get_model(page, page_size, sort_by, sort_order, filter_column, filter_value,
                 query = query.filter(cast(column, String).ilike(f"%{filter_value}%"))
 
             if query.count() == 0:
-                return {
-                    "status": status.HTTP_200_OK,
-                    "message": "No config model found",
-                    "data": []
-                }
+                return not_found_response("model_config_id", "No model config found")
 
         sort_map = {
             "name": AiModel.model_name,
@@ -2041,20 +2077,16 @@ def get_model(page, page_size, sort_by, sort_order, filter_column, filter_value,
         total_record = query.count()
 
         if total_record == 0:
-            return {
-                "status": status.HTTP_200_OK,
-                "message": "No model config found",
-                "data": [],
-                "total_record": 0
-            }
+            # return {
+            #     "status": status.HTTP_200_OK,
+            #     "message": "No model config found",
+            #     "data": [],
+            #     "total_record": 0
+            # }
+            return not_found_response("model_config_id", "No model config found")
 
         if offset >= total_record:
-            return {
-                "status": status.HTTP_200_OK,
-                "message": "No model config found",
-                "data": [],
-                "total_record": total_record
-            }
+            return not_found_response("model_config_id", "No model config found")
 
         model_config = query.limit(page_size).offset(offset).all()
         data = []
@@ -2088,15 +2120,7 @@ def get_model(page, page_size, sort_by, sort_order, filter_column, filter_value,
             exc_info=True
         )
 
-        return {
-            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "errors": [
-                {
-                    "field": "server",
-                    "message": str(e)
-                }
-            ]
-        }
+        return internal_server_error_response(str(e))
     finally:
         db.close()
 
@@ -2117,30 +2141,36 @@ def toggle_model(model_config_id, admin_id):
         ).first()
 
         if not admin:
-            return {
-                "status_code": status.HTTP_403_FORBIDDEN,
-                "errors": [
-                    {
+            # return {
+            #     "status_code": status.HTTP_403_FORBIDDEN,
+            #     "errors": [
+            #         {
+            #             "field": "admin_id",
+            #             "message": "Admin not found."
+            #         }
+            #     ]
+            # }
+            return error_response(
+                403, [{
                         "field": "admin_id",
                         "message": "Admin not found."
-                    }
-                ]
-            }
+                    }])
         
         model_config = db.query(AiModelConfig).filter(
             AiModelConfig.ai_model_config_id == model_config_id
         ).first()
 
         if not model_config:
-            return {
-                "status_code": status.HTTP_404_NOT_FOUND,
-                "errors": [
-                    {
-                        "field": "model_config_id",
-                        "message": "Model configuration not found."
-                    }
-                ]
-            }
+            # return {
+            #     "status_code": status.HTTP_404_NOT_FOUND,
+            #     "errors": [
+            #         {
+            #             "field": "model_config_id",
+            #             "message": "Model configuration not found."
+            #         }
+            #     ]
+            # }
+            return not_found_response("model_config_id", "Model configuration not found.")
         
         disable_all = db.query(AiModelConfig).filter(
             AiModelConfig.ai_model_config_id != model_config_id
@@ -2202,15 +2232,7 @@ def toggle_model(model_config_id, admin_id):
             exc_info=True
         )
 
-        return {
-            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "errors": [
-                {
-                    "field": "server",
-                    "message": str(e)
-                }
-            ]
-        }
+        return internal_server_error_response(str(e))
     finally:
         db.close()
 
@@ -2229,15 +2251,20 @@ def active_model(admin_id):
         ).first()
 
         if not admin:
-            return {
-                "status_code": status.HTTP_403_FORBIDDEN,
-                "errors": [
-                    {
+            # return {
+            #     "status_code": status.HTTP_403_FORBIDDEN,
+            #     "errors": [
+            #         {
+            #             "field": "admin_id",
+            #             "message": "Admin not found."
+            #         }
+            #     ]
+            # }
+            return error_response(
+                403, [{
                         "field": "admin_id",
                         "message": "Admin not found."
-                    }
-                ]
-            }
+                    }])
         
         active_model = (
             db.query(
@@ -2270,15 +2297,20 @@ def active_model(admin_id):
         )
 
         if not active_model:
-            return {
-                "status_code": status.HTTP_404_NOT_FOUND,
-                "errors": [
-                    {
+            # return {
+            #     "status_code": status.HTTP_404_NOT_FOUND,
+            #     "errors": [
+            #         {
+            #             "field": "model",
+            #             "message": "No active model found."
+            #         }
+            #     ]
+            # }
+            return error_response(
+                404, [{
                         "field": "model",
                         "message": "No active model found."
-                    }
-                ]
-            }
+                    }])
 
         masked_api_key = None
         if active_model and active_model[0]['apikey']:
@@ -2316,12 +2348,4 @@ def active_model(admin_id):
             exc_info=True
         )
 
-        return {
-            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "errors": [
-                {
-                    "field": "server",
-                    "message": str(e)
-                }
-            ]
-        }
+        return internal_server_error_response(str(e))
