@@ -1839,6 +1839,7 @@ def model_version(model_id):
 
 # def model_config(payload, admin_id):
 def model_config(payload, admin_id):
+    db = SessionLocal()
     try:
         validation_error = validate_model_config(
             payload=payload,
@@ -1848,7 +1849,7 @@ def model_config(payload, admin_id):
         if validation_error:
             return validation_error
 
-        db = SessionLocal()
+        
         model_version_id = payload.get("model_version_id") 
         ai_model_id = payload.get("model_id") 
         apikey = payload.get("apikey") if payload.get("apikey") else None
@@ -1933,12 +1934,14 @@ def model_config(payload, admin_id):
                 "apikey": decrypt_data(new_config.apikey),
                 "max_tokens": new_config.max_tokens,
             }
-        }             
+        }   
+                  
     except Exception as e:
         logger.warning("[model_config] Error: %s", str(e), exc_info=True)
         return internal_server_error_response(str(e))
     finally:
         db.close()
+        
     
 def get_model(page, page_size, sort_by, sort_order, filter_column, filter_value, admin_id):
     db = SessionLocal()
