@@ -735,6 +735,12 @@ def create_email_template(payload: dict) -> Dict[str, Any]:
                 "message": "body is required"
             })
 
+        if not subject:
+            errors.append({
+                "field": "subject",
+                "message": "subject is required"
+            }) 
+
         if subject is not None and not isinstance(subject, str):
             errors.append({
                 "field": "subject",

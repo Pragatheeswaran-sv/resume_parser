@@ -321,7 +321,7 @@ from src.utils.response import error_response
 
 
 EMAIL_REGEX = r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$"
-ALPHA_REGEX = r"^[A-Za-z ]+$"
+ALPHA_REGEX = r"^[A-Za-z]+$"
 ALPHA_COLUMNS = ["name"]
 
 def build_error(field, message):
@@ -504,13 +504,7 @@ def validate_new_auth(payload, admin_id):
         )
 
     name = payload.get("name")
-    if "name" in ALPHA_COLUMNS:
-        if bool(re.match(ALPHA_REGEX, name)) == False:
-            # return JSONResponse({
-            #     "field": "name",
-            #     "message": f"{"Name"} should not allow numbers/special_characters."
-            # })
-            return error_response(400, f"{"Name"} should not allow numbers/special_characters.")
+    
 
     if not name or not str(name).strip():
         errors.append(
@@ -519,6 +513,20 @@ def validate_new_auth(payload, admin_id):
                 "Name is required."
             )
         )
+        
+    elif "name" in ALPHA_COLUMNS:
+        if bool(re.match(ALPHA_REGEX, name)) == False:
+            # return JSONResponse({
+            #     "field": "name",
+            #     "message": f"{"Name"} should not allow numbers/special_characters."
+            # })
+            errors.append(
+                build_error(
+                    "name",
+                    f"{"Name"} should not allow numbers/special_characters."
+                )
+            )
+            # return error_response(400, )
 
     validate_email(payload.get("email"), errors)
     validate_phone(payload.get("phone_number"), errors)
@@ -784,7 +792,7 @@ def validate_alpha(value, field_name, errors):
 
 
 def validate_alphanumeric(value, field_name, errors):
-    if value and not re.fullmatch(r"[A-Za-z0-9]+", str(value).strip()):
+    if value and not re.fullmatch(r"[A-Za-z0-9-.]+", str(value).strip()):
         errors.append({
             "field": field_name,
             "message": f"{field_name.replace('_', ' ').title()} must be alphanumeric."
