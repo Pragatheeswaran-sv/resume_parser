@@ -77,7 +77,7 @@ def not_found_response(field: str, message: str):
     return JSONResponse(
         status_code = 404,
         content = {
-            "status_code": status.HTTP_400_BAD_REQUEST,
+            "status_code": status.HTTP_404_NOT_FOUND,
             "fields": field,
             "errors": message
         } 

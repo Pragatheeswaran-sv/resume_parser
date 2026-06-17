@@ -583,17 +583,7 @@ def validate_update_user(payload, user_id, current_user_id, role):
             )
         )
     name = str(payload.get("name", "")).strip()
-    if "name" in ALPHA_COLUMNS and name != '':
-        
-        if bool(re.match(ALPHA_REGEX, name)) == False:
-            
-            errors.append(
-                build_error(
-                    "name",
-                    f"{"Name"} should not allow numbers/special_characters."
-                )
-            )
-
+    
     old_password = payload.get("old_password")
     new_password = payload.get("new_password")
 
@@ -620,6 +610,17 @@ def validate_update_user(payload, user_id, current_user_id, role):
                 "is_blocked must be true or false."
             )
         )
+
+    if "name" in ALPHA_COLUMNS and name != '':
+        
+        if bool(re.match(ALPHA_REGEX, name)) == False:
+            
+            errors.append(
+                build_error(
+                    "name",
+                    f"{"Name"} should not allow numbers/special_characters."
+                )
+            )
 
     return validation_response(errors)
 
