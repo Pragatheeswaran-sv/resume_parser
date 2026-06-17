@@ -687,8 +687,8 @@ def _serialize_template(template: EmailTemplate) -> dict:
     """Convert an EmailTemplate row to a JSON-safe dict."""
     return {
         "id": str(template.id),
-        "template_name": template.template_name,
-        "subject": template.subject,
+        "template_name": str(template.template_name).capitalize(),
+        "subject": str(template.subject).capitalize(),
         "body": template.body,
         "is_active": template.is_active,
         "created_at": template.created_at.isoformat() if template.created_at else None,

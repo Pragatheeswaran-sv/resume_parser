@@ -53,7 +53,7 @@ def rounds():
             "data": [
                 {
                     "round_id": str(round_data.round_id),
-                    "round_name": round_data.round_name,
+                    "round_name": str(round_data.round_name).title(),
                     "created_by": round_data.created_by,
                     "updated_by": round_data.updated_by,
                     "is_active": round_data.is_active,
@@ -86,7 +86,7 @@ def add_round(payload, user_name):
 
         round_name = payload.get(
             "round_name"
-        ).strip()
+        ).strip().lower()
 
         existing_round = (
             db.query(InterviewRounds)
@@ -180,7 +180,7 @@ def update_round(payload, round_id, user_name):
 
         round_name = payload.get(
             "round_name"
-        ).strip()
+        ).strip().lower()
 
         interview_round = (
             db.query(InterviewRounds)
@@ -469,9 +469,9 @@ def view_clients(page, page_size, filter_column, filter_by, sort_by, sort_order)
             "data": [
                 {
                     "client_id": str(client.client_id),
-                    "company_name": client.company_name,
-                    "contact_person": client.contact_person,
-                    "location": client.location,
+                    "company_name": str(client.company_name).capitalize(),
+                    "contact_person": str(client.contact_person).capitalize(),
+                    "location": str(client.location).capitalize(),
                     "email_address": client.email_address,
                     "phone_number": client.phone_number,
                     "created_by": client.created_by,
@@ -951,13 +951,13 @@ def view_interviews(page, page_size, filter_column, filter_by, sort_by, sort_ord
                     "resume_id": str(interview.resume_id),
                     "client_id": str(interview.client_id),
                     "candidate_name": (
-                        interview.resume.candidate.name
+                        str(interview.resume.candidate.name).capitalize()
                         if interview.resume and interview.resume.candidate
                         else None
                     ),
                     "experience": interview.experience,
-                    "status": interview.status,
-                    "role": interview.role,
+                    "status": str(interview.status).upper(),
+                    "role": str(interview.role).capitalize(),
                     "started_at": interview.created_at,
                     "created_by": interview.created_by,
                     "updated_by": interview.updated_by,
@@ -1269,11 +1269,11 @@ def view_interview_status(interview_id):
                     "interview_id": str(interview.interview_id),
                     "round_id": str(interview.round_id),
                     "round_no": interview.round_no,
-                    "round_name": interview.round_name,
+                    "round_name": str(interview.round_name).capitalize(),
                     "scheduled_date": interview.scheduled_date,
                     "meeting_link": interview.meeting_link,
                     "feedback": interview.feedback,
-                    "status": interview.status,
+                    "status": str(interview.status).upper(),
                     "created_by": interview.created_by,
                     "updated_by": interview.updated_by,
                     "is_active": interview.is_active,
