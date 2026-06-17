@@ -612,13 +612,7 @@ alpha_column = ["company_name", "contact_person", "status", "candidate_name", "r
 def validate_required(value, field_name, display_name=None):
     display_name = display_name or str(field_name).lower() #field_name.replace("_", " ").title()
     pattern = r"^[A-Za-z ]+$"
-    if display_name in alpha_column:
-        
-        if bool(re.match(pattern, value)) == False:
-            return {
-                "field": field_name,
-                "message": f"{display_name} should not allow numbers/special_characters."
-            }
+    
     # print(display_name)
     # if display_name in alpha_column:
     #     try:
@@ -647,6 +641,13 @@ def validate_required(value, field_name, display_name=None):
             "field": field_name,
             "message": f"{display_name} cannot be empty."
         }
+    
+    if display_name in alpha_column:
+        if bool(re.match(pattern, value)) == False:
+            return {
+                "field": field_name,
+                "message": f"{display_name} should not allow numbers/special_characters."
+            }
 
     return None
 
@@ -681,21 +682,29 @@ def validate_email(email, field_name="email_address"):
 
 
 def validate_phone(phone, field_name="phone_number"):
+    number_pattern = r"^[0-9+ ]+$"
     if phone is None:
         return None
 
     phone = str(phone).strip()
 
-    if not phone.isdigit():
-        return {
-            "field": field_name,
-            "message": "Phone number must contain only digits."
-        }
+    # if not phone.isdigit():
+    #     return {
+    #         "field": field_name,
+    #         "message": "Phone number must contain only digits."
+    #     }
+    
 
     if len(phone) < 10 or len(phone) > 15:
         return {
             "field": field_name,
             "message": "Phone number must be between 10 and 15 digits."
+        }
+    
+    if bool(re.match(number_pattern, phone)) == False:
+        return {
+            "field": field_name,
+            "message": "Invalid mobile number."
         }
 
     return None
