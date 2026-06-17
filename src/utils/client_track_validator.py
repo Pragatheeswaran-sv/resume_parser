@@ -611,7 +611,9 @@ alpha_column = ["company_name", "contact_person", "status", "candidate_name", "r
 
 def validate_required(value, field_name, display_name=None):
     display_name = display_name or str(field_name).lower() #field_name.replace("_", " ").title()
-    pattern = r"^[A-Za-z ]+$"
+    pattern = r"^[A-Za-z]+(?: [A-Za-z]+)*$"
+    if display_name == "round_name":
+        pattern = r"^[A-Za-z]+(?:\s+[A-Za-z]+)*(?:\s+L\d+)?$"
     
     # print(display_name)
     # if display_name in alpha_column:

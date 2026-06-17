@@ -655,7 +655,7 @@ def list_user(page, page_size, sort_by, sort_order, filter_column, filter_value)
 
             data.append({
                 "user_id": str(user.user_id),
-                "name": user.name,
+                "name": str(user.name).capitalize(),
                 "email_address": user.email_address,
                 "phone_number": user.phone_number,
                 "is_blocked": user.is_blocked,
@@ -2100,7 +2100,7 @@ def get_model(page, page_size, sort_by, sort_order, filter_column, filter_value,
             data.append({
                 "config_id": config[0]['model_config_id'],
                 "model_id": config[0]['model_id'],
-                "model_name": config[0]['model_name'],
+                "model_name": str(config[0]['model_name']).capitalize(),
                 "version_id": config[0]['model_version_id'],
                 "version_name": config[0]['model_version_name'],
                 "apikey": masked_api_key,
@@ -2336,7 +2336,7 @@ def active_model(admin_id):
             "data": {
                 "model_config_id": active_model[0]['model_config_id'],
                 "model_id": active_model[0]['model_id'],
-                "model_name": active_model[0]['model_name'],
+                "model_name": str(active_model[0]['model_name']).capitalize(),
                 "version_id": active_model[0]['model_version_id'],
                 "version_name": active_model[0]['model_version_name'],
                 "apikey": masked_api_key,
