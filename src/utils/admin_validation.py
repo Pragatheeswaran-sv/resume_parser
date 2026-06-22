@@ -793,7 +793,7 @@ def validate_alpha(value, field_name, errors):
 
 
 def validate_alphanumeric(value, field_name, errors):
-    if value and not re.fullmatch(r"[A-Za-z0-9-.]+", str(value).strip()):
+    if value and not re.fullmatch(r"[A-Za-z0-9-./]+", str(value).strip()):
         errors.append({
             "field": field_name,
             "message": f"{field_name.replace('_', ' ').title()} must be alphanumeric."

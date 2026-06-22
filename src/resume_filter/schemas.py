@@ -532,8 +532,8 @@ class NLSearchRequest(BaseModel):
         if not v or not isinstance(v, str) or not v.strip():
             raise ValueError("user_query must be a non-empty string")
         cleaned = v.strip()
-        if len(cleaned) > 1000:
-            raise ValueError("user_query must not exceed 1000 characters")
+        # if len(cleaned) > 1000:
+        #     raise ValueError("user_query must not exceed 1000 characters")
         return cleaned
 
     @field_validator("page", mode="before")

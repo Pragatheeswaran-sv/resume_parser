@@ -16,7 +16,7 @@ from src.auth.jwt import create_access_token, hash_password, verify_password
 from fastapi import status
 from src.client_track.models import CandidateInterviews, Clients, InterviewRounds, InterviewStatus
 from src.utils.helper import encrypt_data, decrypt_data
-from src.utils.client_track_validator import VALID_STATUSES, validate_add_client, validate_add_interview, validate_add_interview_status, validate_add_round, validate_client_columns, validate_interview_columns, validate_modify_client, validate_pagination, validate_required, validate_sort_order, validate_update_round, validate_user, validate_uuid
+from src.utils.client_track_validator import VALID_STATUSES, validate_add_client, validate_add_interview, validate_add_interview_status, validate_add_round, validate_client_columns, validate_interview_columns, validate_modify_client, validate_pagination, validate_required, validate_sort_order, validate_update_round, validate_user, validate_uuid, validate_modify_interview_status
 from src.utils.response import internal_server_error_response, not_found_response, success_response, validation_error_response, error_response
 
 load_dotenv()
@@ -1464,76 +1464,266 @@ def add_interview_status(payload, user_name):
     finally:
         db.close()
 
-def modify_interview_status(payload, interview_status_id, user_name):
+# def modify_interview_status(payload, interview_status_id, user_name):
+#     try:
+#         errors = []
+
+#         for field, value in payload.items():
+
+#             if value is None:
+#                 errors.append(f"{field} cannot be null")
+#                 continue
+
+#             if isinstance(value, str) and not value.strip():
+#                 errors.append(f"{field} cannot be empty")
+#                 continue
+
+#         if not interview_status_id:
+#             errors.append({
+#                 "field": "interview_status_id",
+#                 "message": "Interview status ID is required.",
+#             })
+#         else:
+#             try:
+#                 UUID(str(interview_status_id))
+#             except ValueError:
+#                 errors.append({
+#                     "field": "interview_status_id",
+#                     "message": "Interview status ID must be a valid UUID.",
+#                 })
+
+#         if not user_name or not str(user_name).strip():
+#             errors.append({
+#                 "field": "user_name",
+#                 "message": "User name is required.",
+#             })
+
+#         feedback = payload.get("feedback")
+#         scheduled_date = payload.get("scheduled_date")
+#         meeting_link = payload.get("meeting_link")
+#         status_value = payload.get("status")
+
+#         if feedback and len(str(feedback)) > 2000:
+#             errors.append({
+#                 "field": "feedback",
+#                 "message": "Feedback cannot exceed 2000 characters.",
+#             })
+
+#         if meeting_link:
+#             parsed = urlparse(str(meeting_link))
+#             if not parsed.scheme or not parsed.netloc:
+#                 errors.append({
+#                     "field": "meeting_link",
+#                     "message": "Meeting link should be a valid URL.",
+#                 })
+
+#         if scheduled_date:
+#             try:
+#                 if isinstance(scheduled_date, str):
+#                     interview_date = datetime.strptime(
+#                         scheduled_date,
+#                         "%Y-%m-%d %H:%M:%S"
+#                     )
+#                 else:
+#                     interview_date = scheduled_date
+
+#                 if interview_date < datetime.now():
+#                     errors.append({
+#                         "field": "scheduled_date",
+#                         "message": "Interview date cannot be in the past.",
+#                     })
+
+#             except ValueError:
+#                 errors.append({
+#                     "field": "scheduled_date",
+#                     "message": "Scheduled date must be in format YYYY-MM-DD HH:MM:SS.",
+#                 })
+
+#         if status_value and status_value.lower() not in VALID_STATUSES:
+#             errors.append({
+#                 "field": "status",
+#                 "message": f"Status must be one of: {', '.join(sorted(VALID_STATUSES))}.",
+#             })
+
+#         if errors:
+#             return error_response(400, errors)
+
+#         interview_status = (
+#             db.query(InterviewStatus)
+#             .filter(
+#                 InterviewStatus.interview_status_id == interview_status_id,
+#                 InterviewStatus.is_active.is_(True),
+#             )
+#             .first()
+#         )
+
+#         if not interview_status:
+#             return not_found_response("interview_status_id", "Interview status not found.")
+#             # return {
+#             #     "status_code": status.HTTP_404_NOT_FOUND,
+#             #     "errors": [
+#             #         {
+#             #             "field": "interview_status_id",
+#             #             "message": "Interview status not found.",
+#             #         }
+#             #     ],
+#             # }
+        
+#         if interview_status.status and interview_status.status.lower() == "rejected":
+#             return error_response(
+#                 400, [{
+#                         "field": "status",
+#                         "message": "Interview status cannot be modified because the candidate has already been rejected."
+#                     }])
+#             # return {
+#             #     "status_code": status.HTTP_400_BAD_REQUEST,
+#             #     "errors": [
+#             #         {
+#             #             "field": "status",
+#             #             "message": "Interview status cannot be modified because the candidate has already been rejected."
+#             #         }
+#             #     ]
+#             # }
+        
+#         if interview_status.status and interview_status.status.lower() == "cleared":
+#             return error_response(
+#                 400, [{
+#                         "field": "status",
+#                         "message": "Interview status cannot be modified because the candidate has already cleard the round."
+#                     }])
+#             # return {
+#             #     "status_code": status.HTTP_400_BAD_REQUEST,
+#                 # "errors": [
+#                 #     {
+#                 #         "field": "status",
+#                 #         "message": "Interview status cannot be modified because the candidate has already cleard the round."
+#                 #     }
+#                 # ]
+#             # }
+
+#         feedback = payload.get("feedback", interview_status.feedback)
+#         scheduled_date = payload.get(
+#             "scheduled_date",
+#             interview_status.scheduled_date,
+#         )
+#         meeting_link = payload.get(
+#             "meeting_link",
+#             interview_status.meeting_link,
+#         )
+#         status_value = payload.get(
+#             "status",
+#             interview_status.status,
+#         )
+
+#         if (
+#             interview_status.scheduled_date == scheduled_date
+#             and interview_status.meeting_link == meeting_link
+#             and interview_status.status == status_value
+#             and interview_status.feedback == feedback
+#         ):
+#             return error_response(
+#                 409, [{
+#                         "field": "payload",
+#                         "message": "No changes detected.",
+#                     }])
+#             # return {
+#             #     "status_code": status.HTTP_409_CONFLICT,
+#             #     "errors": [
+#             #         {
+#             #             "field": "payload",
+#             #             "message": "No changes detected.",
+#             #         }
+#             #     ],
+#             # }
+
+#         interview_status.scheduled_date = scheduled_date
+#         interview_status.feedback = feedback
+#         interview_status.meeting_link = meeting_link
+#         interview_status.status = status_value
+#         interview_status.updated_by = user_name
+
+#         db.add(interview_status)
+#         db.commit()
+#         db.refresh(interview_status)
+
+#         interview_id = interview_status.interview_id
+#         round_no = interview_status.round_no
+
+#         candidate_interview = (
+#             db.query(CandidateInterviews)
+#             .filter(
+#                 CandidateInterviews.interview_id == interview_id,
+#                 CandidateInterviews.is_active.is_(True),
+#             )
+#             .first()
+#         )
+
+#         if candidate_interview:
+
+#             current_status = str(status_value).lower()
+
+#             if current_status == "completed":
+#                 candidate_interview.status = (
+#                     f"round {round_no} completed"
+#                 )
+
+#             elif current_status == "cleared":
+#                 candidate_interview.status = (
+#                     f"round {round_no} cleared"
+#                 )
+
+#             elif current_status == "rejected":
+#                 candidate_interview.status = "rejected"
+
+#             candidate_interview.updated_by = user_name
+
+#             db.add(candidate_interview)
+#             db.commit()
+#             db.refresh(candidate_interview)
+
+#         return {
+#             "status_code": status.HTTP_200_OK,
+#             "message": "Candidate interview status updated successfully.",
+#             "data": {
+#                 "interview_status_id": str(interview_status.interview_status_id),
+#                 "interview_id": str(interview_status.interview_id),
+#                 "round_id": str(interview_status.round_id),
+#                 "round_no": str(interview_status.round_no),
+#                 "scheduled_date": interview_status.scheduled_date,
+#                 "meeting_link": interview_status.meeting_link,
+#                 "feedback": interview_status.feedback,
+#                 "status": interview_status.status,
+#                 "created_by": interview_status.created_by,
+#                 "updated_by": interview_status.updated_by,
+#                 "is_active": interview_status.is_active,
+#             },
+#         }
+
+#     except Exception as e:
+#         db.rollback()
+
+#         logger.exception(
+#             f"Error while updating interview status: {str(e)}"
+#         )
+
+#         return internal_server_error_response(str(e))
+
+#     finally:
+#         db.close()
+
+
+def modify_interview_status(
+    payload,
+    interview_status_id,
+    user_name,
+):
     try:
-        errors = []
 
-        if not interview_status_id:
-            errors.append({
-                "field": "interview_status_id",
-                "message": "Interview status ID is required.",
-            })
-        else:
-            try:
-                UUID(str(interview_status_id))
-            except ValueError:
-                errors.append({
-                    "field": "interview_status_id",
-                    "message": "Interview status ID must be a valid UUID.",
-                })
-
-        if not user_name or not str(user_name).strip():
-            errors.append({
-                "field": "user_name",
-                "message": "User name is required.",
-            })
-
-        feedback = payload.get("feedback")
-        scheduled_date = payload.get("scheduled_date")
-        meeting_link = payload.get("meeting_link")
-        status_value = payload.get("status")
-
-        if feedback and len(str(feedback)) > 2000:
-            errors.append({
-                "field": "feedback",
-                "message": "Feedback cannot exceed 2000 characters.",
-            })
-
-        if meeting_link:
-            parsed = urlparse(str(meeting_link))
-            if not parsed.scheme or not parsed.netloc:
-                errors.append({
-                    "field": "meeting_link",
-                    "message": "Meeting link should be a valid URL.",
-                })
-
-        if scheduled_date:
-            try:
-                if isinstance(scheduled_date, str):
-                    interview_date = datetime.strptime(
-                        scheduled_date,
-                        "%Y-%m-%d %H:%M:%S"
-                    )
-                else:
-                    interview_date = scheduled_date
-
-                if interview_date < datetime.now():
-                    errors.append({
-                        "field": "scheduled_date",
-                        "message": "Interview date cannot be in the past.",
-                    })
-
-            except ValueError:
-                errors.append({
-                    "field": "scheduled_date",
-                    "message": "Scheduled date must be in format YYYY-MM-DD HH:MM:SS.",
-                })
-
-        if status_value and status_value.lower() not in VALID_STATUSES:
-            errors.append({
-                "field": "status",
-                "message": f"Status must be one of: {', '.join(sorted(VALID_STATUSES))}.",
-            })
+        errors = validate_modify_interview_status(
+            payload=payload,
+            interview_status_id=interview_status_id,
+            user_name=user_name,
+        )
 
         if errors:
             return error_response(400, errors)
@@ -1541,93 +1731,90 @@ def modify_interview_status(payload, interview_status_id, user_name):
         interview_status = (
             db.query(InterviewStatus)
             .filter(
-                InterviewStatus.interview_status_id == interview_status_id,
+                InterviewStatus.interview_status_id
+                == interview_status_id,
                 InterviewStatus.is_active.is_(True),
             )
             .first()
         )
 
         if not interview_status:
-            return not_found_response("interview_status_id", "Interview status not found.")
-            # return {
-            #     "status_code": status.HTTP_404_NOT_FOUND,
-            #     "errors": [
-            #         {
-            #             "field": "interview_status_id",
-            #             "message": "Interview status not found.",
-            #         }
-            #     ],
-            # }
-        
-        if interview_status.status and interview_status.status.lower() == "rejected":
-            return error_response(
-                400, [{
-                        "field": "status",
-                        "message": "Interview status cannot be modified because the candidate has already been rejected."
-                    }])
-            # return {
-            #     "status_code": status.HTTP_400_BAD_REQUEST,
-            #     "errors": [
-            #         {
-            #             "field": "status",
-            #             "message": "Interview status cannot be modified because the candidate has already been rejected."
-            #         }
-            #     ]
-            # }
-        
-        if interview_status.status and interview_status.status.lower() == "cleared":
-            return error_response(
-                400, [{
-                        "field": "status",
-                        "message": "Interview status cannot be modified because the candidate has already cleard the round."
-                    }])
-            # return {
-            #     "status_code": status.HTTP_400_BAD_REQUEST,
-                # "errors": [
-                #     {
-                #         "field": "status",
-                #         "message": "Interview status cannot be modified because the candidate has already cleard the round."
-                #     }
-                # ]
-            # }
+            return not_found_response(
+                "interview_status_id",
+                "Interview status not found.",
+            )
 
-        feedback = payload.get("feedback", interview_status.feedback)
+        current_status = (
+            str(interview_status.status).lower()
+            if interview_status.status
+            else ""
+        )
+
+        if current_status == "rejected":
+            return error_response(
+                400,
+                [{
+                    "field": "status",
+                    "message": (
+                        "Interview status cannot be modified "
+                        "because the candidate has already "
+                        "been rejected."
+                    ),
+                }],
+            )
+
+        if current_status == "cleared":
+            return error_response(
+                400,
+                [{
+                    "field": "status",
+                    "message": (
+                        "Interview status cannot be modified "
+                        "because the candidate has already "
+                        "cleared the round."
+                    ),
+                }],
+            )
+
+        feedback = payload.get(
+            "feedback",
+            interview_status.feedback,
+        )
+
         scheduled_date = payload.get(
             "scheduled_date",
             interview_status.scheduled_date,
         )
+
         meeting_link = payload.get(
             "meeting_link",
             interview_status.meeting_link,
         )
+
         status_value = payload.get(
             "status",
             interview_status.status,
         )
 
         if (
-            interview_status.scheduled_date == scheduled_date
-            and interview_status.meeting_link == meeting_link
-            and interview_status.status == status_value
-            and interview_status.feedback == feedback
+            interview_status.feedback == feedback
+            and interview_status.scheduled_date
+            == scheduled_date
+            and interview_status.meeting_link
+            == meeting_link
+            and interview_status.status
+            == status_value
         ):
             return error_response(
-                409, [{
-                        "field": "payload",
-                        "message": "No changes detected.",
-                    }])
-            # return {
-            #     "status_code": status.HTTP_409_CONFLICT,
-            #     "errors": [
-            #         {
-            #             "field": "payload",
-            #             "message": "No changes detected.",
-            #         }
-            #     ],
-            # }
+                409,
+                [{
+                    "field": "payload",
+                    "message": "No changes detected.",
+                }],
+            )
 
-        interview_status.scheduled_date = scheduled_date
         interview_status.feedback = feedback
+        interview_status.scheduled_date = scheduled_date
         interview_status.meeting_link = meeting_link
         interview_status.status = status_value
         interview_status.updated_by = user_name
@@ -1636,13 +1823,11 @@ def modify_interview_status(payload, interview_status_id, user_name):
         db.commit()
         db.refresh(interview_status)
 
-        interview_id = interview_status.interview_id
-        round_no = interview_status.round_no
-
         candidate_interview = (
             db.query(CandidateInterviews)
             .filter(
-                CandidateInterviews.interview_id == interview_id,
+                CandidateInterviews.interview_id
+                == interview_status.interview_id,
                 CandidateInterviews.is_active.is_(True),
             )
             .first()
@@ -1650,19 +1835,23 @@ def modify_interview_status(payload, interview_status_id, user_name):
 
         if candidate_interview:
 
-            current_status = str(status_value).lower()
+            updated_status = (
+                str(status_value).lower()
+                if status_value
+                else ""
+            )
 
-            if current_status == "completed":
+            if updated_status == "completed":
                 candidate_interview.status = (
-                    f"round {round_no} completed"
+                    f"round {interview_status.round_no} completed"
                 )
 
-            elif current_status == "cleared":
+            elif updated_status == "cleared":
                 candidate_interview.status = (
-                    f"round {round_no} cleared"
+                    f"round {interview_status.round_no} cleared"
                 )
 
-            elif current_status == "rejected":
+            elif updated_status == "rejected":
                 candidate_interview.status = "rejected"
 
             candidate_interview.updated_by = user_name
@@ -1673,30 +1862,50 @@ def modify_interview_status(payload, interview_status_id, user_name):
 
         return {
             "status_code": status.HTTP_200_OK,
-            "message": "Candidate interview status updated successfully.",
+            "message": (
+                "Candidate interview status updated successfully."
+            ),
             "data": {
-                "interview_status_id": str(interview_status.interview_status_id),
-                "interview_id": str(interview_status.interview_id),
-                "round_id": str(interview_status.round_id),
-                "round_no": str(interview_status.round_no),
-                "scheduled_date": interview_status.scheduled_date,
-                "meeting_link": interview_status.meeting_link,
-                "feedback": interview_status.feedback,
-                "status": interview_status.status,
-                "created_by": interview_status.created_by,
-                "updated_by": interview_status.updated_by,
-                "is_active": interview_status.is_active,
+                "interview_status_id": str(
+                    interview_status.interview_status_id
+                ),
+                "interview_id": str(
+                    interview_status.interview_id
+                ),
+                "round_id": str(
+                    interview_status.round_id
+                ),
+                "round_no": str(
+                    interview_status.round_no
+                ),
+                "scheduled_date":
+                    interview_status.scheduled_date,
+                "meeting_link":
+                    interview_status.meeting_link,
+                "feedback":
+                    interview_status.feedback,
+                "status":
+                    interview_status.status,
+                "created_by":
+                    interview_status.created_by,
+                "updated_by":
+                    interview_status.updated_by,
+                "is_active":
+                    interview_status.is_active,
             },
         }
 
     except Exception as e:
+
         db.rollback()
 
         logger.exception(
             f"Error while updating interview status: {str(e)}"
         )
 
-        return internal_server_error_response(str(e))
+        return internal_server_error_response(
+            str(e)
+        )
 
     finally:
         db.close()

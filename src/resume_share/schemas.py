@@ -20,7 +20,7 @@ class ShareResumeResponse(BaseModel):
 
 class EmailProviderConfigCreate(BaseModel):
     provider_name: str
-    from_email: EmailStr
+    from_email: str
     host: Optional[str] = None
     port: Optional[int] = None
     username: Optional[str] = None
