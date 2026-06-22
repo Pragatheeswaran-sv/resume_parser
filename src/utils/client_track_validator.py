@@ -564,7 +564,7 @@
 #     return errors
 
 
-import datetime
+from datetime import datetime
 from urllib.parse import urlparse
 from uuid import UUID
 import re
@@ -893,6 +893,22 @@ def validate_modify_client(payload, client_id, user_name):
     email_address = payload.get("email_address")
     phone_number = payload.get("phone_number")
 
+    required_fields = {
+        "company_name": company_name,
+        "contact_person": contact_person,
+        "location": location,
+        "email_address": email_address,
+        "phone_number": phone_number,
+    }
+
+    for field, value in required_fields.items():
+        if field in payload:
+            print(payload)
+            error = validate_required(value, field)
+
+        if error:
+            errors.append(error)
+
     validations = [
         validate_length(company_name, "company_name", 255),
         validate_length(contact_person, "contact_person", 100),
@@ -1164,6 +1180,107 @@ def validate_add_interview_status(payload, user_name):
                 "message": "Feedback cannot exceed 2000 characters.",
             }
         )
+
+    return errors
+
+def validate_modify_interview_status(
+    payload,
+    interview_status_id,
+    user_name,
+):
+    errors = []
+
+    for field, value in payload.items():
+
+        if value is None:
+            errors.append({
+                "field": field,
+                "message": f"{field} cannot be null."
+            })
+            continue
+
+        if isinstance(value, str) and not value.strip():
+            errors.append({
+                "field": field,
+                "message": f"{field} cannot be empty."
+            })
+
+    if not interview_status_id:
+        errors.append({
+            "field": "interview_status_id",
+            "message": "Interview status ID is required.",
+        })
+    else:
+        try:
+            UUID(str(interview_status_id))
+        except ValueError:
+            errors.append({
+                "field": "interview_status_id",
+                "message": "Interview status ID must be a valid UUID.",
+            })
+
+    if not user_name or not str(user_name).strip():
+        errors.append({
+            "field": "user_name",
+            "message": "User name is required.",
+        })
+
+    feedback = payload.get("feedback")
+    scheduled_date = payload.get("scheduled_date")
+    meeting_link = payload.get("meeting_link")
+    status_value = payload.get("status")
+
+    if feedback and len(str(feedback)) > 2000:
+        errors.append({
+            "field": "feedback",
+            "message": "Feedback cannot exceed 2000 characters.",
+        })
+
+    if meeting_link:
+        parsed = urlparse(str(meeting_link))
+
+        if not parsed.scheme or not parsed.netloc:
+            errors.append({
+                "field": "meeting_link",
+                "message": "Meeting link should be a valid URL.",
+            })
+
+    if scheduled_date:
+        try:
+
+            if isinstance(scheduled_date, str):
+                interview_date = datetime.strptime(
+                    scheduled_date,
+                    "%Y-%m-%d %H:%M:%S"
+                )
+            else:
+                interview_date = scheduled_date
+
+            if interview_date < datetime.now():
+                errors.append({
+                    "field": "scheduled_date",
+                    "message": "Interview date cannot be in the past.",
+                })
+
+        except ValueError:
+            errors.append({
+                "field": "scheduled_date",
+                "message": (
+                    "Scheduled date must be in format "
+                    "YYYY-MM-DD HH:MM:SS."
+                ),
+            })
+
+    if (
+        status_value
+        and status_value.lower() not in VALID_STATUSES
+    ):
+        errors.append({
+            "field": "status",
+            "message":
+                f"Status must be one of: "
+                f"{', '.join(sorted(VALID_STATUSES))}.",
+        })
 
     return errors
 
