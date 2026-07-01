@@ -10,7 +10,8 @@ from lxml import etree
 import pandas as pd
 from alembic.util import status
 from fastapi import HTTPException
-import ollama
+# import ollama
+from langchain_ollama import ChatOllama
 from dotenv import load_dotenv
 from email.utils import parseaddr
 from pypdf import PdfReader
@@ -25,13 +26,13 @@ from src.candidate.models import (
     Candidate, CandidateSkills, CandidateEducation, 
     WorkExperience, Skill, Education, Company, Role
 )
-from src.services.admin.service import get_model
+from src.services.admin.service import active_model, get_model
 from src.admin.models import Admin, AiModel, AiModelConfig, AiModelversion
 
 from openai import OpenAI
 from anthropic import Anthropic
 
-from src.utils.helper import calculate_match_score, clean_mobile_number, compress_file
+from src.utils.helper import calculate_match_score, clean_mobile_number, compress_file, decrypt_data, record_model_usage, select_available_model
 BASE_DIR = "/app"  
 EXPORT_PATH = os.path.join(BASE_DIR, "export_files")
 
@@ -435,48 +436,62 @@ def is_resume(text: str) -> bool:
         
         admin_id = admin.admin_id
 
-        model_info =( db.query(
-            func.json_build_object(
-                'model_name', AiModel.model_name,
-                'model_version_name', AiModelversion.version_name,
-                'apikey', AiModelConfig.apikey,
-                'max_tokens', AiModelConfig.max_tokens,
-                'temperature', AiModelConfig.temparature,
-                'is_active', AiModelConfig.is_active
-            )
-        )
-        .select_from(AiModelConfig).
-        join(AiModel, AiModel.ai_model_id == AiModelConfig.ai_model_id).
-        join(AiModelversion, AiModelversion.ai_model_version_id == AiModelConfig.ai_model_version_id).
-        filter(AiModelConfig.is_active == True).
-        first()
-        )
+        # model_info =( db.query(
+        #     func.json_build_object(
+        #         'model_name', AiModel.model_name,
+        #         'model_version_name', AiModelversion.version_name,
+        #         'apikey', AiModelConfig.apikey,
+        #         'max_tokens', AiModelConfig.max_tokens,
+        #         'temperature', AiModelConfig.temparature,
+        #         'is_active', AiModelConfig.is_active
+        #     )
+        # )
+        # .select_from(AiModelConfig).
+        # join(AiModel, AiModel.ai_model_id == AiModelConfig.ai_model_id).
+        # join(AiModelversion, AiModelversion.ai_model_version_id == AiModelConfig.ai_model_version_id).
+        # filter(AiModelConfig.is_active == True).
+        # first()
+        # )
+
+        get_active_model = active_model(admin_id)
+        model_info = get_active_model.get('data')
 
         if not model_info:
             model_info = {}
-        else:
-            model_info = model_info[0]
 
+        model_config_id = model_info.get("model_config_id")
         model = model_info.get("model_name", "ollama").lower()
-        version = model_info.get("model_version_name", "llama3").lower()
-        api_key = model_info.get("apikey") or None
+        version = model_info.get("version_name", "llama3").lower()
+        base_url = model_info.get("base_url")
 
         message = [
                     {"role": "system", "content": "You only return JSON"},
                     {"role": "user", "content": prompt + "\n\nDocument:\n" + text[:12000]}
                 ]
-        
+        model_update = db.query(AiModelConfig).filter(AiModelConfig.ai_model_config_id == model_config_id).first()
+        api_key = model_update.apikey
+       
+        api_key = decrypt_data(api_key)
+        print(api_key)
         if model == "openai":
             if not api_key or api_key == None:
                 raise Exception("OpenAI API key not found")
 
-            client = OpenAI(api_key=api_key)
+            client = OpenAI(
+                # api_key="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",
+                api_key = api_key,
+                base_url = base_url
+                )
 
             response = client.chat.completions.create(
                 model = version,
                 messages = message
             )
             content = response.choices[0].message.content.strip()
+            token_used = response.usage.total_tokens
+            usage = record_model_usage(model_config_id, token_used, admin.name)
+
+            logger.info(f'{usage}, token used for the prompt: {token_used}')
             logger.info(f" the response from OpenAi {response}")
         elif model == "claude":
             if not api_key or api_key == None:
@@ -637,48 +652,76 @@ def extract_basic_info(resume_text):
         admin_id = admin.admin_id
         model_info = get_model(page = 1, page_size = 100, sort_by = None, sort_order = None, filter_column = None, filter_value = None, admin_id = admin_id)
 
-        model_info =( db.query(
-            func.json_build_object(
-                'model_name', AiModel.model_name,
-                'model_version_name', AiModelversion.version_name,
-                'apikey', AiModelConfig.apikey,
-                'max_tokens', AiModelConfig.max_tokens,
-                'temperature', AiModelConfig.temparature,
-                'is_active', AiModelConfig.is_active
-            )
-        )
-        .select_from(AiModelConfig).
-        join(AiModel, AiModel.ai_model_id == AiModelConfig.ai_model_id).
-        join(AiModelversion, AiModelversion.ai_model_version_id == AiModelConfig.ai_model_version_id).
-        filter(AiModelConfig.is_active == True).
-        first()
-        )
+        # model_info =( db.query(
+        #     func.json_build_object(
+        #         'model_name', AiModel.model_name,
+        #         'model_version_name', AiModelversion.version_name,
+        #         'apikey', AiModelConfig.apikey,
+        #         'max_tokens', AiModelConfig.max_tokens,
+        #         'temperature', AiModelConfig.temparature,
+        #         'is_active', AiModelConfig.is_active
+        #     )
+        # )
+        # .select_from(AiModelConfig).
+        # join(AiModel, AiModel.ai_model_id == AiModelConfig.ai_model_id).
+        # join(AiModelversion, AiModelversion.ai_model_version_id == AiModelConfig.ai_model_version_id).
+        # filter(AiModelConfig.is_active == True).
+        # first()
+        # )
+
+        get_active_model = active_model(admin.admin_id)
+        model_info = get_active_model.get('data')
 
         if not model_info:
             model_info = {}
-        else:
-            model_info = model_info[0]
 
-        model = model_info.get("model_name", "llama3").lower()
-        version = model_info.get("model_version_name", "latest").lower()
-        api_key = model_info.get("apikey") or None
+        model_config_id = model_info.get("model_config_id")
+        model = model_info.get("model_name", "ollama").lower()
+        version = model_info.get("version_name", "llama3").lower()
+        base_url = model_info.get("base_url")
+
+        # if not model_info:
+        #     model_info = {}
+        # else:
+        #     model_info = model_info[0]
+
+        # model = model_info.get("model_name", "llama3").lower()
+        # version = model_info.get("model_version_name", "latest").lower()
+        # api_key = model_info.get("apikey") or None
         
         message = [
                     {"role": "system", "content": "You only return JSON"},
                     {"role": "user", "content": prompt + "\n\nDocument:\n" + resume_text[:12000]}
                 ]
+        # api_key = decrypt_data(api_key)
+        # print('api_key=>',api_key)
+
+        model_update = db.query(AiModelConfig).filter(AiModelConfig.ai_model_config_id == model_config_id).first()
+        api_key = model_update.apikey
+        api_key = decrypt_data(api_key)
 
         if model == "openai":
             if not api_key or api_key == None:
                 raise Exception("OpenAI API key not found")
 
-            client = OpenAI(api_key=api_key)
+            # client = OpenAI(api_key=api_key)
+            client = OpenAI(
+                # api_key="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",
+                api_key = api_key,
+                base_url = base_url
+                )
 
             response = client.chat.completions.create(
                 model = version,
                 messages = message
             )
             content = response.choices[0].message.content.strip()
+
+            token_used = response.usage.total_tokens
+            
+            usage = record_model_usage(model_config_id, token_used, admin.name)
+            logger.info(f'{usage}, token used for the prompt: {token_used}')
+
             logger.info(f" the response from OpenAi {response}")
         elif model == "claude":
             if not api_key or api_key == None:
@@ -1027,19 +1070,32 @@ def search_resumes(filters: dict, export: bool = False) -> list:
         if isinstance(roles, list) and roles:
             role_terms = [str(role).strip() for role in roles if str(role).strip()]
             role_ids = []
+
             if role_terms:
-                role_numeric_ids = [rid for rid in (_safe_int(role) for role in role_terms) if rid is not None]
-                role_name_filters = [Role.role.ilike(f"%{term}%") for term in role_terms]
-                role_filters = list(role_name_filters)
-                if role_numeric_ids:
-                    role_filters.append(Role.role_id.in_(role_numeric_ids))
-                role_ids = [
-                    row.role_id
-                    for row in db.query(Role.role_id).filter(
-                        or_(*role_filters)
-                    ).all()
-                ]
-            
+                uuid_role_ids = []
+                role_name_terms = []
+
+                for term in role_terms:
+                    try:
+                        uuid_role_ids.append(UUID(term))
+                    except ValueError:
+                        role_name_terms.append(term)
+
+                if uuid_role_ids:
+                    role_ids.extend(
+                        row.role_id
+                        for row in db.query(Role.role_id).filter(Role.role_id.in_(uuid_role_ids)).all()
+                    )
+
+                if role_name_terms:
+                    role_name_filters = [Role.role.ilike(f"%{term}%") for term in role_name_terms]
+                    role_ids.extend(
+                        row.role_id
+                        for row in db.query(Role.role_id).filter(or_(*role_name_filters)).all()
+                    )
+
+                role_ids = list(dict.fromkeys(role_ids))
+
             if role_ids:
                 conditions.append(
                     Candidate.candidate_id.in_(
@@ -1247,7 +1303,7 @@ def search_resumes(filters: dict, export: bool = False) -> list:
                 df.to_csv(export_file, index=False)
                 logger.info(f"Export completed successfully: {export_file}")
                 result = {"file_path": export_file} 
-                # print('export result-->', result)
+                
                 return result
             else:
                 logger.info("No data to export")
@@ -1269,7 +1325,12 @@ def search_resumes(filters: dict, export: bool = False) -> list:
         for row in data:
             candidate_info = row.candidate_info
             candidate_skills_list = candidate_info.get("skills", [])
-            rate_skill = [item.get("skill") for item in candidate_skills_list if item.get("skill")]
+            
+            rate_skill = [
+                item.get("skill")
+                for item in candidate_skills_list
+                if isinstance(item, dict) and item.get("skill")
+            ]
             rate_experience = candidate_info.get("total_experience", 0) or 0
             rate_role = candidate_info.get("candidate_role", "") or ""
             
@@ -1843,50 +1904,49 @@ def extract_filters_from_query(query: str) -> dict:
             logger.warning("[extract_filters_from_query] No admin found, defaulting to ollama with latest model")
             raise Exception("No admin found")
 
-        model_info = (db.query(
-            func.json_build_object(
-                'model_name', AiModel.model_name,
-                'model_version_name', AiModelversion.version_name,
-                'apikey', AiModelConfig.apikey,
-                'max_tokens', AiModelConfig.max_tokens,
-                'temperature', AiModelConfig.temparature,
-                'is_active', AiModelConfig.is_active
-            )
-        )
-        .select_from(AiModelConfig)
-        .join(AiModel, AiModel.ai_model_id == AiModelConfig.ai_model_id)
-        .join(AiModelversion, AiModelversion.ai_model_version_id == AiModelConfig.ai_model_version_id)
-        .filter(AiModelConfig.is_active == True)
-        .first()
-        )
+        # get_active_model = active_model(admin.admin_id)
+        # model_info = get_active_model.get('data')
+        model_info = select_available_model(admin.admin_id)
 
         if not model_info:
             model_info = {}
-        else:
-            model_info = model_info[0]
-        
+
+        model_config_id = model_info.get("model_config_id")
         model = model_info.get("model_name", "ollama").lower()
-        version = model_info.get("model_version_name", "llama3").lower()
-        api_key = model_info.get("apikey") or None
+        version = model_info.get("version_name", "llama3").lower()
+        base_url = model_info.get("base_url")
         
         logger.info("[extract_filters_from_query] Using model: %s, version: %s", model, version)
 
         message = [
-            {"role": "system", "content": "You output only JSON."},
+            {"role": "system", "content": "You are a strict JSON extractor for recruiter search queries. Respond with a single valid JSON object only. No markdown fences, no commentary."},
             {"role": "user", "content": prompt + "\n\nQuery:\n" + query[:1000]},
         ]
 
+        model_update = db.query(AiModelConfig).filter(AiModelConfig.ai_model_config_id == model_config_id).first()
+        api_key = model_update.apikey
+        
         if model == "openai":
             if not api_key or api_key == None:
                 raise Exception("OpenAI API key not found")
 
-            client = OpenAI(api_key=api_key)
+            api_key = decrypt_data(api_key)
+            
+            client = OpenAI(
+                api_key=api_key,
+                base_url = base_url)
 
             response = client.chat.completions.create(
                 model=version,
                 messages=message
             )
+
             content = response.choices[0].message.content.strip()
+            token_used = response.usage.total_tokens
+    
+            usage = record_model_usage(model_config_id, token_used, admin.name)
+            logger.info(f'{usage}, token used for the prompt: {token_used}')
+            
         elif model == "claude":
             if not api_key or api_key == None:
                 raise Exception("Claude API key not found")
@@ -1896,7 +1956,7 @@ def extract_filters_from_query(query: str) -> dict:
             response = client.messages.create(
                 model=version,
                 max_tokens=1000,
-                system="You output only JSON.",
+                system="You are a strict JSON extractor for recruiter search queries. Respond with a single valid JSON object only. No markdown fences, no commentary.",
                 messages=[
                     {"role": "user", "content": prompt + "\n\nQuery:\n" + query[:1000]}
                 ]

@@ -32,6 +32,7 @@ def rounds():
             .filter(
                 InterviewRounds.is_active.is_(True)
             )
+            .order_by(InterviewRounds.round_name)
             .all()
         )
 

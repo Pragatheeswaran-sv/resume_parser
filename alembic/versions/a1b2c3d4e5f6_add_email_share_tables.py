@@ -1,7 +1,7 @@
 """add email share tables
 
 Revision ID: a1b2c3d4e5f6
-Revises: e0c93e322ea5
+Revises: 8276ff4c1c94
 Create Date: 2026-04-28 13:00:00.000000
 
 """
