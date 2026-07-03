@@ -20,7 +20,7 @@ from db.connection import SessionLocal
 from sqlalchemy import UUID, String, func, cast, inspect
 from sqlalchemy.dialects.postgresql import JSON, aggregate_order_by
 from src.admin.models import (
-    Admin, AiModel, AiModelConfig, AiModelversion,
+    Admin, AiModel, AiModelConfig, AiModelUsage, AiModelversion,
     Users, ExtractionConfig, ist_now,
 )
 from src.auth.jwt import (
@@ -2190,6 +2190,29 @@ def toggle_model(model_config_id, admin_id):
             )
         db.commit()
 
+        now = ist_now()
+        model_usage = db.query(AiModelUsage).filter(
+            AiModelUsage.ai_model_config_id == model_config_id
+        ).first()
+        if not model_usage:
+            usage = AiModelUsage(
+                ai_model_config_id=model_config_id,
+                minute_window_start=now,
+                day_window_start=now,
+                minute_requests=0,
+                minute_tokens=0,
+                day_requests=0,
+                day_tokens=0,
+                total_requests=0,
+                total_tokens=0,
+                is_rate_limited=False,
+                created_by=str(admin_id),
+            )
+            db.add(usage)
+            db.commit()
+            db.refresh(usage)
+
+
         active_model = db.query(AiModelConfig).all()
         data = []
         for active in active_model:
@@ -2278,6 +2301,7 @@ def active_model(admin_id):
                     "model_version_id", AiModelversion.ai_model_version_id,
                     "model_version_name", AiModelversion.version_name,
                     "apikey", AiModelConfig.apikey,
+                    'baseurl', AiModelConfig.base_url,
                     "max_tokens", AiModelConfig.max_tokens,
                     "admin_id", AiModelConfig.admin_id,
                     "is_active", AiModelConfig.is_active
@@ -2340,6 +2364,7 @@ def active_model(admin_id):
                 "version_id": active_model[0]['model_version_id'],
                 "version_name": active_model[0]['model_version_name'],
                 "apikey": masked_api_key,
+                'base_url': active_model[0]['baseurl'],
                 "max_tokens": active_model[0]['max_tokens'],
                 "admin_id": active_model[0]['admin_id'],
                 "is_active": active_model[0]['is_active']}   

@@ -436,49 +436,30 @@ def is_resume(text: str) -> bool:
         
         admin_id = admin.admin_id
 
-        # model_info =( db.query(
-        #     func.json_build_object(
-        #         'model_name', AiModel.model_name,
-        #         'model_version_name', AiModelversion.version_name,
-        #         'apikey', AiModelConfig.apikey,
-        #         'max_tokens', AiModelConfig.max_tokens,
-        #         'temperature', AiModelConfig.temparature,
-        #         'is_active', AiModelConfig.is_active
-        #     )
-        # )
-        # .select_from(AiModelConfig).
-        # join(AiModel, AiModel.ai_model_id == AiModelConfig.ai_model_id).
-        # join(AiModelversion, AiModelversion.ai_model_version_id == AiModelConfig.ai_model_version_id).
-        # filter(AiModelConfig.is_active == True).
-        # first()
-        # )
-
-        get_active_model = active_model(admin_id)
-        model_info = get_active_model.get('data')
-
+        model_info = select_available_model(admin_id)
+    
         if not model_info:
-            model_info = {}
-
+            raise Exception("No active AI model configured")
+        
         model_config_id = model_info.get("model_config_id")
         model = model_info.get("model_name", "ollama").lower()
         version = model_info.get("version_name", "llama3").lower()
         base_url = model_info.get("base_url")
+        api_key = model_info.get("apikey")
+        
+        api_key = decrypt_data(api_key)
+       
 
         message = [
                     {"role": "system", "content": "You only return JSON"},
                     {"role": "user", "content": prompt + "\n\nDocument:\n" + text[:12000]}
                 ]
-        model_update = db.query(AiModelConfig).filter(AiModelConfig.ai_model_config_id == model_config_id).first()
-        api_key = model_update.apikey
-       
-        api_key = decrypt_data(api_key)
-        print(api_key)
+
         if model == "openai":
             if not api_key or api_key == None:
                 raise Exception("OpenAI API key not found")
 
             client = OpenAI(
-                # api_key="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",
                 api_key = api_key,
                 base_url = base_url
                 )
@@ -489,8 +470,8 @@ def is_resume(text: str) -> bool:
             )
             content = response.choices[0].message.content.strip()
             token_used = response.usage.total_tokens
+    
             usage = record_model_usage(model_config_id, token_used, admin.name)
-
             logger.info(f'{usage}, token used for the prompt: {token_used}')
             logger.info(f" the response from OpenAi {response}")
         elif model == "claude":
@@ -650,63 +631,29 @@ def extract_basic_info(resume_text):
             raise Exception("No admin found")
         
         admin_id = admin.admin_id
-        model_info = get_model(page = 1, page_size = 100, sort_by = None, sort_order = None, filter_column = None, filter_value = None, admin_id = admin_id)
 
-        # model_info =( db.query(
-        #     func.json_build_object(
-        #         'model_name', AiModel.model_name,
-        #         'model_version_name', AiModelversion.version_name,
-        #         'apikey', AiModelConfig.apikey,
-        #         'max_tokens', AiModelConfig.max_tokens,
-        #         'temperature', AiModelConfig.temparature,
-        #         'is_active', AiModelConfig.is_active
-        #     )
-        # )
-        # .select_from(AiModelConfig).
-        # join(AiModel, AiModel.ai_model_id == AiModelConfig.ai_model_id).
-        # join(AiModelversion, AiModelversion.ai_model_version_id == AiModelConfig.ai_model_version_id).
-        # filter(AiModelConfig.is_active == True).
-        # first()
-        # )
-
-        get_active_model = active_model(admin.admin_id)
-        model_info = get_active_model.get('data')
-
+        model_info = select_available_model(admin_id)
+    
         if not model_info:
-            model_info = {}
-
+            raise Exception("No active AI model configured")
+        
         model_config_id = model_info.get("model_config_id")
         model = model_info.get("model_name", "ollama").lower()
         version = model_info.get("version_name", "llama3").lower()
         base_url = model_info.get("base_url")
-
-        # if not model_info:
-        #     model_info = {}
-        # else:
-        #     model_info = model_info[0]
-
-        # model = model_info.get("model_name", "llama3").lower()
-        # version = model_info.get("model_version_name", "latest").lower()
-        # api_key = model_info.get("apikey") or None
+        api_key = model_info.get("apikey")
+        api_key = decrypt_data(api_key)
         
         message = [
                     {"role": "system", "content": "You only return JSON"},
                     {"role": "user", "content": prompt + "\n\nDocument:\n" + resume_text[:12000]}
                 ]
-        # api_key = decrypt_data(api_key)
-        # print('api_key=>',api_key)
-
-        model_update = db.query(AiModelConfig).filter(AiModelConfig.ai_model_config_id == model_config_id).first()
-        api_key = model_update.apikey
-        api_key = decrypt_data(api_key)
 
         if model == "openai":
             if not api_key or api_key == None:
                 raise Exception("OpenAI API key not found")
 
-            # client = OpenAI(api_key=api_key)
             client = OpenAI(
-                # api_key="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",
                 api_key = api_key,
                 base_url = base_url
                 )
@@ -1904,33 +1851,28 @@ def extract_filters_from_query(query: str) -> dict:
             logger.warning("[extract_filters_from_query] No admin found, defaulting to ollama with latest model")
             raise Exception("No admin found")
 
-        # get_active_model = active_model(admin.admin_id)
-        # model_info = get_active_model.get('data')
         model_info = select_available_model(admin.admin_id)
-
+    
         if not model_info:
-            model_info = {}
-
+            raise Exception("No active AI model configured")
+        
         model_config_id = model_info.get("model_config_id")
         model = model_info.get("model_name", "ollama").lower()
         version = model_info.get("version_name", "llama3").lower()
         base_url = model_info.get("base_url")
-        
+        api_key = model_info.get("apikey")
+        api_key = decrypt_data(api_key)
+
         logger.info("[extract_filters_from_query] Using model: %s, version: %s", model, version)
 
         message = [
             {"role": "system", "content": "You are a strict JSON extractor for recruiter search queries. Respond with a single valid JSON object only. No markdown fences, no commentary."},
             {"role": "user", "content": prompt + "\n\nQuery:\n" + query[:1000]},
         ]
-
-        model_update = db.query(AiModelConfig).filter(AiModelConfig.ai_model_config_id == model_config_id).first()
-        api_key = model_update.apikey
         
         if model == "openai":
             if not api_key or api_key == None:
                 raise Exception("OpenAI API key not found")
-
-            api_key = decrypt_data(api_key)
             
             client = OpenAI(
                 api_key=api_key,
