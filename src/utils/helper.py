@@ -135,12 +135,14 @@ def record_model_usage(model_config_id, tokens_used: int, name: str = None):
             usage.minute_window_start = now
             usage.minute_requests_received = 0
             usage.minute_tokens_used = 0
+            usage.is_rate_limited = False
 
         # ---- day window: reset day + total per your requirement ----
         if not usage.day_window_start or (now - usage.day_window_start) >= timedelta(hours=24):
             usage.day_window_start = now
             usage.total_requests = 0
             usage.total_tokens = 0
+            usage.is_rate_limited = False
 
         # ---- increment counters only ----
         usage.minute_requests_received = (usage.minute_requests_received or 0) + 1
@@ -148,6 +150,17 @@ def record_model_usage(model_config_id, tokens_used: int, name: str = None):
 
         usage.total_requests = (usage.total_requests or 0) + 1
         usage.total_tokens = (usage.total_tokens or 0) + tokens_used
+
+        max_tokens = 0
+
+        if usage.ai_model_config and usage.ai_model_config.max_tokens:
+            max_tokens = usage.ai_model_config.max_tokens
+
+        minute_exhausted = (usage.minute_tokens or 0) and (usage.minute_tokens_used or 0) + max_tokens > usage.minute_tokens
+        day_exhausted = (usage.day_tokens or 0) and (usage.total_tokens or 0) + max_tokens > usage.day_tokens
+
+        if minute_exhausted or day_exhausted:
+            usage.is_rate_limited = True
 
         usage.last_used_at = now
         usage.updated_by = name
@@ -257,8 +270,11 @@ def calculate_match_score(
 
 from datetime import timedelta
 
-def _is_model_available(usage, now) -> bool:
-    """A model with no usage row yet is always available."""
+def _is_model_available(usage, now, needed_tokens: int = 0) -> bool:
+    """A model with no usage row yet is always available.
+    needed_tokens = tokens the next request may consume; a model is skipped
+    if serving that request would push it past a token limit.
+    """
     if usage is None:
         return True
 
@@ -276,78 +292,91 @@ def _is_model_available(usage, now) -> bool:
     # limits (0/None = "no limit configured" → never blocks)
     if (usage.minute_requests or 0) and m_req >= usage.minute_requests:
         return False
-    if (usage.minute_tokens or 0) and m_tok >= usage.minute_tokens:
+    if (usage.minute_tokens or 0) and (m_tok + needed_tokens) > usage.minute_tokens:
         return False
     if (usage.day_requests or 0) and d_req >= usage.day_requests:
         return False
-    if (usage.day_tokens or 0) and d_tok >= usage.day_tokens:
+    if (usage.day_tokens or 0) and (d_tok + needed_tokens) > usage.day_tokens:
         return False
     return True
 
 def select_available_model(admin_id):
-    """Runs on every request. Marks limit-reached models as disabled +
-    rate-limited, enables the highest-priority available model (so the UI's
-    is_active reflects what's actually serving). Returns None if all exhausted.
+    """Runs on every request. Picks the highest-priority available model.
+    Only writes to the DB when state actually changes (avoids per-request
+    write load / lock contention).
     """
     db = SessionLocal()
     try:
         now = ist_now().replace(tzinfo=None)
-
-        configs = (
-            db.query(AiModelConfig)
+        rows = (
+            db.query(AiModelConfig, AiModelUsage)
+            .outerjoin(
+                AiModelUsage,
+                AiModelUsage.ai_model_config_id == AiModelConfig.ai_model_config_id,
+            )
             .filter(AiModelConfig.admin_id == admin_id)
-            .order_by(AiModelConfig.prioprity_queue.asc().nullslast())
+            .order_by(
+                AiModelConfig.prioprity_queue.asc().nullslast(),
+                AiModelConfig.created_at.asc(),
+            )
             .all()
         )
-
         chosen_config = None
         chosen_usage = None
-
-        for config in configs:
-            usage = db.query(AiModelUsage).filter(
-                AiModelUsage.ai_model_config_id == config.ai_model_config_id
-            ).first()
-
-            if _is_model_available(usage, now):
+        dirty = False
+        for config, usage in rows:
+            needed = config.max_tokens or 0
+            if _is_model_available(usage, now, needed):
                 chosen_config = config
                 chosen_usage = usage
                 break
 
-            # reached criteria -> flag it as rate-limited for the UI
-            if usage:
+            if usage and not usage.is_rate_limited:
                 usage.is_rate_limited = True
                 usage.retry_after = (usage.minute_window_start or now) + timedelta(minutes=1)
+                dirty = True
 
         if chosen_config is None:
-            # everyone is exhausted: disable all, nothing serving
-            db.query(AiModelConfig).filter(
-                AiModelConfig.admin_id == admin_id
-            ).update({AiModelConfig.is_active: False}, synchronize_session=False)
-            db.commit()
+            already_all_off = all(not c.is_active for c, _ in rows)
+
+            if not already_all_off:
+                db.query(AiModelConfig).filter(
+                    AiModelConfig.admin_id == admin_id
+                ).update({AiModelConfig.is_active: False}, synchronize_session=False)
+                dirty = True
+
+            if dirty:
+                db.commit()
             return None
+        
+        if not chosen_config.is_active:
+            db.query(AiModelConfig).filter(
+                AiModelConfig.admin_id == admin_id,
+                AiModelConfig.ai_model_config_id != chosen_config.ai_model_config_id,
+                AiModelConfig.is_active == True,
+            ).update({AiModelConfig.is_active: False}, synchronize_session=False)
+            chosen_config.is_active = True
+            dirty = True
 
-        # enable the chosen model, disable every other model for this admin
-        db.query(AiModelConfig).filter(
-            AiModelConfig.admin_id == admin_id,
-            AiModelConfig.ai_model_config_id != chosen_config.ai_model_config_id,
-        ).update({AiModelConfig.is_active: False}, synchronize_session=False)
-
-        chosen_config.is_active = True
-        if chosen_usage:
+        if chosen_usage and chosen_usage.is_rate_limited:
             chosen_usage.is_rate_limited = False
-        db.commit()
+            dirty = True
 
-        model = chosen_config.ai_model            # relationship
-        version = chosen_config.ai_model_version  # relationship
-        print(f"Selected model: {model.model_name}, version: {version.version_name if version else None}, config_id: {chosen_config.ai_model_config_id}")
+        if dirty:
+            db.commit()
+
+        model = chosen_config.ai_model
+        version = chosen_config.ai_model_version
+
         return {
             "model_config_id": chosen_config.ai_model_config_id,
             "model_name": (model.model_name if model else "ollama"),
             "version_name": (version.version_name if version else None),
             "base_url": chosen_config.base_url,
-            "apikey": chosen_config.apikey,   # still encrypted; decrypt at call site
+            "apikey": chosen_config.apikey,
             "max_tokens": chosen_config.max_tokens,
         }
+    
     except Exception as e:
         db.rollback()
         logger.warning("[select_available_model] Error: %s", str(e), exc_info=True)
@@ -355,47 +384,46 @@ def select_available_model(admin_id):
     finally:
         db.close()
 
-
 # def select_available_model(admin_id):
-    """Pick the highest-priority model under all its limits.
+    # """Pick the highest-priority model under all its limits.
 
-    Returns a dict shaped like active_model()['data'], or None if every
-    configured model is exhausted.
-    """
-    db = SessionLocal()
-    try:
-        now = ist_now().replace(tzinfo=None)
+    # Returns a dict shaped like active_model()['data'], or None if every
+    # configured model is exhausted.
+    # """
+    # db = SessionLocal()
+    # try:
+    #     now = ist_now().replace(tzinfo=None)
 
-        configs = (
-            db.query(AiModelConfig)
-            .filter(AiModelConfig.admin_id == admin_id)
-            .order_by(AiModelConfig.prioprity_queue.asc().nullslast())
-            .all()
-        )
+    #     configs = (
+    #         db.query(AiModelConfig)
+    #         .filter(AiModelConfig.admin_id == admin_id)
+    #         .order_by(AiModelConfig.prioprity_queue.asc().nullslast())
+    #         .all()
+    #     )
 
-        for config in configs:
-            usage = db.query(AiModelUsage).filter(
-                AiModelUsage.ai_model_config_id == config.ai_model_config_id
-            ).first()
+    #     for config in configs:
+    #         usage = db.query(AiModelUsage).filter(
+    #             AiModelUsage.ai_model_config_id == config.ai_model_config_id
+    #         ).first()
 
-            if _is_model_available(usage, now):
+    #         if _is_model_available(usage, now):
                 # optional: persist the switch so is_active reflects reality
                 # db.query(AiModelConfig).update({AiModelConfig.is_active: False}, ...)
                 # config.is_active = True
                 # if usage: usage.is_rate_limited = False
                 # db.commit()
 
-                model = config.ai_model      # relationship
-                version = config.ai_model_version
-                print(f"Selected model: {model.model_name}, version: {version.version_name if version else None}, config_id: {config.ai_model_config_id}")
-                return {
-                    "model_config_id": config.ai_model_config_id,
-                    "model_name": (model.model_name or "ollama"),
-                    "version_name": (version.version_name if version else None),
-                    "base_url": config.base_url,
-                    "apikey": config.apikey,   # still encrypted; decrypt at call site
-                    "max_tokens": config.max_tokens,
-                }
+                # model = config.ai_model      # relationship
+                # version = config.ai_model_version
+                # print(f"Selected model: {model.model_name}, version: {version.version_name if version else None}, config_id: {config.ai_model_config_id}")
+                # return {
+                #     "model_config_id": config.ai_model_config_id,
+                #     "model_name": (model.model_name or "ollama"),
+                #     "version_name": (version.version_name if version else None),
+                #     "base_url": config.base_url,
+                #     "apikey": config.apikey,   # still encrypted; decrypt at call site
+                #     "max_tokens": config.max_tokens,
+                # }
 
             # optional observability: mark it rate-limited + retry_after
             # if usage:
@@ -403,6 +431,6 @@ def select_available_model(admin_id):
             #     usage.retry_after = (usage.minute_window_start or now) + timedelta(minutes=1)
             #     db.commit()
 
-        return None  # everything exhausted
-    finally:
-        db.close()
+    #     return None  # everything exhausted
+    # finally:
+    #     db.close()

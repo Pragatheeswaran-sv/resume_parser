@@ -36,6 +36,7 @@ from src.services.admin.service import (
     new_job,
     pause_extraction,
     profile,
+    reorder_model_priority,
     resume_extraction,
     revoke_refresh_tokens,
     rotate_refresh_token,
@@ -684,6 +685,16 @@ def get_model_config(payload: Dict[str, Any], _admin=Depends(get_current_admin))
                 "status": "error",
                 "message": str(e),
             })
+    
+@router.patch("/reorder_model_priority/")
+def reorder_priority(model_config_id, new_priority, _admin=Depends(get_current_admin)):
+    try:
+        admin_id = _admin.admin_id
+        return reorder_model_priority(model_config_id, int(new_priority), admin_id)
+    except ValueError as e:
+        logger.warning("[reorder_priority] Error: %s", str(e), exc_info=True)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail={"status": "error", "message": str(e)})
     
 @router.get("/get_model_config/")
 # def fetch_model_config(admin_id):
