@@ -300,12 +300,13 @@ def _is_model_available(usage, now, needed_tokens: int = 0) -> bool:
         return False
     return True
 
-def select_available_model(admin_id):
+def select_available_model(admin_id, exclude_ids: set = None):
     """Runs on every request. Picks the highest-priority available model.
     Only writes to the DB when state actually changes (avoids per-request
     write load / lock contention).
     """
     db = SessionLocal()
+    exclude_ids = exclude_ids or set()
     try:
         now = ist_now().replace(tzinfo=None)
         rows = (
@@ -325,6 +326,8 @@ def select_available_model(admin_id):
         chosen_usage = None
         dirty = False
         for config, usage in rows:
+            if config.ai_model_config_id in exclude_ids:
+                continue
             needed = config.max_tokens or 0
             if _is_model_available(usage, now, needed):
                 chosen_config = config
