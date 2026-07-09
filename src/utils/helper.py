@@ -228,8 +228,13 @@ def calculate_match_score(
         if jd_skills else 0
     )
     
-    required_exp = float(required_exp or 0)
-    candidate_exp = float(candidate_exp or 0)
+    def _to_float(value):
+        try:
+            return float(value or 0)
+        except (TypeError, ValueError):
+            return 0.0
+    required_exp = _to_float(required_exp)
+    candidate_exp = _to_float(candidate_exp)
 
     if required_exp == 0 and candidate_exp == 0:
         experience_score = 100

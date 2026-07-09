@@ -1511,11 +1511,15 @@ def search_resumes(filters: dict, export: bool = False) -> list:
         query = query.limit(page_size).offset((page - 1) * page_size)
 
         data = query.all()
-        jd_role = filters.get("roles") or []
-        jd_role = db.query(Role.role).filter(Role.role_id.in_(jd_role)).first()
+        jd_role_ids = filters.get("roles") or []
+        jd_role_row = db.query(Role.role).filter(Role.role_id.in_(jd_role_ids)).first()
+        jd_role = jd_role_row.role if jd_role_row else ""
+
         jd_skill = filters.get("skills") or []
         jd_skills = [skill.skill for skill in db.query(Skill.skill).filter(Skill.skill_id.in_(jd_skill)).all()]
-        jd_exp = filters.get("max_experience", 0)
+
+        jd_exp = normalize_experience(filters.get("max_experience", 0))
+
         results = []
         for row in data:
             candidate_info = row.candidate_info
@@ -1526,7 +1530,7 @@ def search_resumes(filters: dict, export: bool = False) -> list:
                 for item in candidate_skills_list
                 if isinstance(item, dict) and item.get("skill")
             ]
-            rate_experience = candidate_info.get("total_experience", 0) or 0
+            rate_experience = normalize_experience(candidate_info.get("total_experience", 0))
             rate_role = candidate_info.get("candidate_role", "") or ""
             
             candidate_rating = calculate_match_score(

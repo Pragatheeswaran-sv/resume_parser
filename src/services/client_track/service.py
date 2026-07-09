@@ -1853,7 +1853,19 @@ def modify_interview_status(
                 )
 
             elif updated_status == "rejected":
-                candidate_interview.status = "rejected"
+                candidate_interview.status = (
+                    f"round {interview_status.round_no} rejected"
+                )
+
+            elif updated_status == "rescheduled":
+                candidate_interview.status = (
+                    f"round {interview_status.round_no} rescheduled"
+                )
+            
+            elif updated_status == "cancelled":
+                candidate_interview.status = (
+                    f"round {interview_status.round_no} cancelled"
+                )
 
             candidate_interview.updated_by = user_name
 
