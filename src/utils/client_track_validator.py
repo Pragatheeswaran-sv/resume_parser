@@ -1200,10 +1200,11 @@ def validate_modify_interview_status(
             continue
 
         if isinstance(value, str) and not value.strip():
-            errors.append({
-                "field": field,
-                "message": f"{field} cannot be empty."
-            })
+            if field != "feedback":
+                errors.append({
+                    "field": field,
+                    "message": f"{field} cannot be empty."
+                })
 
     if not interview_status_id:
         errors.append({

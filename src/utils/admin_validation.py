@@ -883,6 +883,103 @@ def validate_model_version(model_id):
 
     return validation_response(errors)
 
+# def validate_model_config(payload, admin_id):
+#     errors = []
+
+#     model_id = payload.get("model_id")
+#     model_version_id = payload.get("model_version_id")
+#     apikey = payload.get("apikey")
+#     max_tokens = payload.get("max_tokens")
+#     temperature = payload.get("temperature")
+
+#     validate_uuid(admin_id, "admin_id", errors)
+
+#     validate_uuid(model_id, "model_id", errors)
+
+#     validate_uuid(model_version_id, "model_version_id", errors)
+
+#     if not apikey or not str(apikey).strip():
+#         errors.append({
+#             "field": "apikey",
+#             "message": "API key is required."
+#         })
+
+#     if max_tokens is not None:
+#         try:
+#             max_tokens = int(max_tokens)
+
+#             if max_tokens <= 0:
+#                 errors.append({
+#                     "field": "max_tokens",
+#                     "message": "Max tokens must be greater than 0."
+#                 })
+
+#         except (ValueError, TypeError):
+#             errors.append({
+#                 "field": "max_tokens",
+#                 "message": "Max tokens must be a valid integer."
+#             })
+
+#     if temperature is not None:
+#         try:
+#             temperature = float(temperature)
+
+#             if temperature < 0 or temperature > 2:
+#                 errors.append({
+#                     "field": "temperature",
+#                     "message": "Temperature must be between 0 and 2."
+#                 })
+
+#         except (ValueError, TypeError):
+#             errors.append({
+#                 "field": "temperature",
+#                 "message": "Temperature must be a valid number."
+#             })
+
+#     rate_limit_fields = [
+#         ("request_per_minute", payload.get("request_per_minute")),
+#         ("request_per_day", payload.get("request_per_day")),
+#         ("token_per_minute", payload.get("token_per_minute")),
+#         ("token_per_day", payload.get("token_per_day")),
+#     ]
+
+#     parsed = {}
+#     for field_name, value in rate_limit_fields:
+#         if value is None:
+#             continue
+
+#         if not isinstance(value, int) or isinstance(value, bool):
+#             errors.append({
+#                 "field": field_name,
+#                 "message": f"{field_name.replace('_', ' ').title()} must be an integer."
+#             })
+#             continue
+
+#         if value <= 0:
+#             errors.append({
+#                 "field": field_name,
+#                 "message": f"{field_name.replace('_', ' ').title()} must be greater than 0."
+#             })
+#             continue
+
+#         parsed[field_name] = value
+
+#     if "request_per_minute" in parsed and "request_per_day" in parsed:
+#         if parsed["request_per_minute"] > parsed["request_per_day"]:
+#             errors.append({
+#                 "field": "request_per_minute",
+#                 "message": "Requests per minute cannot exceed requests per day."
+#             })
+
+#     if "token_per_minute" in parsed and "token_per_day" in parsed:
+#         if parsed["token_per_minute"] > parsed["token_per_day"]:
+#             errors.append({
+#                 "field": "token_per_minute",
+#                 "message": "Tokens per minute cannot exceed tokens per day."
+#             })
+
+#     return validation_response(errors)
+
 def validate_model_config(payload, admin_id):
     errors = []
 
@@ -934,6 +1031,61 @@ def validate_model_config(payload, admin_id):
             errors.append({
                 "field": "temperature",
                 "message": "Temperature must be a valid number."
+            })
+
+    rate_limit_fields = [
+        ("request_per_minute", payload.get("request_per_minute")),
+        ("request_per_day", payload.get("request_per_day")),
+        ("token_per_minute", payload.get("token_per_minute")),
+        ("token_per_day", payload.get("token_per_day")),
+    ]
+
+    parsed = {}
+    for field_name, value in rate_limit_fields:
+        if value is None:
+            continue
+
+        if not isinstance(value, int) or isinstance(value, bool):
+            errors.append({
+                "field": field_name,
+                "message": f"{field_name.replace('_', ' ').title()} must be an integer."
+            })
+            continue
+
+        if value <= 0:
+            errors.append({
+                "field": field_name,
+                "message": f"{field_name.replace('_', ' ').title()} must be greater than 0."
+            })
+            continue
+
+        parsed[field_name] = value
+
+    if "request_per_minute" in parsed and "request_per_day" in parsed:
+        if parsed["request_per_minute"] > parsed["request_per_day"]:
+            errors.append({
+                "field": "request_per_minute",
+                "message": "Requests per minute cannot exceed requests per day."
+            })
+
+    if "token_per_minute" in parsed and "token_per_day" in parsed:
+        if parsed["token_per_minute"] > parsed["token_per_day"]:
+            errors.append({
+                "field": "token_per_minute",
+                "message": "Tokens per minute cannot exceed tokens per day."
+            })
+
+    priority_queue = payload.get("priority_queue")
+    if priority_queue is not None:
+        if not isinstance(priority_queue, int) or isinstance(priority_queue, bool):
+            errors.append({
+                "field": "priority_queue",
+                "message": "Priority queue must be an integer."
+            })
+        elif priority_queue <= 0:
+            errors.append({
+                "field": "priority_queue",
+                "message": "Priority queue must be greater than 0."
             })
 
     return validation_response(errors)

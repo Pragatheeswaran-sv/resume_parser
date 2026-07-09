@@ -11,6 +11,7 @@ import pandas as pd
 from alembic.util import status
 from fastapi import HTTPException
 import ollama
+from langchain_ollama import ChatOllama
 from dotenv import load_dotenv
 from email.utils import parseaddr
 from pypdf import PdfReader
@@ -25,13 +26,13 @@ from src.candidate.models import (
     Candidate, CandidateSkills, CandidateEducation, 
     WorkExperience, Skill, Education, Company, Role
 )
-from src.services.admin.service import get_model
+from src.services.admin.service import active_model, get_model
 from src.admin.models import Admin, AiModel, AiModelConfig, AiModelversion
 
 from openai import OpenAI
 from anthropic import Anthropic
 
-from src.utils.helper import calculate_match_score, clean_mobile_number, compress_file
+from src.utils.helper import calculate_match_score, clean_mobile_number, compress_file, decrypt_data, record_model_usage, select_available_model
 BASE_DIR = "/app"  
 EXPORT_PATH = os.path.join(BASE_DIR, "export_files")
 
@@ -393,6 +394,78 @@ def extract_docx_text(path):
     return "\n".join(unique_text)
     # return preprocess_resume_text("\n".join(unique_text))
 
+def run_llm_json(prompt: str, text: str, system: str = "You only return JSON", max_retries: int = 3):
+    """Select an available model and call it, retrying with the next-priority
+    model on failure. Returns a parsed JSON dict. Raises if all models fail."""
+    db = SessionLocal()
+    try:
+        admin = db.query(Admin).filter(Admin.is_active == True).first()
+        if not admin:
+            raise Exception("No admin found")
+        admin_id = admin.admin_id
+        admin_name = admin.name
+    finally:
+        db.close()
+
+    failed_ids = set()
+    last_error = None
+
+    for _ in range(max_retries):
+        model_info = select_available_model(admin_id, exclude_ids=failed_ids)
+        if not model_info:
+            break
+
+        model_config_id = model_info.get("model_config_id")
+        model = model_info.get("model_name", "ollama").lower()
+        version = model_info.get("version_name", "llama3").lower()
+        base_url = model_info.get("base_url")
+        api_key = decrypt_data(model_info.get("apikey"))
+
+        message = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt + "\n\nDocument:\n" + text[:12000]},
+        ]
+
+        try:
+            if model == "openai":
+                if not api_key:
+                    raise Exception("OpenAI API key not found")
+                client = OpenAI(api_key=api_key, base_url=base_url)
+                response = client.chat.completions.create(model=version, messages=message)
+                content = response.choices[0].message.content.strip()
+                record_model_usage(model_config_id, response.usage.total_tokens, admin_name)
+
+            elif model == "claude":
+                if not api_key:
+                    raise Exception("Claude API key not found")
+                client = Anthropic(api_key=api_key)
+                response = client.messages.create(
+                    model=version, max_tokens=1000, system=system,
+                    messages=[{"role": "user", "content": prompt + "\n\nDocument:\n" + text[:12000]}],
+                )
+                content = response.content[0].text.strip()
+                token_used = response.usage.input_tokens + response.usage.output_tokens
+                record_model_usage(model_config_id, token_used, admin_name)
+
+            else:
+                response = ollama.chat(model=version, messages=message)
+                content = response["message"]["content"].strip()
+
+            start = content.find("{")
+            end = content.rfind("}") + 1
+            if start == -1 or end == 0:
+                raise ValueError("No valid JSON object found in model response")
+
+            return json.loads(content[start:end])
+
+        except Exception as call_err:
+            last_error = call_err
+            logger.warning("[run_llm_json] model=%s failed, trying next: %s", model, call_err)
+            failed_ids.add(model_config_id)
+            continue
+
+    raise Exception(f"All AI model attempts failed: {last_error}")
+
 def extract_text_from_docx(path):
     text = ""
     try:
@@ -402,6 +475,123 @@ def extract_text_from_docx(path):
     except Exception as e:
         logger.info(f"[ERROR] DOCX read failed: {path} -> {e}")
     return text
+
+# def is_resume(text: str) -> bool:
+#     """Classify whether a document is a resume/CV using the local LLM."""
+
+#     prompt = """ 
+#         You are a strict classifier.
+
+#         Return ONLY JSON:
+#         {"is_resume": true} or {"is_resume": false}
+
+#         Rules:
+#         - Return TRUE only if this is clearly a complete resume/CV
+#         - A resume MUST contain at least 2 of these sections:
+#         Skills, Experience, Education, Projects
+
+#         - Return FALSE if:
+#         - It is random text
+#         - It is invoice, email, report, or any other document
+#         - It looks like partial resume content
+
+#         - If unsure → return FALSE
+#         """
+
+#     try:
+#         db = SessionLocal()
+#         admin = db.query(Admin).filter(Admin.is_active == True).first()
+
+#         if not admin:   
+#             logger.warning("No admin found, defaulting to ollama with latest model")
+#             raise Exception("No admin found")
+        
+#         admin_id = admin.admin_id
+
+#         model_info = select_available_model(admin_id)
+    
+#         if not model_info:
+#             raise Exception("No active AI model configured")
+        
+#         model_config_id = model_info.get("model_config_id")
+#         model = model_info.get("model_name", "ollama").lower()
+#         version = model_info.get("version_name", "llama3").lower()
+#         base_url = model_info.get("base_url")
+#         api_key = model_info.get("apikey")
+        
+#         api_key = decrypt_data(api_key)
+       
+
+#         message = [
+#                     {"role": "system", "content": "You only return JSON"},
+#                     {"role": "user", "content": prompt + "\n\nDocument:\n" + text[:12000]}
+#                 ]
+
+#         if model == "openai":
+#             if not api_key or api_key == None:
+#                 raise Exception("OpenAI API key not found")
+
+#             client = OpenAI(
+#                 api_key = api_key,
+#                 base_url = base_url
+#                 )
+
+#             response = client.chat.completions.create(
+#                 model = version,
+#                 messages = message
+#             )
+#             content = response.choices[0].message.content.strip()
+#             token_used = response.usage.total_tokens
+    
+#             usage = record_model_usage(model_config_id, token_used, admin.name)
+#             logger.info(f'{usage}, token used for the prompt: {token_used}')
+#             logger.info(f" the response from OpenAi {response}")
+#         elif model == "claude":
+#             if not api_key or api_key == None:
+#                 raise Exception("Claude API key not found")
+
+#             client = Anthropic(api_key=api_key)
+
+#             response = client.messages.create(
+#                 model=version,
+#                 max_tokens=1000,
+#                 system="You only return JSON",
+#                 messages=[
+#                     {"role": "user", "content": prompt + "\n\nDocument:\n" + text[:12000]}
+#                 ]
+#             )
+#             content = response.content[0].text.strip()
+#             logger.info(f" the response from Claude {response}")
+#         else:
+#             client = ollama
+#             response = client.chat(
+#                 model = version,
+#                 messages = message
+#             )
+#             logger.info(f" the response from Ollama {response}")
+#             content = response["message"]["content"].strip()
+
+#         try:
+#             start = content.find("{")
+#             end = content.rfind("}") + 1
+
+#             if start == -1 or end == 0:
+#                 raise ValueError("No valid JSON object found in model response")
+
+#             json_str = content[start:end]
+#             data = json.loads(json_str)
+#             logger.info(f"is_resume classification result: {data}")
+#         except json.JSONDecodeError as e:
+#             logger.error(f"Invalid JSON returned by model: {content}")
+#             raise ValueError("Model returned invalid JSON") from e
+#         resume_state = data.get("is_resume", False)
+#         return resume_state
+
+#     except Exception as e:
+#         logger.error("Resume detection failed: %s", e)
+#         return False
+#     finally:
+#         db.close()
 
 def is_resume(text: str) -> bool:
     """Classify whether a document is a resume/CV using the local LLM."""
@@ -424,107 +614,9 @@ def is_resume(text: str) -> bool:
 
         - If unsure → return FALSE
         """
-
-    try:
-        db = SessionLocal()
-        admin = db.query(Admin).filter(Admin.is_active == True).first()
-
-        if not admin:   
-            logger.warning("No admin found, defaulting to ollama with latest model")
-            raise Exception("No admin found")
-        
-        admin_id = admin.admin_id
-
-        model_info =( db.query(
-            func.json_build_object(
-                'model_name', AiModel.model_name,
-                'model_version_name', AiModelversion.version_name,
-                'apikey', AiModelConfig.apikey,
-                'max_tokens', AiModelConfig.max_tokens,
-                'temperature', AiModelConfig.temparature,
-                'is_active', AiModelConfig.is_active
-            )
-        )
-        .select_from(AiModelConfig).
-        join(AiModel, AiModel.ai_model_id == AiModelConfig.ai_model_id).
-        join(AiModelversion, AiModelversion.ai_model_version_id == AiModelConfig.ai_model_version_id).
-        filter(AiModelConfig.is_active == True).
-        first()
-        )
-
-        if not model_info:
-            model_info = {}
-        else:
-            model_info = model_info[0]
-
-        model = model_info.get("model_name", "ollama").lower()
-        version = model_info.get("model_version_name", "llama3").lower()
-        api_key = model_info.get("apikey") or None
-
-        message = [
-                    {"role": "system", "content": "You only return JSON"},
-                    {"role": "user", "content": prompt + "\n\nDocument:\n" + text[:12000]}
-                ]
-        
-        if model == "openai":
-            if not api_key or api_key == None:
-                raise Exception("OpenAI API key not found")
-
-            client = OpenAI(api_key=api_key)
-
-            response = client.chat.completions.create(
-                model = version,
-                messages = message
-            )
-            content = response.choices[0].message.content.strip()
-            logger.info(f" the response from OpenAi {response}")
-        elif model == "claude":
-            if not api_key or api_key == None:
-                raise Exception("Claude API key not found")
-
-            client = Anthropic(api_key=api_key)
-
-            response = client.messages.create(
-                model=version,
-                max_tokens=1000,
-                system="You only return JSON",
-                messages=[
-                    {"role": "user", "content": prompt + "\n\nDocument:\n" + text[:12000]}
-                ]
-            )
-            content = response.content[0].text.strip()
-            logger.info(f" the response from Claude {response}")
-        else:
-            client = ollama
-            response = client.chat(
-                model = version,
-                messages = message
-            )
-            logger.info(f" the response from Ollama {response}")
-            content = response["message"]["content"].strip()
-
-        try:
-            start = content.find("{")
-            end = content.rfind("}") + 1
-
-            if start == -1 or end == 0:
-                raise ValueError("No valid JSON object found in model response")
-
-            json_str = content[start:end]
-            data = json.loads(json_str)
-            logger.info(f"is_resume classification result: {data}")
-        except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON returned by model: {content}")
-            raise ValueError("Model returned invalid JSON") from e
-        resume_state = data.get("is_resume", False)
-        return resume_state
-
-    except Exception as e:
-        logger.error("Resume detection failed: %s", e)
-        return False
-    finally:
-        db.close()
-
+    data = run_llm_json(prompt, text)
+    return bool(data.get("is_resume", False))
+    
 def extract_basic_info(resume_text):
     """Use local Ollama LLM to extract structured info from resume text."""
     logger.info('This process started=>>>>')
@@ -626,104 +718,203 @@ def extract_basic_info(resume_text):
         - No trailing commas
         - Strict JSON only
         """
-    try:
-        db = SessionLocal()
-        admin = db.query(Admin).filter(Admin.is_active == True).first()
-
-        if not admin:   
-            logger.warning("No admin found, defaulting to ollama with latest model")
-            raise Exception("No admin found")
-        
-        admin_id = admin.admin_id
-        model_info = get_model(page = 1, page_size = 100, sort_by = None, sort_order = None, filter_column = None, filter_value = None, admin_id = admin_id)
-
-        model_info =( db.query(
-            func.json_build_object(
-                'model_name', AiModel.model_name,
-                'model_version_name', AiModelversion.version_name,
-                'apikey', AiModelConfig.apikey,
-                'max_tokens', AiModelConfig.max_tokens,
-                'temperature', AiModelConfig.temparature,
-                'is_active', AiModelConfig.is_active
-            )
-        )
-        .select_from(AiModelConfig).
-        join(AiModel, AiModel.ai_model_id == AiModelConfig.ai_model_id).
-        join(AiModelversion, AiModelversion.ai_model_version_id == AiModelConfig.ai_model_version_id).
-        filter(AiModelConfig.is_active == True).
-        first()
-        )
-
-        if not model_info:
-            model_info = {}
-        else:
-            model_info = model_info[0]
-
-        model = model_info.get("model_name", "llama3").lower()
-        version = model_info.get("model_version_name", "latest").lower()
-        api_key = model_info.get("apikey") or None
-        
-        message = [
-                    {"role": "system", "content": "You only return JSON"},
-                    {"role": "user", "content": prompt + "\n\nDocument:\n" + resume_text[:12000]}
-                ]
-
-        if model == "openai":
-            if not api_key or api_key == None:
-                raise Exception("OpenAI API key not found")
-
-            client = OpenAI(api_key=api_key)
-
-            response = client.chat.completions.create(
-                model = version,
-                messages = message
-            )
-            content = response.choices[0].message.content.strip()
-            logger.info(f" the response from OpenAi {response}")
-        elif model == "claude":
-            if not api_key or api_key == None:
-                raise Exception("Claude API key not found")
-
-            client = Anthropic(api_key=api_key)
-
-            response = client.messages.create(
-                model=version,
-                max_tokens=1000,
-                system="You only return JSON",
-                messages=[
-                    {"role": "user", "content": prompt + "\n\nDocument:\n" + resume_text[:12000]}
-                ]
-            )
-            content = response.content[0].text.strip()
-            logger.info(f" the response from Claude {response}")
-        else:
-            client = ollama
-            response = client.chat(
-                model = version,
-                messages = message
-            )
-            logger.info(f" the response from Ollama {response}")
-            content = response["message"]["content"].strip()
-
-        try:
-            start = content.find("{")
-            end = content.rfind("}") + 1
-
-            if start == -1 or end == 0:
-                raise ValueError("No valid JSON object found in model response")
-
-            json_str = content[start:end]
-            data = json.loads(json_str)
-            logger.info(f"is_resume classification result: {data}")
-        except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON returned by model: {content}")
-            raise ValueError("Model returned invalid JSON") from e
-       
-        return data
     
-    except Exception as e:
-        logger.info(f"[ERROR] LLM parse failed: {e}")
-        return None
+    return run_llm_json(prompt, resume_text)
+
+# def extract_basic_info(resume_text):
+#     """Use local Ollama LLM to extract structured info from resume text."""
+#     logger.info('This process started=>>>>')
+#     logger.info("This extract_basic_info executed -----> ")
+#     OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+#     prompt = """
+#         You are a highly accurate resume parser.
+
+#         Extract structured candidate information from the given resume.
+
+#         Return ONLY valid JSON.
+#         Do NOT add explanation.
+#         Do NOT add any text before or after JSON.
+
+#         STRICT JSON FORMAT:
+
+#         {
+#             "name": "",
+#             "total_experience": 0,
+#             "email": "",
+#             "phone_number": "",
+#             "location": "",
+#             "role": "",
+#             "skills": [],
+#             "education": [
+#                 {
+#                     "qualification": "",
+#                     "institution": "",
+#                     "percentage": "",
+#                     "passout_year": ""
+#                 }
+#             ],
+#             "work_experience": [
+#                 {
+#                     "company_name": "",
+#                     "role": "",
+#                     "start_date": "",
+#                     "end_date": ""
+#                 }
+#             ]
+#         }
+
+#         STRICT RULES:
+
+#         1. ALWAYS return all keys. Do NOT skip any field.
+
+#         2. If any value is missing:
+#         - Use "" for strings
+#         - Use 0 for total_experience
+#         - Use [] for arrays
+
+#         3. DO NOT return null.
+
+#         4. total_experience must be a NUMBER (years).
+
+#         5. SKILLS EXTRACTION (STRICT): If a skill entry contains separators like ":", "-", "–", "—", or "|", discard everything before the first separator and extract only the content after it, then split by "," and return each item as an individual skill (e.g., "Cloud: AWS, GCP", "Cloud - AWS, GCP" → ["AWS","GCP"]); if no separator is present, extract skills normally as individual keywords; always return a flat list with no prefixes, no grouping, no sentences, and no duplicates. 
+#         Do NOT return full sentences.
+
+#         6. DATE NORMALIZATION (VERY IMPORTANT): Convert all dates to format YYYY-MM (e.g., 2016-06) OR YYYY (e.g., 2016); examples: "June 2016" -> "2016-06", "Feb 2017" -> "2017-02", "2018" -> "2018"; if only month/year given -> convert to YYYY-MM; if invalid text like "Year 11" -> return "".
+
+#         7. passout_year must be ONLY a YEAR (YYYY).
+#         - If not a valid year -> return ""
+
+#         8. EDUCATION PERCENTAGE EXTRACTION (STRICT):
+
+#         Extract percentage/CGPA/GPA only if explicitly mentioned near the education entry.
+
+#         Examples:
+#         - "85%" -> "85"
+#         - "CGPA 8.2" -> "77.9" (CGPA × 9.5)
+#         - "GPA 3.8/4" -> "95" ((GPA / 4) × 100)
+
+#         Return ONLY the final percentage value as string.
+
+#         Do NOT guess, mix values between education entries, or extract unrelated numbers.
+#         If no valid value exists, return "".
+
+#         9. work_experience dates must ALWAYS follow YYYY-MM or YYYY.
+#         - If end_date is "present" -> return "Present"
+
+#         10. DO NOT include words like:
+#         - "June", "Feb", "Year 11", "Currently"
+#         Only return normalized values.
+
+#         11. Do NOT guess missing data except for top-level role inference from skills.
+
+#         12. Ensure output is valid JSON (parsable).
+
+#         13. Infer top-level "role" ONLY from technical skills; do not use summary, titles, company, projects, responsibilities, certifications, education, or any other content. Keep it short and professional; if unclear, return "".
+
+#         14. Example mappings: Python/FastAPI/Django -> Python Developer, React/JS/HTML/CSS -> Frontend Developer, Node/Express/MongoDB -> Backend Developer, React+Node -> Full Stack Developer, Java/Spring -> Java Developer, Selenium/Testing -> QA Engineer, AWS/Docker/K8s/Jenkins -> DevOps Engineer, ML/NLP/TensorFlow -> Machine Learning Engineer, Power BI/Tableau/SQL -> Data Analyst, Python/Pandas/ETL -> Data Engineer, Kotlin/Java -> Android Developer, Swift/iOS -> iOS Developer, PHP/Laravel -> PHP Developer, C#/.NET -> .NET Developer.
+
+#         15. work_experience.role must be extracted only if explicitly mentioned; otherwise return "".
+
+#         IMPORTANT:
+#         - Top-level "role" must be based ONLY on skills.
+#         - Do NOT use any other information for top-level role inference.
+#         - No extra text
+#         - No trailing commas
+#         - Strict JSON only
+#         """
+#     try:
+#         db = SessionLocal()
+#         admin = db.query(Admin).filter(Admin.is_active == True).first()
+
+#         if not admin:   
+#             logger.warning("No admin found, defaulting to ollama with latest model")
+#             raise Exception("No admin found")
+        
+#         admin_id = admin.admin_id
+
+#         model_info = select_available_model(admin_id)
+    
+#         if not model_info:
+#             raise Exception("No active AI model configured")
+        
+#         model_config_id = model_info.get("model_config_id")
+#         model = model_info.get("model_name", "ollama").lower()
+#         version = model_info.get("version_name", "llama3").lower()
+#         base_url = model_info.get("base_url")
+#         api_key = model_info.get("apikey")
+#         api_key = decrypt_data(api_key)
+        
+#         message = [
+#                     {"role": "system", "content": "You only return JSON"},
+#                     {"role": "user", "content": prompt + "\n\nDocument:\n" + resume_text[:12000]}
+#                 ]
+
+#         if model == "openai":
+#             if not api_key or api_key == None:
+#                 raise Exception("OpenAI API key not found")
+
+#             client = OpenAI(
+#                 api_key = api_key,
+#                 base_url = base_url
+#                 )
+
+#             response = client.chat.completions.create(
+#                 model = version,
+#                 messages = message
+#             )
+#             content = response.choices[0].message.content.strip()
+
+#             token_used = response.usage.total_tokens
+            
+#             usage = record_model_usage(model_config_id, token_used, admin.name)
+#             logger.info(f'{usage}, token used for the prompt: {token_used}')
+
+#             logger.info(f" the response from OpenAi {response}")
+#         elif model == "claude":
+#             if not api_key or api_key == None:
+#                 raise Exception("Claude API key not found")
+
+#             client = Anthropic(api_key=api_key)
+
+#             response = client.messages.create(
+#                 model=version,
+#                 max_tokens=1000,
+#                 system="You only return JSON",
+#                 messages=[
+#                     {"role": "user", "content": prompt + "\n\nDocument:\n" + resume_text[:12000]}
+#                 ]
+#             )
+#             content = response.content[0].text.strip()
+#             logger.info(f" the response from Claude {response}")
+#         else:
+#             client = ollama
+#             response = client.chat(
+#                 model = version,
+#                 messages = message
+#             )
+#             logger.info(f" the response from Ollama {response}")
+#             content = response["message"]["content"].strip()
+
+#         try:
+#             start = content.find("{")
+#             end = content.rfind("}") + 1
+
+#             if start == -1 or end == 0:
+#                 raise ValueError("No valid JSON object found in model response")
+
+#             json_str = content[start:end]
+#             data = json.loads(json_str)
+#             logger.info(f"is_resume classification result: {data}")
+#         except json.JSONDecodeError as e:
+#             logger.error(f"Invalid JSON returned by model: {content}")
+#             raise ValueError("Model returned invalid JSON") from e
+       
+#         return data
+    
+#     except Exception as e:
+#         logger.info(f"[ERROR] LLM parse failed: {e}")
+#         return None
+
 
 # def process_resumes(folder_path:str, message_id: int):
 #     start = time.time()
@@ -813,64 +1004,111 @@ def process_resumes(email_id: UUID) -> dict:
 
         results = []
         file_path = ""
-        attachment_ids = []
+        # attachment_ids = []
+        kept_files = []  # (attachment_id, file_path) for confirmed resumes only
+        # for att in all_attachments:
+        #     file_path = f"attachments/{att.file_name}"
+        #     attachment_ids.append(att.attachment_id)
+        #     if file_path.endswith(".pdf"):
+        #         text = extract_text_from_pdf(file_path)
+        #     elif file_path.endswith(".docx"):
+        #         # text = extract_text_from_docx(file_path)
+        #         text = extract_docx_text(file_path)
+        #     else:
+        #         continue
+
+        #     if not text.strip():
+        #         logger.info("Empty document, skipping: %s", att.file_name)
+        #         continue
+
+        #     resume_flag = is_resume(text)
+        #     att.is_resume = resume_flag
+        #     db.commit()
+        #     logger.info("Classified %s — is_resume=%s", att.file_name, resume_flag)
+
+        #     if resume_flag == False:
+        #         if os.path.exists(file_path):
+        #             os.remove(file_path)
+        #             logger.info(f"{file_path} removed successfully")
+        #         else:
+        #             logger.info(f"{file_path} does not exist")
+                
+        #     if not resume_flag:
+        #         continue
+
+        #     info = extract_basic_info(text)
+        #     if info:
+        #         info["file_name"] = att.file_name
+        #         results.append({
+        #             "info": info,
+        #             "text": text,
+        #             "attachment_id": att.attachment_id,
+        #             "sender_email": parse_email_address(email_obj.sender)
+        #         })
+        #     logger.info("Extracted info for %s", att.file_name)
+
         for att in all_attachments:
             file_path = f"attachments/{att.file_name}"
-            attachment_ids.append(att.attachment_id)
-            if file_path.endswith(".pdf"):
-                text = extract_text_from_pdf(file_path)
-            elif file_path.endswith(".docx"):
-                # text = extract_text_from_docx(file_path)
-                text = extract_docx_text(file_path)
-            else:
-                continue
-
-            if not text.strip():
-                logger.info("Empty document, skipping: %s", att.file_name)
-                continue
-
-            resume_flag = is_resume(text)
-            att.is_resume = resume_flag
-            db.commit()
-            logger.info("Classified %s — is_resume=%s", att.file_name, resume_flag)
-
-            if resume_flag == False:
-                if os.path.exists(file_path):
-                    os.remove(file_path)
-                    logger.info(f"{file_path} removed successfully")
+            try:
+                if file_path.endswith(".pdf"):
+                    text = extract_text_from_pdf(file_path)
+                elif file_path.endswith(".docx"):
+                    text = extract_docx_text(file_path)
                 else:
-                    logger.info(f"{file_path} does not exist")
-                
-            if not resume_flag:
-                continue
+                    continue
 
-            info = extract_basic_info(text)
-            if info:
-                info["file_name"] = att.file_name
-                results.append({
-                    "info": info,
-                    "text": text,
-                    "attachment_id": att.attachment_id,
-                    "sender_email": parse_email_address(email_obj.sender)
-                })
-            logger.info("Extracted info for %s", att.file_name)
+                if not text.strip():
+                    logger.info("Empty document, skipping: %s", att.file_name)
+                    continue
+
+                resume_flag = is_resume(text)
+                att.is_resume = resume_flag
+                db.commit()
+                logger.info("Classified %s — is_resume=%s", att.file_name, resume_flag)
+
+                if not resume_flag:
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                        logger.info(f"{file_path} removed successfully")
+                    continue
+
+                info = extract_basic_info(text)
+                if info:
+                    info["file_name"] = att.file_name
+                    results.append({
+                        "info": info,
+                        "text": text,
+                        "attachment_id": att.attachment_id,
+                        "sender_email": parse_email_address(email_obj.sender)
+                    })
+                logger.info("Extracted info for %s", att.file_name)
+
+                kept_files.append((att.attachment_id, file_path))
+
+            except Exception as e:
+                db.rollback()
+                logger.warning("Failed to process attachment %s: %s — skipping", att.file_name, e)
+                continue
 
         if results:
             logger.info("Saving %d resume(s) to DB", len(results))
             save_resumes_to_db(results)
 
-        file_compress = compress_file(file_path)
-        for att_id in attachment_ids:
-            attachment = db.query(Attachment).filter(Attachment.attachment_id == att_id).first()
-            attachment.file_name = file_compress
-            db.commit()
-            db.refresh(attachment)
-        
-        if os.path.exists(file_path):
-            os.remove(file_path)
-            logger.info(f"{file_path} removed successfully")
-        logger.info(f'{file_compress}')
-        
+        for att_id, path in kept_files:
+            if not os.path.exists(path):
+                continue
+            compressed_name = compress_file(path)
+            attachment = db.query(Attachment).filter(
+                Attachment.attachment_id == att_id
+            ).first()
+            if attachment:
+                attachment.file_name = compressed_name
+                db.commit()
+                db.refresh(attachment)
+            if os.path.exists(path):
+                os.remove(path)
+                logger.info(f"{path} removed successfully")
+
         return {
             "message_id": str(email_id),
             "processed_files": len(results)
@@ -1027,19 +1265,32 @@ def search_resumes(filters: dict, export: bool = False) -> list:
         if isinstance(roles, list) and roles:
             role_terms = [str(role).strip() for role in roles if str(role).strip()]
             role_ids = []
+
             if role_terms:
-                role_numeric_ids = [rid for rid in (_safe_int(role) for role in role_terms) if rid is not None]
-                role_name_filters = [Role.role.ilike(f"%{term}%") for term in role_terms]
-                role_filters = list(role_name_filters)
-                if role_numeric_ids:
-                    role_filters.append(Role.role_id.in_(role_numeric_ids))
-                role_ids = [
-                    row.role_id
-                    for row in db.query(Role.role_id).filter(
-                        or_(*role_filters)
-                    ).all()
-                ]
-            
+                uuid_role_ids = []
+                role_name_terms = []
+
+                for term in role_terms:
+                    try:
+                        uuid_role_ids.append(UUID(term))
+                    except ValueError:
+                        role_name_terms.append(term)
+
+                if uuid_role_ids:
+                    role_ids.extend(
+                        row.role_id
+                        for row in db.query(Role.role_id).filter(Role.role_id.in_(uuid_role_ids)).all()
+                    )
+
+                if role_name_terms:
+                    role_name_filters = [Role.role.ilike(f"%{term}%") for term in role_name_terms]
+                    role_ids.extend(
+                        row.role_id
+                        for row in db.query(Role.role_id).filter(or_(*role_name_filters)).all()
+                    )
+
+                role_ids = list(dict.fromkeys(role_ids))
+
             if role_ids:
                 conditions.append(
                     Candidate.candidate_id.in_(
@@ -1247,7 +1498,7 @@ def search_resumes(filters: dict, export: bool = False) -> list:
                 df.to_csv(export_file, index=False)
                 logger.info(f"Export completed successfully: {export_file}")
                 result = {"file_path": export_file} 
-                # print('export result-->', result)
+                
                 return result
             else:
                 logger.info("No data to export")
@@ -1269,7 +1520,12 @@ def search_resumes(filters: dict, export: bool = False) -> list:
         for row in data:
             candidate_info = row.candidate_info
             candidate_skills_list = candidate_info.get("skills", [])
-            rate_skill = [item.get("skill") for item in candidate_skills_list if item.get("skill")]
+            
+            rate_skill = [
+                item.get("skill")
+                for item in candidate_skills_list
+                if isinstance(item, dict) and item.get("skill")
+            ]
             rate_experience = candidate_info.get("total_experience", 0) or 0
             rate_role = candidate_info.get("candidate_role", "") or ""
             
@@ -1843,50 +2099,44 @@ def extract_filters_from_query(query: str) -> dict:
             logger.warning("[extract_filters_from_query] No admin found, defaulting to ollama with latest model")
             raise Exception("No admin found")
 
-        model_info = (db.query(
-            func.json_build_object(
-                'model_name', AiModel.model_name,
-                'model_version_name', AiModelversion.version_name,
-                'apikey', AiModelConfig.apikey,
-                'max_tokens', AiModelConfig.max_tokens,
-                'temperature', AiModelConfig.temparature,
-                'is_active', AiModelConfig.is_active
-            )
-        )
-        .select_from(AiModelConfig)
-        .join(AiModel, AiModel.ai_model_id == AiModelConfig.ai_model_id)
-        .join(AiModelversion, AiModelversion.ai_model_version_id == AiModelConfig.ai_model_version_id)
-        .filter(AiModelConfig.is_active == True)
-        .first()
-        )
-
+        model_info = select_available_model(admin.admin_id)
+    
         if not model_info:
-            model_info = {}
-        else:
-            model_info = model_info[0]
+            raise Exception("No active AI model configured")
         
+        model_config_id = model_info.get("model_config_id")
         model = model_info.get("model_name", "ollama").lower()
-        version = model_info.get("model_version_name", "llama3").lower()
-        api_key = model_info.get("apikey") or None
-        
+        version = model_info.get("version_name", "llama3").lower()
+        base_url = model_info.get("base_url")
+        api_key = model_info.get("apikey")
+        api_key = decrypt_data(api_key)
+
         logger.info("[extract_filters_from_query] Using model: %s, version: %s", model, version)
 
         message = [
-            {"role": "system", "content": "You output only JSON."},
+            {"role": "system", "content": "You are a strict JSON extractor for recruiter search queries. Respond with a single valid JSON object only. No markdown fences, no commentary."},
             {"role": "user", "content": prompt + "\n\nQuery:\n" + query[:1000]},
         ]
-
+        
         if model == "openai":
             if not api_key or api_key == None:
                 raise Exception("OpenAI API key not found")
-
-            client = OpenAI(api_key=api_key)
+            
+            client = OpenAI(
+                api_key=api_key,
+                base_url = base_url)
 
             response = client.chat.completions.create(
                 model=version,
                 messages=message
             )
+
             content = response.choices[0].message.content.strip()
+            token_used = response.usage.total_tokens
+    
+            usage = record_model_usage(model_config_id, token_used, admin.name)
+            logger.info(f'{usage}, token used for the prompt: {token_used}')
+            
         elif model == "claude":
             if not api_key or api_key == None:
                 raise Exception("Claude API key not found")
@@ -1896,7 +2146,7 @@ def extract_filters_from_query(query: str) -> dict:
             response = client.messages.create(
                 model=version,
                 max_tokens=1000,
-                system="You output only JSON.",
+                system="You are a strict JSON extractor for recruiter search queries. Respond with a single valid JSON object only. No markdown fences, no commentary.",
                 messages=[
                     {"role": "user", "content": prompt + "\n\nQuery:\n" + query[:1000]}
                 ]

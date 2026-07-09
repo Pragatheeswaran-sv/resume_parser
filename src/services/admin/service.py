@@ -20,7 +20,7 @@ from db.connection import SessionLocal
 from sqlalchemy import UUID, String, func, cast, inspect
 from sqlalchemy.dialects.postgresql import JSON, aggregate_order_by
 from src.admin.models import (
-    Admin, AiModel, AiModelConfig, AiModelversion,
+    Admin, AiModel, AiModelConfig, AiModelUsage, AiModelversion,
     Users, ExtractionConfig, ist_now,
 )
 from src.auth.jwt import (
@@ -1838,6 +1838,249 @@ def model_version(model_id):
 #         db.close()  
 
 # def model_config(payload, admin_id):
+# def model_config(payload, admin_id):
+#     db = SessionLocal()
+#     try:
+#         validation_error = validate_model_config(
+#             payload=payload,
+#             admin_id=admin_id
+#         )
+
+#         if validation_error:
+#             return validation_error
+
+        
+#         model_version_id = payload.get("model_version_id") 
+#         ai_model_id = payload.get("model_id") 
+#         apikey = payload.get("apikey") if payload.get("apikey") else None
+#         version = payload.get("version") if payload.get("version") else None
+#         max_tokens = payload.get("max_tokens") if payload.get("max_tokens") else None
+#         base_url = payload.get("base_url") if payload.get("base_url") else None
+#         prioprity_queue = payload.get("prioprity_queue") if payload.get("prioprity_queue") else None
+#         temperature = payload.get("temperature") if payload.get("temperature") else None
+#         request_per_minute = payload.get("request_per_minute") if payload.get("request_per_minute") else None
+#         request_per_day = payload.get("request_per_day") if payload.get("request_per_day") else None
+#         token_per_minute = payload.get("token_per_minute") if payload.get("token_per_minute") else None
+#         token_per_day = payload.get("token_per_day") if payload.get("token_per_day") else None
+        
+#         model = db.query(AiModel).filter_by(ai_model_id=ai_model_id, is_active=True).first()
+#         if not model:
+#             # return {
+#             #     "status_code": status.HTTP_404_NOT_FOUND,
+#             #     "errors": [
+#             #         {
+#             #             "field": "model_id",
+#             #             "message": "No model found for the given model ID."
+#             #         }
+#             #     ]
+#             # }
+#             return not_found_response("model_id", "No model found for the given model ID.")
+
+#         model_version = db.query(AiModelversion).filter_by(ai_model_version_id=model_version_id, is_active=True).first()
+#         if not model_version:
+#             # return {
+#             #     "status_code": status.HTTP_404_NOT_FOUND,
+#             #     "errors": [
+#             #         {
+#             #             "field": "model_version_id",
+#             #             "message": "No model version found for the given model version ID."
+#             #         }
+#             #     ]
+#             # }
+#             return not_found_response("model_version_id", "No model version found for the given model version ID.")
+        
+#         configs = db.query(AiModelConfig).filter(
+#             AiModelConfig.ai_model_id == ai_model_id,
+#             AiModelConfig.ai_model_version_id == model_version_id
+#         ).all()
+
+#         for config in configs:
+#             if decrypt_data(config.apikey) == apikey:
+#                 # return {
+#                 #     "status_code": status.HTTP_409_CONFLICT,
+#                 #     "errors": [
+#                 #         {
+#                 #             "field": "apikey",
+#                 #             "message": "Model configuration with this API key already exists."
+#                 #         }
+#                 #     ]
+#                 # }
+#                 return error_response(
+#                     409, [{
+#                             "field": "apikey",
+#                             "message": "Model configuration with this API key already exists."
+#                         }])
+        
+#         encrtyped_key = encrypt_data(apikey)
+#         if not encrtyped_key:
+#             return internal_server_error_response(str(e))
+        
+#         new_config = AiModelConfig(
+#             ai_model_version_id = model_version_id,
+#             ai_model_id = ai_model_id,
+#             admin_id = admin_id,
+#             apikey = encrtyped_key,
+#             version = version,
+#             max_tokens = max_tokens,
+#             is_active = False
+#         )
+#         db.add(new_config)
+#         db.commit()
+#         db.refresh(new_config)
+
+#         new_model_usage = db.query(AiModelUsage).filter(AiModelUsage.ai_model_config_id == new_config.ai_model_config_id).first()
+#         if new_model_usage != None:
+#             new_model_usage.minute_requests = request_per_minute
+#             new_model_usage.day_requests = request_per_day
+#             new_model_usage.minute_tokens = token_per_minute
+#             new_model_usage.day_tokens = token_per_day
+
+#             db.commit()
+#             db.refresh(new_model_usage)
+
+#         new_model_usage = AiModelUsage(
+#             ai_model_config_id = new_config.ai_model_config_id,
+#             minute_requests = request_per_minute,
+#             day_requests = request_per_day,
+#             minute_tokens = token_per_minute,
+#             day_tokens = token_per_day)
+        
+#         db.add(new_model_usage)
+#         db.commit()
+
+#         return {
+#             "status": status.HTTP_201_CREATED,
+#             "message": "Model config created successfully",
+#             "data": {
+#                 "model_config_id": str(new_config.ai_model_config_id),
+#                 "model_id": str(new_config.ai_model_id),
+#                 "model_name" : model.model_name,
+#                 "model_version_id": str(new_config.ai_model_version_id),
+#                 "model_version_name": model_version.version_name,
+#                 "admin_id": str(new_config.admin_id),
+#                 "apikey": decrypt_data(new_config.apikey),
+#                 "max_tokens": new_config.max_tokens,
+#             }
+#         }   
+                  
+#     except Exception as e:
+#         logger.warning("[model_config] Error: %s", str(e), exc_info=True)
+#         return internal_server_error_response(str(e))
+#     finally:
+#         db.close()
+        
+# def model_config(payload, admin_id):
+#     db = SessionLocal()
+#     try:
+#         validation_error = validate_model_config(
+#             payload=payload,
+#             admin_id=admin_id
+#         )
+
+#         if validation_error:
+#             return validation_error
+
+#         model_version_id = payload.get("model_version_id")
+#         ai_model_id = payload.get("model_id")
+#         apikey = payload.get("apikey") if payload.get("apikey") else None
+#         version = payload.get("version") if payload.get("version") else None
+#         max_tokens = payload.get("max_tokens") if payload.get("max_tokens") else None
+#         temperature = payload.get("temperature") if payload.get("temperature") else None
+#         request_per_minute = payload.get("request_per_minute") if payload.get("request_per_minute") else None
+#         request_per_day = payload.get("request_per_day") if payload.get("request_per_day") else None
+#         token_per_minute = payload.get("token_per_minute") if payload.get("token_per_minute") else None
+#         token_per_day = payload.get("token_per_day") if payload.get("token_per_day") else None
+#         priority_queue = payload.get("priority_queue")
+
+#         model = db.query(AiModel).filter_by(ai_model_id=ai_model_id, is_active=True).first()
+#         if not model:
+#             return not_found_response("model_id", "No model found for the given model ID.")
+
+#         model_version = db.query(AiModelversion).filter_by(ai_model_version_id=model_version_id, is_active=True).first()
+#         if not model_version:
+#             return not_found_response("model_version_id", "No model version found for the given model version ID.")
+
+#         configs = db.query(AiModelConfig).filter(
+#             AiModelConfig.ai_model_id == ai_model_id,
+#             AiModelConfig.ai_model_version_id == model_version_id
+#         ).all()
+
+#         for config in configs:
+#             if decrypt_data(config.apikey) == apikey:
+#                 return error_response(
+#                     409, [{
+#                             "field": "apikey",
+#                             "message": "Model configuration with this API key already exists."
+#                         }])
+
+#         if priority_queue is None:
+#             max_priority = db.query(func.max(AiModelConfig.prioprity_queue)).filter(
+#                 AiModelConfig.admin_id == admin_id
+#             ).scalar()
+#             priority_queue = (max_priority or 0) + 1
+#         else:
+#             existing_priority = db.query(AiModelConfig).filter(
+#                 AiModelConfig.admin_id == admin_id,
+#                 AiModelConfig.prioprity_queue == priority_queue
+#             ).first()
+#             if existing_priority:
+#                 return error_response(
+#                     409, [{
+#                             "field": "priority_queue",
+#                             "message": "This priority is already assigned to another model configuration."
+#                         }])
+
+#         encrtyped_key = encrypt_data(apikey)
+#         if not encrtyped_key:
+#             return internal_server_error_response("Failed to encrypt API key.")
+
+#         new_config = AiModelConfig(
+#             ai_model_version_id = model_version_id,
+#             ai_model_id = ai_model_id,
+#             admin_id = admin_id,
+#             apikey = encrtyped_key,
+#             version = version,
+#             max_tokens = max_tokens,
+#             temparature = temperature,
+#             prioprity_queue = priority_queue,
+#             is_active = False
+#         )
+#         db.add(new_config)
+#         db.commit()
+#         db.refresh(new_config)
+
+#         new_model_usage = AiModelUsage(
+#             ai_model_config_id = new_config.ai_model_config_id,
+#             minute_requests = request_per_minute,
+#             day_requests = request_per_day,
+#             minute_tokens = token_per_minute,
+#             day_tokens = token_per_day)
+
+#         db.add(new_model_usage)
+#         db.commit()
+
+#         return {
+#             "status": status.HTTP_201_CREATED,
+#             "message": "Model config created successfully",
+#             "data": {
+#                 "model_config_id": str(new_config.ai_model_config_id),
+#                 "model_id": str(new_config.ai_model_id),
+#                 "model_name" : model.model_name,
+#                 "model_version_id": str(new_config.ai_model_version_id),
+#                 "model_version_name": model_version.version_name,
+#                 "admin_id": str(new_config.admin_id),
+#                 "apikey": decrypt_data(new_config.apikey),
+#                 "max_tokens": new_config.max_tokens,
+#                 "priority_queue": new_config.prioprity_queue,
+#             }
+#         }
+
+#     except Exception as e:
+#         logger.warning("[model_config] Error: %s", str(e), exc_info=True)
+#         return internal_server_error_response(str(e))
+#     finally:
+#         db.close()
+
 def model_config(payload, admin_id):
     db = SessionLocal()
     try:
@@ -1849,40 +2092,26 @@ def model_config(payload, admin_id):
         if validation_error:
             return validation_error
 
-        
-        model_version_id = payload.get("model_version_id") 
-        ai_model_id = payload.get("model_id") 
+        model_version_id = payload.get("model_version_id")
+        ai_model_id = payload.get("model_id")
         apikey = payload.get("apikey") if payload.get("apikey") else None
         version = payload.get("version") if payload.get("version") else None
         max_tokens = payload.get("max_tokens") if payload.get("max_tokens") else None
         temperature = payload.get("temperature") if payload.get("temperature") else None
-        
+        request_per_minute = payload.get("request_per_minute") if payload.get("request_per_minute") else None
+        request_per_day = payload.get("request_per_day") if payload.get("request_per_day") else None
+        token_per_minute = payload.get("token_per_minute") if payload.get("token_per_minute") else None
+        token_per_day = payload.get("token_per_day") if payload.get("token_per_day") else None
+        priority_queue = payload.get("priority_queue")
+
         model = db.query(AiModel).filter_by(ai_model_id=ai_model_id, is_active=True).first()
         if not model:
-            # return {
-            #     "status_code": status.HTTP_404_NOT_FOUND,
-            #     "errors": [
-            #         {
-            #             "field": "model_id",
-            #             "message": "No model found for the given model ID."
-            #         }
-            #     ]
-            # }
             return not_found_response("model_id", "No model found for the given model ID.")
 
         model_version = db.query(AiModelversion).filter_by(ai_model_version_id=model_version_id, is_active=True).first()
         if not model_version:
-            # return {
-            #     "status_code": status.HTTP_404_NOT_FOUND,
-            #     "errors": [
-            #         {
-            #             "field": "model_version_id",
-            #             "message": "No model version found for the given model version ID."
-            #         }
-            #     ]
-            # }
             return not_found_response("model_version_id", "No model version found for the given model version ID.")
-        
+
         configs = db.query(AiModelConfig).filter(
             AiModelConfig.ai_model_id == ai_model_id,
             AiModelConfig.ai_model_version_id == model_version_id
@@ -1890,25 +2119,35 @@ def model_config(payload, admin_id):
 
         for config in configs:
             if decrypt_data(config.apikey) == apikey:
-                # return {
-                #     "status_code": status.HTTP_409_CONFLICT,
-                #     "errors": [
-                #         {
-                #             "field": "apikey",
-                #             "message": "Model configuration with this API key already exists."
-                #         }
-                #     ]
-                # }
                 return error_response(
                     409, [{
                             "field": "apikey",
                             "message": "Model configuration with this API key already exists."
                         }])
-        
+
+        existing_count = db.query(func.count(AiModelConfig.ai_model_config_id)).filter(
+            AiModelConfig.admin_id == admin_id
+        ).scalar() or 0
+
+        if priority_queue is None:
+            priority_queue = existing_count + 1
+        else:
+            if priority_queue > existing_count + 1:
+                priority_queue = existing_count + 1
+
+            db.query(AiModelConfig).filter(
+                AiModelConfig.admin_id == admin_id,
+                AiModelConfig.prioprity_queue >= priority_queue,
+            ).update(
+                {AiModelConfig.prioprity_queue: AiModelConfig.prioprity_queue + 1},
+                synchronize_session=False,
+            )
+            db.flush()
+
         encrtyped_key = encrypt_data(apikey)
         if not encrtyped_key:
-            return internal_server_error_response(str(e))
-        
+            return internal_server_error_response("Failed to encrypt API key.")
+
         new_config = AiModelConfig(
             ai_model_version_id = model_version_id,
             ai_model_id = ai_model_id,
@@ -1916,11 +2155,24 @@ def model_config(payload, admin_id):
             apikey = encrtyped_key,
             version = version,
             max_tokens = max_tokens,
+            temparature = temperature,
+            prioprity_queue = priority_queue,
             is_active = False
         )
         db.add(new_config)
         db.commit()
         db.refresh(new_config)
+
+        new_model_usage = AiModelUsage(
+            ai_model_config_id = new_config.ai_model_config_id,
+            minute_requests = request_per_minute,
+            day_requests = request_per_day,
+            minute_tokens = token_per_minute,
+            day_tokens = token_per_day)
+
+        db.add(new_model_usage)
+        db.commit()
+
         return {
             "status": status.HTTP_201_CREATED,
             "message": "Model config created successfully",
@@ -1933,15 +2185,57 @@ def model_config(payload, admin_id):
                 "admin_id": str(new_config.admin_id),
                 "apikey": decrypt_data(new_config.apikey),
                 "max_tokens": new_config.max_tokens,
+                "priority_queue": new_config.prioprity_queue,
             }
-        }   
-                  
+        }
+
     except Exception as e:
         logger.warning("[model_config] Error: %s", str(e), exc_info=True)
         return internal_server_error_response(str(e))
     finally:
         db.close()
-        
+
+def reorder_model_priority(model_config_id, new_priority, admin_id):
+    db = SessionLocal()
+    try:
+        # (validate uuids / new_priority is a positive int here)
+        target = db.query(AiModelConfig).filter(
+            AiModelConfig.ai_model_config_id == model_config_id,
+            AiModelConfig.admin_id == admin_id,
+        ).first()
+        if not target:
+            return not_found_response("model_config_id", "No model configuration found.")
+        configs = (
+            db.query(AiModelConfig)
+            .filter(AiModelConfig.admin_id == admin_id)
+            .order_by(AiModelConfig.prioprity_queue.asc().nullslast(),
+                      AiModelConfig.created_at.asc())
+            .all()
+        )
+        # remove the moved one, then insert at the new position
+        others = [c for c in configs if c.ai_model_config_id != target.ai_model_config_id]
+        # clamp target index into valid range [0, len(others)]
+        index = max(0, min(new_priority - 1, len(others)))
+        others.insert(index, target)
+        # renumber everyone 1..N
+        for i, config in enumerate(others, start=1):
+            config.prioprity_queue = i
+        db.commit()
+        return {
+            "status": status.HTTP_200_OK,
+            "message": "Priority updated successfully",
+            "data": [
+                {"model_config_id": str(c.ai_model_config_id),
+                 "priority_queue": c.prioprity_queue}
+                for c in others
+            ],
+        }
+    except Exception as e:
+        db.rollback()
+        logger.warning("[reorder_model_priority] Error: %s", str(e), exc_info=True)
+        return internal_server_error_response(str(e))
+    finally:
+        db.close()
     
 def get_model(page, page_size, sort_by, sort_order, filter_column, filter_value, admin_id):
     db = SessionLocal()
@@ -2160,7 +2454,8 @@ def toggle_model(model_config_id, admin_id):
                     }])
         
         model_config = db.query(AiModelConfig).filter(
-            AiModelConfig.ai_model_config_id == model_config_id
+            AiModelConfig.ai_model_config_id == model_config_id,
+            AiModelConfig.admin_id == admin_id,
         ).first()
 
         if not model_config:
@@ -2175,22 +2470,82 @@ def toggle_model(model_config_id, admin_id):
             # }
             return not_found_response("model_config_id", "Model configuration not found.")
         
-        disable_all = db.query(AiModelConfig).filter(
-            AiModelConfig.ai_model_config_id != model_config_id
-            ).update(
-                {AiModelConfig.is_active: False},
-                synchronize_session=False
-            )
+        # disable_all = db.query(AiModelConfig).filter(
+        #     AiModelConfig.ai_model_config_id != model_config_id
+        #     ).update(
+        #         {AiModelConfig.is_active: False},
+        #         synchronize_session=False
+        #     )
         
-        enable_one = db.query(AiModelConfig).filter(
-                AiModelConfig.ai_model_config_id == model_config_id
+        # enable_one = db.query(AiModelConfig).filter(
+        #         AiModelConfig.ai_model_config_id == model_config_id
+        #     ).update(
+        #         {AiModelConfig.is_active: True},
+        #         synchronize_session=False
+        #     )
+        # db.commit()
+
+        old_priority = model_config.prioprity_queue
+
+        if old_priority is None:
+            db.query(AiModelConfig).filter(
+                AiModelConfig.admin_id == admin_id,
+                AiModelConfig.ai_model_config_id != model_config_id,
             ).update(
-                {AiModelConfig.is_active: True},
-                synchronize_session=False
+                {AiModelConfig.prioprity_queue: AiModelConfig.prioprity_queue + 1},
+                synchronize_session=False,
             )
+        elif old_priority > 1:
+            db.query(AiModelConfig).filter(
+                AiModelConfig.admin_id == admin_id,
+                AiModelConfig.prioprity_queue < old_priority,
+            ).update(
+                {AiModelConfig.prioprity_queue: AiModelConfig.prioprity_queue + 1},
+                synchronize_session=False,
+            )
+
+        model_config.prioprity_queue = 1
+
+        db.query(AiModelConfig).filter(
+            AiModelConfig.admin_id == admin_id,
+            AiModelConfig.ai_model_config_id != model_config_id,
+        ).update(
+            {AiModelConfig.is_active: False},
+            synchronize_session=False,
+        )
+
+        model_config.is_active = True
         db.commit()
 
-        active_model = db.query(AiModelConfig).all()
+        now = ist_now()
+        model_usage = db.query(AiModelUsage).filter(
+            AiModelUsage.ai_model_config_id == model_config_id
+        ).first()
+        if not model_usage:
+            usage = AiModelUsage(
+                ai_model_config_id=model_config_id,
+                minute_window_start=now,
+                day_window_start=now,
+                minute_requests=0,
+                minute_tokens=0,
+                day_requests=0,
+                day_tokens=0,
+                total_requests=0,
+                total_tokens=0,
+                is_rate_limited=False,
+                created_by=str(admin_id),
+            )
+            db.add(usage)
+            db.commit()
+            db.refresh(usage)
+
+
+        active_model = db.query(AiModelConfig).filter(
+            AiModelConfig.admin_id == admin_id
+        ).order_by(
+            AiModelConfig.prioprity_queue.asc().nullslast()
+        ).all()
+
         data = []
         for active in active_model:
             decrypted_key = None
@@ -2278,6 +2633,7 @@ def active_model(admin_id):
                     "model_version_id", AiModelversion.ai_model_version_id,
                     "model_version_name", AiModelversion.version_name,
                     "apikey", AiModelConfig.apikey,
+                    'baseurl', AiModelConfig.base_url,
                     "max_tokens", AiModelConfig.max_tokens,
                     "admin_id", AiModelConfig.admin_id,
                     "is_active", AiModelConfig.is_active
@@ -2340,6 +2696,7 @@ def active_model(admin_id):
                 "version_id": active_model[0]['model_version_id'],
                 "version_name": active_model[0]['model_version_name'],
                 "apikey": masked_api_key,
+                'base_url': active_model[0]['baseurl'],
                 "max_tokens": active_model[0]['max_tokens'],
                 "admin_id": active_model[0]['admin_id'],
                 "is_active": active_model[0]['is_active']}   

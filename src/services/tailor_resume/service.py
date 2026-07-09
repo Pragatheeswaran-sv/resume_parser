@@ -8,6 +8,7 @@ from tomlkit import value
 import ollama
 import json
 
+from src.services.admin.service import active_model
 from src.email_reader.models import Attachment
 from src.resume_filter.models import Resume
 from src.services.resume_filter.service import extract_docx_text, extract_text_from_pdf
@@ -26,7 +27,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, ListFlowabl
 from docx import Document
 from docx.shared import Pt, Inches
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
-from src.utils.helper import decrypt_data
+from src.utils.helper import decrypt_data, record_model_usage, select_available_model
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -50,13 +51,12 @@ def alter_resume(payload, resume_id):
         )
 
         resume = db.query(Resume).filter(Resume.resume_id == resume_id).first()
-        attachment_id = resume.attachment_id
-        
         if resume is None:
-            return {"status": status.HTTP_404_NOT_FOUND, "message": "Resume not found."} 
-        print('came')
+            return {"status": status.HTTP_404_NOT_FOUND, "message": "Resume not found."}
+        attachment_id = resume.attachment_id
+
         att = db.query(Attachment).filter(Attachment.attachment_id == attachment_id).first()
-        print("att=>", att)
+
         file_path = f"attachments/{att.file_name}"
 
         if file_path.endswith(".pdf"):
@@ -167,426 +167,586 @@ def create_json_completion(client, model, messages):
 
 def tailor_resume(resume_text, jd_info):
 
+    
+    # prompt = """
+    #     You are an Expert Resume Tailoring Engine.
+    #     Return exactly one valid JSON object only.
+
+    #     Use RESUME_TEXT and JD_INFO to create a tailored resume.
+
+    #     Rules:
+    #     1. Use RESUME_TEXT as the source for candidate basics: name, email, phone, location, total experience, company names, durations, education, certifications, links, existing work history, and project details.
+    #     2. Use JD_INFO as the source for target role title, JD skills, and JD responsibility themes.
+    #     3. Do not create fake companies, fake dates, fake education, fake certifications, or fake employment history.
+    #     4. Keep company names and durations exactly from RESUME_TEXT. Never change them.
+    #     5. Set tailored_resume.role from the role/title in JD_INFO.
+    #     6. Set each work_experience.role from the JD role/title so the experience matches the target role, but keep the same company, duration, and project/work history from RESUME_TEXT.
+    #     7. Keep existing resume skills only when they are relevant or related to the JD. Remove unrelated skills.
+    #     8. Extract JD skills strictly from JD_INFO. Add only skills, technologies, tools, platforms, programming languages, frameworks, libraries, databases, cloud services, methodologies, certifications, and domain concepts that are explicitly mentioned in JD_INFO. Do not infer, assume, generalize, expand abbreviations into new skills, or create related skills that are not stated in JD_INFO. Do not generate generic soft skills, responsibilities, job duties, or implied competencies unless they are explicitly listed as skills or qualifications in JD_INFO. Categorize extracted skills appropriately into: languages, frameworks, libraries, databases, cloud, devops, tools, ai_ml, concepts, and others.
+    #     8A. Skill Extraction Accuracy Rule: Skills must be extracted verbatim or as direct normalized forms of terms explicitly present in JD_INFO. Do not convert responsibilities into new skills. For example, "create dashboards" does not automatically become "Dashboard Development", "collaborate with stakeholders" does not become "Stakeholder Management", and "identify trends" does not become "Trend Analysis" unless those exact skills are explicitly mentioned in JD_INFO.
+    #     9. Avoid duplicate skills.
+    #     10. Rewrite work experience responsibilities based on RESUME_TEXT and JD_INFO together.
+    #     11. Use every existing work_experience/project block from RESUME_TEXT as the base. Do not ignore any block.
+    #     12. Preserve the original project/work meaning, company, duration, domain context, and core functionality, then enhance the responsibilities with JD-related work.
+    #     13. Modify existing responsibilities so they naturally reflect the JD responsibilities, technologies, tools, and outcomes. Do not replace the project with an unrelated domain.
+    #     14. Add JD-related skills inside responsibility sentences as realistic work, not keyword stuffing.
+    #     15. Keep each enhanced responsibility believable for the original resume project/work history.
+    #     16. If a responsibility is not strongly related to the JD, keep it and lightly improve the wording.
+    #     17. Analyze headings such as Work Experience, Experience Details, Professional Experience, Employment History, Projects, Project Details, Client Projects, or Key Projects.
+    #     18. Do not keep work experience and projects as separate sections in the output.
+    #     19. If RESUME_TEXT is project-based, treat each separate project/client/product block as one work_experience entry.
+    #     20. Do not combine multiple project blocks into one work_experience entry.
+    #     21. For headings like Project Details, Client Projects, or Key Projects, every project title under that heading must become its own work_experience item.
+    #     22. The number of work_experience entries must match the number of distinct work/project blocks found in RESUME_TEXT.
+    #     23. If no company is explicitly available for a block, keep company as "" and use project_name to identify the entry.
+    #     24. Return tailored_resume.projects as an empty array.
+    #     25. Generate a completely new professional summary based primarily on the target role defined in JD_INFO. The summary must contain at least 3 complete sentences (preferably 4–6 lines) and should position the candidate as a strong fit for the target role, not necessarily the role stated in the original summary. Analyze the target role, required skills, preferred skills, technologies, responsibilities, and domain from JD_INFO, then identify the candidate's most relevant experience, projects, skills, achievements, and transferable strengths from RESUME_TEXT. If the existing summary focuses on a different profession, career objective, or role than JD_INFO, discard it entirely and generate a new summary from scratch. Use RESUME_TEXT only as evidence of the candidate's background and experience, not as the source of summary wording or role positioning. Highlight transferable skills, relevant technologies, business impact, problem-solving abilities, domain knowledge, and accomplishments that support the target role. The summary must be ATS-friendly, natural, recruiter-focused, and aligned with the JD. Do not copy or lightly modify the original summary. Reflect the candidate's actual seniority and experience level, avoid keyword stuffing, and never invent experience, achievements, certifications, or skills that are not supported by RESUME_TEXT.
+    #     26. Preserve every useful resume section from RESUME_TEXT. If content does not fit summary, skills, work_experience, education, or certifications, add it to achievements, languages, interests, or additional_sections.
+    #     27. Return valid JSON only. No markdown, no explanation, no null values.
+    #     28. Do not include comments, labels, prefixes, code fences, or trailing commas.
+    #     29. The top-level object must contain exactly: jd_analysis, skill_gap_analysis, tailored_resume.
+    #     30. If a value is unknown, use "" for strings, 0 for total_experience, and [] for arrays.
+    #     31. JD_INFO below is the source of truth for the job description. Do not ignore it.
+    #     32. Summary Reconstruction Rule:
+    #         The profile summary must NOT be copied blindly from RESUME_TEXT. Evaluate whether the existing summary aligns with the target role, required skills, responsibilities, seniority level, and domain in JD_INFO.
+
+    #         - If the existing summary is relevant, enhance and optimize it for the target role.
+    #         - If the existing summary is partially relevant, rewrite it substantially.
+    #         - If the existing summary is unrelated to the target role, completely replace it.
+
+    #         The final summary must:
+    #         - Be generated specifically for the role in JD_INFO.
+    #         - Be ATS-friendly and professionally written.
+    #         - Use only factual information available in RESUME_TEXT.
+    #         - Highlight the candidate's most relevant experience, skills, technologies, projects, domains, and achievements for the target role.
+    #         - Prioritize JD-required and preferred skills when they can be reasonably supported by the candidate's background.
+    #         - Reflect the candidate's actual seniority and total experience.
+    #         - Sound natural and credible, not keyword-stuffed.
+    #         - Never mention skills, achievements, certifications, domains, responsibilities, or experience that are not supported by RESUME_TEXT.
+    #         - Never reuse an unrelated objective, career goal, or summary from RESUME_TEXT.
+    #         - The summary should make the candidate appear as a strong and realistic fit for the target role while remaining fully truthful to the source resume.
+
+    #     Return this JSON structure:
+    #     {
+    #     "jd_analysis": {
+    #     "target_role": "",
+    #     "overall_experience_required": "",
+    #     "technical_skills": {
+    #         "languages": [],
+    #         "frameworks": [],
+    #         "libraries": [],
+    #         "databases": [],
+    #         "cloud": [],
+    #         "devops": [],
+    #         "tools": [],
+    #         "ai_ml": [],
+    #         "concepts": [],
+    #         "others": []
+    #         },
+    #     "responsibilities": [],
+    #     "domain_knowledge": [],
+    #     "certifications": []
+    #     },
+
+    #     "skill_gap_analysis": {
+    #     "existing_skills": [],
+    #     "missing_skills": []
+    #     },
+
+    #     "tailored_resume": {
+    #         "name": "",
+    #         "total_experience": 0,
+    #         "email": "",
+    #         "phone_number": "",
+    #         "location": "",
+    #         "role": "",
+    #         "summary": "",
+
+    #         "technical_skills": {
+    #             "languages": [],
+    #             "frameworks": [],
+    #             "libraries": [],
+    #             "databases": [],
+    #             "cloud": [],
+    #             "devops": [],
+    #             "tools": [],
+    #             "ai_ml": [],
+    #             "concepts": [],
+    #             "others": []
+    #         },
+
+    #         "education": [
+    #             {
+    #             "degree": "",
+    #             "field": "",
+    #             "institution": "",
+    #             "cgpa": "",
+    #             "duration": ""
+    #             }
+    #         ],
+
+    #         "work_experience": [
+    #             {
+    #             "role": "",
+    #             "company": "",
+    #             "project_name": "",
+    #             "location": "",
+    #             "duration": "",
+    #             "responsibilities": []
+    #             }
+    #         ],
+
+    #         "projects": [],
+
+    #         "certifications": [
+    #             {
+    #             "name": "",
+    #             "organization": "",
+    #             "year": "",
+    #             "details": ""
+    #             }
+    #         ],
+
+    #         "achievements": [],
+
+    #         "languages": [],
+
+    #         "interests": [],
+
+            
+
+    #         "links": {
+    #             "linkedin": "",
+    #             "github": "",
+    #             "portfolio": ""
+    #         }
+    #     }
+    #     }
+
+    #     """
+
+
+# before final 
+
 #     prompt = """
+# You are a Resume Tailoring Engine. Return one valid JSON object. No markdown.
 
-# You are an Expert Resume Tailoring Engine.
-
-# Your task is to transform a candidate's resume based on a Job Description (JD).
+# GOAL: Transform the resume to match JD_INFO. NOT a copy task.
+# FAIL if output keeps original summary, original job titles, or original responsibility wording.
 
 # INPUTS:
-# 1. Resume Text
-# 2. Job Description Text
-
-# OBJECTIVE:
-# Analyze the Job Description, extract all role requirements, compare them with the resume, identify skill gaps, and tailor the resume so it aligns more closely with the target role while maintaining realism and consistency.
+# - RESUME_TEXT → identity, companies, dates, project/company names only
+# - JD_INFO → target role, skills, responsibility themes (NOT candidate experience years)
 
 # ====================================================================
-# PHASE 1: JOB DESCRIPTION ANALYSIS
+# 1. PRESERVE EXACTLY
 # ====================================================================
-
-# Extract the following from the Job Description:
-
-# 1. Target Role
-# 2. Overall Years of Experience Required
-# 3. Required Skills
-# 4. Preferred Skills
-# 5. Technologies
-# 6. Frameworks
-# 7. Programming Languages
-# 8. Databases
-# 9. Cloud Platforms
-# 10. Tools
-# 11. Responsibilities
-# 12. Domain Knowledge
-# 13. Certifications (if mentioned)
-
-# For each skill identified, extract years of experience if explicitly mentioned.
-
-# Example:
-
-# {
-#   "skill": "React",
-#   "experience_required": "3+ years"
-# }
-
-# Do not infer experience years if not explicitly mentioned in the JD.
+# name, email, phone_number, location, education, certifications, links, achievements, languages, interests
+# Per kept work entry: company, duration, project_name, location — exact from RESUME_TEXT
 
 # ====================================================================
-# PHASE 2: RESUME ANALYSIS
+# 2. MUST GENERATE NEW (never reuse original text)
 # ====================================================================
-
-# Analyze the resume and extract:
-
-# 1. Existing Skills
-# 2. Existing Projects
-# 3. Existing Work Experience
-# 4. Existing Technologies
-# 5. Existing Responsibilities
-
-# Identify which JD skills already exist in the resume and which are missing.
+# | Field              | Rule |
+# |--------------------|------|
+# | summary            | Write 100% NEW from JD — ignore original summary completely |
+# | work_experience.role | NEW JD-domain titles — never original titles |
+# | responsibilities   | Write 100% NEW from JD themes — never copy original bullets |
+# | technical_skills   | JD skills first; add resume skills only if JD-relevant |
 
 # ====================================================================
-# PHASE 3: SKILL GAP ANALYSIS
+# 3. SUMMARY (always new, JD-driven)
 # ====================================================================
-
-# Compare JD skills against resume skills.
-
-# For each JD skill:
-
-# - If already present in the resume:
-#   - Mark as "existing"
-
-# - If not present:
-#   - Mark as "missing"
-
-# Generate:
-
-# {
-#   "skill_gap_analysis": {
-#     "existing_skills": [],
-#     "missing_skills": []
-#   }
-# }
+# - Do NOT read, copy, or paraphrase the original Professional Summary from RESUME_TEXT. Write 100% NEW summary — never copy original Professional Summary
+# - Write 3–5 fresh sentences for the JD target role
+# - Sentence 1: JD role + total_experience (calculated from resume dates, section 4)
+# - Include JD skills and JD responsibility themes
+# - If career pivot (QA→Data Analyst etc.): zero mention of old profession
+# - Use RESUME_TEXT only for years of experience and general domain facts — not for summary wording
 
 # ====================================================================
-# PHASE 4: RESUME TAILORING
+# 4. EXPERIENCE, TRIM & ROLES
 # ====================================================================
+# total_experience:
+# - Calculate from RESUME_TEXT date ranges (kept entries) — NEVER from JD "1-3 years required"
+# - jd_analysis.overall_experience_required = JD text for analysis only
 
-# PRIMARY GOAL:
+# Trim (only if candidate years >> JD max):
+# - Remove OLDEST entries first; always keep most recent
+# - Recalculate total_experience from kept dates
 
-# Make the resume align with the target role by incorporating missing JD skills into:
+# work_experience order: MOST RECENT FIRST (index 0 = latest job)
+# Role titles (NEW — never from RESUME_TEXT):
+# - Index 0 (latest): JD role + seniority (Senior if 5+ years)
+# - Middle: mid-level (e.g. "Data Analyst")
+# - Oldest kept: junior (e.g. "Junior Data Analyst")
 
-# 1. Skills Section
-# 2. Project Descriptions
-# 3. Work Experience Responsibilities
-# 4. Professional Summary (if available)
-
-# IMPORTANT:
-
-# Do NOT simply append skills.
-
-# Instead:
-
-# - Understand the purpose of each project.
-# - Understand the responsibilities in each work experience.
-# - Identify the most relevant places where JD skills naturally fit.
-# - Enrich project descriptions and responsibilities with JD technologies and responsibilities.
+# FINAL: tailored_resume.role = work_experience[0].role (exact copy)
 
 # ====================================================================
-# SKILL INJECTION RULES
+# 5. RESPONSIBILITIES (new, JD-driven)
 # ====================================================================
+# For EVERY work_experience entry generate 4–5 NEW bullets.
 
-# For every missing JD skill:
+# Rules:
+# - Source = JD_INFO responsibility themes + JD skills — NOT original resume bullets
+# - Do NOT copy or paraphrase original responsibility text from RESUME_TEXT
+# - Do NOT copy JD_INFO sentences verbatim
+# - Anchor each bullet to the entry's company/project_name from RESUME_TEXT for context
+# - Match seniority of that entry's role title
+# - Each bullet: exactly 10–15 words (count before output; reject if under 10 or over 15)
+# - Format: [Verb] + [JD-aligned task] + [JD skill/tool] + [company/project context]
+# - Spread different JD themes across bullets — no repetition
 
-# 1. Add the skill to the Skills section.
+# Word count examples:
+#   OK (12w): "Built Tableau dashboards for Accenture banking clients tracking loan approval metrics weekly."
+#   OK (14w): "Extracted and cleaned PostgreSQL datasets using SQL to support automated reporting for insurance claim analysis."
+#   BAD (8w):  "Analyzed datasets and created dashboards for stakeholders."  ← too short
+#   BAD (20w): "Analyzed large complex datasets using SQL and Tableau to identify trends patterns and anomalies for business teams."  ← too long
 
-# 2. Add realistic usage of the skill in one or more existing projects.
-
-# Example:
-
-# Before:
-# "Built responsive web applications using React."
-
-# After:
-# "Built responsive web applications using React and integrated backend services using Node.js and Express.js."
-
-# 3. Add realistic responsibilities involving the skill to existing work experience.
-
-# Example:
-
-# Before:
-# "Developed frontend components."
-
-# After:
-# "Developed frontend components and collaborated on backend API integration using Node.js and Express.js."
-
-# 4. Use JD responsibilities to strengthen existing experience.
-
-# 5. Maintain consistency with:
-#    - Existing role
-#    - Existing domain
-#    - Existing project purpose
-#    - Existing technology stack
+# Career pivot: write bullets as JD-role work at that company — no old-role terms (no Selenium/testing for Data Analyst JD).
 
 # ====================================================================
-# ROLE TRANSFORMATION RULES
+# 6. SKILLS
 # ====================================================================
-
-# If the JD targets a different role than the current resume:
-
-# Example:
-# - Frontend → Full Stack
-# - Backend → Data Engineer
-# - QA → Automation Engineer
-
-# Then:
-
-# - Preserve all existing experience.
-# - Preserve all existing projects.
-# - Preserve all existing employment history.
-
-# Enhance the resume by incorporating:
-
-# - Missing skills
-# - Missing technologies
-# - Missing responsibilities
-
-# while keeping the profile believable and internally consistent.
+# 1. Add every skill explicitly in JD_INFO
+# 2. Add resume skills ONLY if JD-relevant
+# 3. Remove all old-profession skills (Selenium, Cypress etc. unless JD is QA)
+# 4. Categorize: languages, frameworks, libraries, databases, cloud, devops, tools, ai_ml, concepts, others
 
 # ====================================================================
-# STRICT CONSTRAINTS
+# 7. STRUCTURE & OUTPUT
 # ====================================================================
-
-# NEVER:
-
-# - Remove existing skills.
-# - Remove existing projects.
-# - Remove existing responsibilities.
-# - Remove existing work experience.
-# - Change company names.
-# - Change job titles.
-# - Change employment dates.
-# - Change education details.
-# - Change candidate name.
-# - Change contact information.
-# - Create fake employment history.
-# - Create fake companies.
-# - Create fake certifications.
-# - Create unrealistic achievements.
-
-# ALWAYS:
-
-# - Preserve all original resume content.
-# - Extend and enrich existing content.
-# - Maintain professional resume language.
-# - Maintain consistency across the resume.
-
-# ====================================================================
-# OUTPUT FORMAT
-# ====================================================================
-
-# Return ONLY valid JSON.
+# - All work/project blocks from RESUME_TEXT unless trimmed (section 4)
+# - projects = []
+# - Valid JSON; keys: jd_analysis, skill_gap_analysis, tailored_resume
 
 # {
 #   "jd_analysis": {
 #     "target_role": "",
 #     "overall_experience_required": "",
-#     "skills": [
-#       {
-#         "skill": "",
-#         "experience_required": ""
-#       }
-#     ],
-#     "technologies": [],
-#     "frameworks": [],
-#     "databases": [],
-#     "cloud_platforms": [],
-#     "tools": [],
+#     "technical_skills": {"languages":[],"frameworks":[],"libraries":[],"databases":[],"cloud":[],"devops":[],"tools":[],"ai_ml":[],"concepts":[],"others":[]},
 #     "responsibilities": [],
 #     "domain_knowledge": [],
 #     "certifications": []
 #   },
-
-#   "skill_gap_analysis": {
-#     "existing_skills": [],
-#     "missing_skills": []
-#   },
-
+#   "skill_gap_analysis": {"existing_skills":[],"missing_skills":[]},
 #   "tailored_resume": {
-#     "summary": "",
-#     "skills": [],
-#     "work_experience": [
-#       {
-#         "company": "",
-#         "role": "",
-#         "duration": "",
-#         "responsibilities": []
-#       }
-#     ],
-#     "projects": [
-#       {
-#         "project_name": "",
-#         "description": "",
-#         "technologies": []
-#       }
-#     ]
+#     "name":"","total_experience":0,"email":"","phone_number":"","location":"","role":"","summary":"",
+#     "technical_skills":{"languages":[],"frameworks":[],"libraries":[],"databases":[],"cloud":[],"devops":[],"tools":[],"ai_ml":[],"concepts":[],"others":[]},
+#     "education":[{"degree":"","field":"","institution":"","cgpa":"","duration":""}],
+#     "work_experience":[{"role":"","company":"","project_name":"","location":"","duration":"","responsibilities":[]}],
+#     "projects":[],
+#     "certifications":[{"name":"","organization":"","year":"","details":""}],
+#     "achievements":[],"languages":[],"interests":[],
+#     "links":{"linkedin":"","github":"","portfolio":""}
 #   }
 # }
-
-# RULES FOR OUTPUT:
-
-# - Return JSON only.
-# - No markdown.
-# - No explanations.
-# - No notes.
-# - No comments.
-# - No additional text outside JSON.
-
-# RESUME TEXT:
-# {{resume_text}}
-
-# JOB DESCRIPTION:
-# {{jd_info}}
-
 # """
-    
+
+
+#     prompt = """
+# You are a Resume Tailoring Engine. Return one valid JSON object. No markdown.
+
+# CRITICAL:
+# - jd_analysis.target_role MUST come from JD_INFO — never from RESUME_TEXT or from examples below.
+# - All generated content (role, summary, skills, bullets) MUST match JD_INFO for THIS request.
+# - Never default to any fixed role or skill set. Every request is different — read JD_INFO first.
+
+# ====================================================================
+# 1. PRESERVE EXACTLY (from RESUME_TEXT — do not change)
+# ====================================================================
+# - name, email, phone_number, location
+# - education, certifications, links, achievements, languages, interests (if present)
+# - Per work entry: company, duration, project_name, location — copy exact
+
+# ====================================================================
+# 2. GENERATE NEW (from JD_INFO — never copy from resume)
+# ====================================================================
+# | Field | Rule |
+# |-------|------|
+# | jd_analysis.target_role | Extract exact role/title from JD_INFO |
+# | tailored_resume.role | Copy work_experience[0].role after step 4 |
+# | summary | 100% new — never copy original summary |
+# | total_experience | Calculate from kept entry dates (step 4) — never copy resume header text |
+# | technical_skills | Build from scratch from JD_INFO (step 6) |
+# | work_experience.role | New titles in JD role domain — never original titles |
+# | work_experience.responsibilities | New bullets — analyze original then reframe (step 7) |
+
+# ====================================================================
+# 3. RESUME STRUCTURE
+# ====================================================================
+# Employment-based: each job = one work_experience entry (keep company + duration exact)
+# Project-based: each project block = one work_experience entry (keep project_name exact)
+# - Do not merge entries
+# - Order: most recent first (index 0 = latest)
+# - projects = []
+
+# ====================================================================
+# 4. EXPERIENCE & ROLES
+# ====================================================================
+# target_role: read from JD_INFO (e.g. whatever role the JD states — engineer, analyst, manager, etc.)
+
+# total_experience:
+# - Calculate years from date ranges of KEPT entries in RESUME_TEXT
+# - NEVER copy "X+ years" from original summary without calculating
+# - NEVER use JD requirement text (e.g. "3-5 years required") as candidate total_experience
+# - jd_analysis.overall_experience_required = JD requirement for analysis only
+
+# Trimming (only if candidate years > JD maximum):
+# - Remove OLDEST entries first; always keep most recent
+# - Recalculate total_experience from kept entry dates only
+
+# Role titles (new — based on jd_analysis.target_role):
+# - Index 0 (latest): target role (+ Senior prefix if total_experience >= 5)
+# - Middle entries: mid-level variant of target role domain
+# - Oldest kept: junior/associate variant of target role domain
+# - NEVER keep original job titles from RESUME_TEXT
+
+# FINAL: tailored_resume.role = work_experience[0].role (character-for-character match)
+
+# ====================================================================
+# 5. SUMMARY
+# ====================================================================
+# - Write 3-5 new sentences for jd_analysis.target_role
+# - Line 1: target role + total_experience (integer from step 4)
+# - Highlight skills and themes from JD_INFO
+# - If JD role differs from original resume profession: discard old profession wording entirely
+# - Never copy or paraphrase original summary
+
+# ====================================================================
+# 6. SKILLS
+# ====================================================================
+# START with empty categories. Do NOT copy RESUME_TEXT skills section as-is.
+
+# STEP 1: Add every skill/tool explicitly mentioned in JD_INFO
+# STEP 2: From resume, add ONLY skills that support jd_analysis.target_role
+# STEP 3: Remove ALL skills from old profession not needed for JD role
+#   Rule: if skill is not in JD_INFO and not required for target role → exclude it
+# STEP 4: Categorize into: languages, frameworks, libraries, databases, cloud, devops, tools, ai_ml, concepts, others
+# Empty unused categories as []
+
+# ====================================================================
+# 7. RESPONSIBILITIES — JD ROLE ONLY (strict)
+# ====================================================================
+# Write responsibilities AS IF the candidate worked in jd_analysis.target_role on each project.
+# Bullets describe JD-role work — never the candidate's original profession from RESUME_TEXT.
+
+# Per entry: 4-5 bullets | 10-15 words each | all new text
+
+# --- PER ENTRY (do independently for every work_experience row) ---
+
+# 1. READ original entry in RESUME_TEXT:
+#    project_name/company, synopsis, original bullets
+#    → extract FACTS only: domain, product purpose, data/workflows, outcomes, metrics
+
+# 2. READ JD_INFO:
+#    target_role, responsibility themes, required skills/tools
+
+# 3. WRITE bullets using this rule:
+#    "What would a [target_role] have done on this project?"
+#    - Facts from step 1 = project anchor (domain, product, company/project name)
+#    - Wording from step 2 = JD role, JD skills, JD duty themes
+#    - Every bullet must sound like target_role work — not the old profession
+
+# 4. REJECT bullet if it:
+#    - copies original resume bullet (same meaning or same key phrases)
+#    - uses tools/terms from old profession not in JD_INFO
+#    - could apply to any project with zero context
+#    - copies a JD sentence verbatim
+#    - matches the same pattern as another entry (template swap)
+
+# --- JD-ROLE LANGUAGE (dynamic — derive from JD_INFO, not examples) ---
+# Use verbs and nouns that match jd_analysis.target_role and JD responsibilities.
+# Use skills/tools from JD_INFO in bullets — never default to a fixed skill list.
+# If original resume was a different profession: rewrite ALL duties in target_role vocabulary.
+# Changing job title without rewriting bullet profession = FAILED output.
+
+# --- UNIQUENESS (mandatory) ---
+# Each entry gets different bullets because each project had different facts in step 1.
+# Do not repeat the same bullet structure across entries.
+# Do not repeat the same opening verb in one entry.
+# Spread JD responsibility themes across bullets — vary focus per bullet.
+
+# --- VALIDATION (run before output) ---
+# For each entry ask:
+#   [ ] Would a hiring manager believe this is [target_role] work?
+#   [ ] Are all 4-5 bullets 10-15 words?
+#   [ ] Is any bullet copied from original resume? → rewrite
+#   [ ] Is any bullet identical in pattern to another entry? → rewrite
+#   [ ] Do bullets mention this entry's project/domain facts?
+
+# --- Compact synthesis pattern (adapt to actual JD + project) ---
+# "[JD-role verb] [JD duty] using [JD skill] for [project/company] [project-specific context]."
+# Each bullet must use a different JD theme and different project fact — never clone across entries.
+
+# ====================================================================
+# 8. OUTPUT
+# ====================================================================
+# Valid JSON only. No nulls. Keys: jd_analysis, skill_gap_analysis, tailored_resume.
+
+# {
+#   "jd_analysis": {
+#     "target_role": "",
+#     "overall_experience_required": "",
+#     "technical_skills": {"languages":[],"frameworks":[],"libraries":[],"databases":[],"cloud":[],"devops":[],"tools":[],"ai_ml":[],"concepts":[],"others":[]},
+#     "responsibilities": [],
+#     "domain_knowledge": [],
+#     "certifications": []
+#   },
+#   "skill_gap_analysis": {"existing_skills":[],"missing_skills":[]},
+#   "tailored_resume": {
+#     "name":"","total_experience":0,"email":"","phone_number":"","location":"","role":"","summary":"",
+#     "technical_skills":{"languages":[],"frameworks":[],"libraries":[],"databases":[],"cloud":[],"devops":[],"tools":[],"ai_ml":[],"concepts":[],"others":[]},
+#     "education":[{"degree":"","field":"","institution":"","cgpa":"","duration":""}],
+#     "work_experience":[{"role":"","company":"","project_name":"","location":"","duration":"","responsibilities":[]}],
+#     "projects":[],
+#     "certifications":[{"name":"","organization":"","year":"","details":""}],
+#     "achievements":[],"languages":[],"interests":[],
+#     "links":{"linkedin":"","github":"","portfolio":""}
+#   }
+# }
+# """
+
+
     prompt = """
-        You are an Expert Resume Tailoring Engine.
-        Return exactly one valid JSON object only.
+You are a Resume Tailoring Engine. Return one valid JSON object. No markdown.
 
-        Use RESUME_TEXT and JD_INFO to create a tailored resume.
+CRITICAL:
+- Read JD_INFO first. Extract jd_analysis.target_role, skills, and responsibility themes from JD_INFO only.
+- Never assume a fixed role (not Data Analyst, not Java Developer, not QA). Every request is different.
+- RESUME_TEXT provides project facts. JD_INFO defines how to rewrite them.
 
-        Rules:
-        1. Use RESUME_TEXT as the source for candidate basics: name, email, phone, location, total experience, company names, durations, education, certifications, links, existing work history, and project details.
-        2. Use JD_INFO as the source for target role title, JD skills, and JD responsibility themes.
-        3. Do not create fake companies, fake dates, fake education, fake certifications, or fake employment history.
-        4. Keep company names and durations exactly from RESUME_TEXT. Never change them.
-        5. Set tailored_resume.role from the role/title in JD_INFO.
-        6. Set each work_experience.role from the JD role/title so the experience matches the target role, but keep the same company, duration, and project/work history from RESUME_TEXT.
-        7. Keep existing resume skills only when they are relevant or related to the JD. Remove unrelated skills.
-        8. Extract JD skills strictly from JD_INFO. Add only skills, technologies, tools, platforms, programming languages, frameworks, libraries, databases, cloud services, methodologies, certifications, and domain concepts that are explicitly mentioned in JD_INFO. Do not infer, assume, generalize, expand abbreviations into new skills, or create related skills that are not stated in JD_INFO. Do not generate generic soft skills, responsibilities, job duties, or implied competencies unless they are explicitly listed as skills or qualifications in JD_INFO. Categorize extracted skills appropriately into: languages, frameworks, libraries, databases, cloud, devops, tools, ai_ml, concepts, and others.
-        8A. Skill Extraction Accuracy Rule: Skills must be extracted verbatim or as direct normalized forms of terms explicitly present in JD_INFO. Do not convert responsibilities into new skills. For example, "create dashboards" does not automatically become "Dashboard Development", "collaborate with stakeholders" does not become "Stakeholder Management", and "identify trends" does not become "Trend Analysis" unless those exact skills are explicitly mentioned in JD_INFO.
-        9. Avoid duplicate skills.
-        10. Rewrite work experience responsibilities based on RESUME_TEXT and JD_INFO together.
-        11. Use every existing work_experience/project block from RESUME_TEXT as the base. Do not ignore any block.
-        12. Preserve the original project/work meaning, company, duration, domain context, and core functionality, then enhance the responsibilities with JD-related work.
-        13. Modify existing responsibilities so they naturally reflect the JD responsibilities, technologies, tools, and outcomes. Do not replace the project with an unrelated domain.
-        14. Add JD-related skills inside responsibility sentences as realistic work, not keyword stuffing.
-        15. Keep each enhanced responsibility believable for the original resume project/work history.
-        16. If a responsibility is not strongly related to the JD, keep it and lightly improve the wording.
-        17. Analyze headings such as Work Experience, Experience Details, Professional Experience, Employment History, Projects, Project Details, Client Projects, or Key Projects.
-        18. Do not keep work experience and projects as separate sections in the output.
-        19. If RESUME_TEXT is project-based, treat each separate project/client/product block as one work_experience entry.
-        20. Do not combine multiple project blocks into one work_experience entry.
-        21. For headings like Project Details, Client Projects, or Key Projects, every project title under that heading must become its own work_experience item.
-        22. The number of work_experience entries must match the number of distinct work/project blocks found in RESUME_TEXT.
-        23. If no company is explicitly available for a block, keep company as "" and use project_name to identify the entry.
-        24. Return tailored_resume.projects as an empty array.
-        25. Generate a completely new professional summary based primarily on the target role defined in JD_INFO. The summary must contain at least 3 complete sentences (preferably 4–6 lines) and should position the candidate as a strong fit for the target role, not necessarily the role stated in the original summary. Analyze the target role, required skills, preferred skills, technologies, responsibilities, and domain from JD_INFO, then identify the candidate's most relevant experience, projects, skills, achievements, and transferable strengths from RESUME_TEXT. If the existing summary focuses on a different profession, career objective, or role than JD_INFO, discard it entirely and generate a new summary from scratch. Use RESUME_TEXT only as evidence of the candidate's background and experience, not as the source of summary wording or role positioning. Highlight transferable skills, relevant technologies, business impact, problem-solving abilities, domain knowledge, and accomplishments that support the target role. The summary must be ATS-friendly, natural, recruiter-focused, and aligned with the JD. Do not copy or lightly modify the original summary. Reflect the candidate's actual seniority and experience level, avoid keyword stuffing, and never invent experience, achievements, certifications, or skills that are not supported by RESUME_TEXT.
-        26. Preserve every useful resume section from RESUME_TEXT. If content does not fit summary, skills, work_experience, education, or certifications, add it to achievements, languages, interests, or additional_sections.
-        27. Return valid JSON only. No markdown, no explanation, no null values.
-        28. Do not include comments, labels, prefixes, code fences, or trailing commas.
-        29. The top-level object must contain exactly: jd_analysis, skill_gap_analysis, tailored_resume.
-        30. If a value is unknown, use "" for strings, 0 for total_experience, and [] for arrays.
-        31. JD_INFO below is the source of truth for the job description. Do not ignore it.
-        32. Summary Reconstruction Rule:
-            The profile summary must NOT be copied blindly from RESUME_TEXT. Evaluate whether the existing summary aligns with the target role, required skills, responsibilities, seniority level, and domain in JD_INFO.
+====================================================================
+1. PRESERVE EXACTLY (from RESUME_TEXT)
+====================================================================
+name, email, phone_number, location, education, certifications, links, achievements, languages, interests
+Per work entry: company, duration, project_name, location — exact copy
 
-            - If the existing summary is relevant, enhance and optimize it for the target role.
-            - If the existing summary is partially relevant, rewrite it substantially.
-            - If the existing summary is unrelated to the target role, completely replace it.
+====================================================================
+2. GENERATE NEW (from JD_INFO)
+====================================================================
+summary, technical_skills, work_experience.role, work_experience.responsibilities, tailored_resume.role, total_experience
+Never copy original summary or original responsibility bullets verbatim.
 
-            The final summary must:
-            - Be generated specifically for the role in JD_INFO.
-            - Be ATS-friendly and professionally written.
-            - Use only factual information available in RESUME_TEXT.
-            - Highlight the candidate's most relevant experience, skills, technologies, projects, domains, and achievements for the target role.
-            - Prioritize JD-required and preferred skills when they can be reasonably supported by the candidate's background.
-            - Reflect the candidate's actual seniority and total experience.
-            - Sound natural and credible, not keyword-stuffed.
-            - Never mention skills, achievements, certifications, domains, responsibilities, or experience that are not supported by RESUME_TEXT.
-            - Never reuse an unrelated objective, career goal, or summary from RESUME_TEXT.
-            - The summary should make the candidate appear as a strong and realistic fit for the target role while remaining fully truthful to the source resume.
+====================================================================
+3. STRUCTURE
+====================================================================
+- Employment resume: one work_experience entry per job
+- Project resume: one work_experience entry per project block (keep project_name exact)
+- Order: most recent first (index 0 = latest)
+- projects = []
 
-        Return this JSON structure:
-        {
-        "jd_analysis": {
-        "target_role": "",
-        "overall_experience_required": "",
-        "technical_skills": {
-            "languages": [],
-            "frameworks": [],
-            "libraries": [],
-            "databases": [],
-            "cloud": [],
-            "devops": [],
-            "tools": [],
-            "ai_ml": [],
-            "concepts": [],
-            "others": []
-            },
-        "responsibilities": [],
-        "domain_knowledge": [],
-        "certifications": []
-        },
+====================================================================
+4. ROLES & EXPERIENCE
+====================================================================
+jd_analysis.target_role = exact role/title from JD_INFO
 
-        "skill_gap_analysis": {
-        "existing_skills": [],
-        "missing_skills": []
-        },
+Role titles (derive from target_role — any JD role):
+- Index 0 (latest): target_role (+ Senior if total_experience >= 5)
+- Middle: mid-level variant of same role domain
+- Oldest: junior/associate variant of same role domain
+- Never keep original titles from RESUME_TEXT
 
-        "tailored_resume": {
-            "name": "",
-            "total_experience": 0,
-            "email": "",
-            "phone_number": "",
-            "location": "",
-            "role": "",
-            "summary": "",
+total_experience: calculate from kept entry dates — never copy resume header text
+FINAL: tailored_resume.role = work_experience[0].role
 
-            "technical_skills": {
-                "languages": [],
-                "frameworks": [],
-                "libraries": [],
-                "databases": [],
-                "cloud": [],
-                "devops": [],
-                "tools": [],
-                "ai_ml": [],
-                "concepts": [],
-                "others": []
-            },
+====================================================================
+5. SUMMARY
+====================================================================
+3-5 new sentences for jd_analysis.target_role from JD_INFO.
+Include JD skills/themes. Never copy original summary.
+If JD role ≠ original profession: remove all old-profession terms.
 
-            "education": [
-                {
-                "degree": "",
-                "field": "",
-                "institution": "",
-                "cgpa": "",
-                "duration": ""
-                }
-            ],
+====================================================================
+6. SKILLS
+====================================================================
+Add ONLY skills explicitly in JD_INFO. Do not copy resume skills section.
+Include a resume skill only if the same term appears in JD_INFO.
+All other resume skills must be excluded.
 
-            "work_experience": [
-                {
-                "role": "",
-                "company": "",
-                "project_name": "",
-                "location": "",
-                "duration": "",
-                "responsibilities": []
-                }
-            ],
+====================================================================
+7. RESPONSIBILITIES — GENERAL JD-BASED SYNTHESIS
+====================================================================
+This section is dynamic. Derive everything from JD_INFO + each project's original facts.
 
-            "projects": [],
+GOAL: For each work entry, write bullets as if the candidate worked as
+jd_analysis.target_role on that project — using JD duties and JD skills.
 
-            "certifications": [
-                {
-                "name": "",
-                "organization": "",
-                "year": "",
-                "details": ""
-                }
-            ],
+Per entry: 4-5 bullets | 10-15 words each | 100% new text
 
-            "achievements": [],
+--- STEP 1: EXTRACT from JD_INFO (once per request) ---
+- target_role
+- List responsibility themes from JD (parse Key Responsibilities / duties in JD_INFO)
+- List skills/tools from JD (parse Qualifications & Skills in JD_INFO)
+Store in jd_analysis.responsibilities and use these as the duty vocabulary for ALL entries.
 
-            "languages": [],
+--- STEP 2: EXTRACT from RESUME_TEXT (per entry) ---
+For THIS work_experience entry only, read synopsis + original bullets.
+Extract FACTS only (not wording):
+  - business domain, product purpose, users, workflows
+  - data/systems involved, integrations, deliverables, metrics/outcomes
+Do NOT copy original bullet sentences.
 
-            "interests": [],
+--- STEP 3: SYNTHESIZE new bullets (per entry) ---
+Ask: "What would a [target_role] have contributed on [this project]?"
+For each bullet:
+  - Pick one JD responsibility theme from Step 1
+  - Pick one JD skill/tool from Step 1 where it fits naturally
+  - Anchor to one project fact from Step 2 (domain, product, company/project_name)
+  - Write in past-tense resume style for target_role
 
-            
+Rules:
+- Bullets must sound like target_role work — not the candidate's original profession
+- Use JD skills/tools in sentences — do not invent a fixed skill list
+- Vary JD themes across bullets within the entry
+- Each entry must differ from other entries (different project facts = different bullets)
+- Mention project_name or company in 1-2 bullets only
 
-            "links": {
-                "linkedin": "",
-                "github": "",
-                "portfolio": ""
-            }
-        }
-        }
+--- FORBIDDEN ---
+✗ Copying original resume bullets (same meaning or key phrases)
+✗ Copying JD sentences verbatim
+✗ Same bullet template across entries with only name swapped
+✗ Using tools/terms from old profession that are NOT in JD_INFO
+✗ Changing job title but keeping original profession wording in bullets
+✗ Generic bullets with no project/domain context
 
-        """
-    
+--- VALIDATION (per entry before output) ---
+[ ] 4-5 bullets, each 10-15 words
+[ ] Every bullet reflects target_role + a JD theme from Step 1
+[ ] Every bullet anchored to this entry's project facts from Step 2
+[ ] No bullet matches original resume text
+[ ] No two entries share the same bullet pattern
+
+--- GENERAL PATTERN (adapt role/skills/themes from JD_INFO) ---
+"[Past-tense verb] [JD duty theme] using [JD skill] for [project/company] [project-specific fact]."
+
+====================================================================
+8. OUTPUT — use exact JSON keys
+====================================================================
+{
+  "jd_analysis": {
+    "target_role": "",
+    "overall_experience_required": "",
+    "technical_skills": {"languages":[],"frameworks":[],"libraries":[],"databases":[],"cloud":[],"devops":[],"tools":[],"ai_ml":[],"concepts":[],"others":[]},
+    "responsibilities": [],
+    "domain_knowledge": [],
+    "certifications": []
+  },
+  "skill_gap_analysis": {"existing_skills":[],"missing_skills":[]},
+  "tailored_resume": {
+    "name":"","total_experience":0,"email":"","phone_number":"","location":"","role":"","summary":"",
+    "technical_skills":{"languages":[],"frameworks":[],"libraries":[],"databases":[],"cloud":[],"devops":[],"tools":[],"ai_ml":[],"concepts":[],"others":[]},
+    "education":[{"degree":"","field":"","institution":"","cgpa":"","duration":""}],
+    "work_experience":[{"role":"","company":"","project_name":"","location":"","duration":"","responsibilities":[]}],
+    "projects":[],
+    "certifications":[{"name":"","organization":"","year":"","details":""}],
+    "achievements":[],"languages":[],"interests":[],
+    "links":{"linkedin":"","github":"","portfolio":""}
+  }
+}
+"""
+
     full_content = f"""
 RESUME_TEXT:
 {resume_text[:12000]}
@@ -595,52 +755,42 @@ JD_INFO:
 {str(jd_info)[:8000]}
 """
 
-    model_info =( db.query(
-                func.json_build_object(
-                    'model_name', AiModel.model_name,
-                    'model_version_name', AiModelversion.version_name,
-                    'apikey', AiModelConfig.apikey,
-                    'max_tokens', AiModelConfig.max_tokens,
-                    'temperature', AiModelConfig.temparature,
-                    'is_active', AiModelConfig.is_active
-                )
-            )
-            .select_from(AiModelConfig).
-            join(AiModel, AiModel.ai_model_id == AiModelConfig.ai_model_id).
-            join(AiModelversion, AiModelversion.ai_model_version_id == AiModelConfig.ai_model_version_id).
-            filter(AiModelConfig.is_active == True).
-            first()
-            )
+    admin = db.query(Admin).filter(Admin.is_active == True).first()
+
+    model_info = select_available_model(admin.admin_id)
 
     if not model_info:
-        model_info = {}
-    else:
-        model_info = model_info[0]
-
-    model = model_info.get("model_name", "llama3").lower()
-    version = model_info.get("model_version_name", "latest").lower()
-    api_key = model_info.get("apikey") or None
+        return Exception("No active AI model configured")
     
+    model_config_id = model_info.get("model_config_id")
+    model = model_info.get("model_name", "ollama").lower()
+    version = model_info.get("version_name", "llama3").lower()
+    base_url = model_info.get("base_url")
+    api_key = model_info.get("apikey")
+    api_key = decrypt_data(api_key)
+
     system_message = (
-        "Return exactly one valid JSON object. "
-        "Do not include markdown, code fences, labels, prefixes, or extra text."
+        "Resume tailoring engine. Return one JSON object using the exact JSON schema. "
+        "Target role, skills, and responsibility themes come from JD_INFO only — no fixed role. "
+        "Preserve only: name, email, phone, location, company, duration, project_name. "
+        "For each work entry: extract project facts from resume, then write 4-5 NEW bullets "
+        "(10-15 words) as jd_analysis.target_role duties using JD themes and JD skills. "
+        "Never copy original bullets. Never keep old-profession wording. "
+        "Each entry must have unique bullets. tailored_resume.role = work_experience[0].role."
     )
+
     message = [
                 {"role": "system", "content": system_message},
                 {"role": "user", "content": prompt + "\n\n" + full_content}
             ]
-
-    api_key = decrypt_data(api_key)
 
     if model == "openai":
         if not api_key or api_key == None:
             raise Exception("OpenAI API key not found")
 
         client = OpenAI(
-            # api_key = "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",
-            api_key = api_key,
-            base_url = "https://api.groq.com/openai/v1",
-            )
+            api_key=api_key,
+            base_url = base_url)
 
     elif model == "claude":
         if not api_key or api_key == None:
@@ -679,7 +829,10 @@ JD_INFO:
             messages=message
         )
         content = response.choices[0].message.content.strip()
-        print('content =>', content)
+        token_used = response.usage.total_tokens
+    
+        usage = record_model_usage(model_config_id, token_used, admin.name)
+        logger.info(f'{usage}, token used for the prompt: {token_used}')
 
     try:
         data = parse_llm_json(content)
