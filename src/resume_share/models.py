@@ -2,7 +2,16 @@ import uuid
 import datetime
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import UUID, Column, ForeignKey, String, DateTime, Boolean, Integer, Text
+from sqlalchemy import (
+    UUID,
+    Column,
+    ForeignKey,
+    String,
+    DateTime,
+    Boolean,
+    Integer,
+    Text,
+)
 from sqlalchemy.orm import relationship
 from db.connection import Base
 
@@ -38,21 +47,25 @@ class EmailTemplate(Base):
     updated_at = Column(DateTime(timezone=False), default=ist_now, onupdate=ist_now)
     is_active = Column(Boolean, default=True)
 
+
 class EmailNotification(Base):
     __tablename__ = "email_notification"
 
     email_share_id = Column(UUID, primary_key=True, default=uuid.uuid4)
     to_address = Column(String(255), nullable=False)
     cc_address = Column(String(255), nullable=True)
-    # candidate_id = Column(UUID(as_uuid=True), ForeignKey("candidates.candidate_id"), nullable=False) 
+    # candidate_id = Column(UUID(as_uuid=True), ForeignKey("candidates.candidate_id"), nullable=False)
     resume_id = Column(UUID(as_uuid=True), ForeignKey("resumes.resume_id"), nullable=False)
     subject = Column(String(500), nullable=True)
     mail_body = Column(Text, nullable=True)
-    status = Column(String, default='Pending')
+    status = Column(String, default="Pending")
     is_active = Column(Boolean, default=True)
     created_by = Column(String(255), nullable=True)
     updated_by = Column(String(255), nullable=True)
-    sent_at = Column(DateTime(timezone=False))
+    sent_at = Column(DateTime(timezone=False), nullable=True)
+    retry_count = Column(Integer, default=0)
+    failed_at = Column(DateTime(timezone=False), nullable=True)
+    last_retry_at = Column(DateTime(timezone=False), nullable=True)
     created_at = Column(DateTime(timezone=False), default=ist_now)
     updated_at = Column(DateTime(timezone=False), default=ist_now, onupdate=ist_now)
 
