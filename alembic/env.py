@@ -11,12 +11,15 @@ from src.admin import models
 from src.auth import models
 from src.resume_share import models 
 from src.client_track import models 
+import os
 
 from alembic import context
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
+
+config.set_main_option("sqlalchemy.url", os.getenv("DATABASE_URL", ""))
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
