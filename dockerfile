@@ -28,6 +28,13 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 
 COPY . .
 
+# Attachments dir is excluded via .dockerignore; create it so the app can write.
+RUN mkdir -p /app/attachments && \
+    sed -i 's/\r$//' /app/start.sh && \
+    chmod +x /app/start.sh
+
+ENV PYTHONPATH=/app
+
 EXPOSE 8000
 
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["bash", "/app/start.sh"]

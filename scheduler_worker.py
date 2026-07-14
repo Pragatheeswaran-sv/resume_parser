@@ -2,7 +2,7 @@ import logging
 from datetime import datetime
 from apscheduler.schedulers.blocking import BlockingScheduler
 from dotenv import load_dotenv
-
+from db.connection import engine
 from db.connection import SessionLocal
 from src.services.auth.service import fetch_emails_oauth
 from src.admin.models import ExtractionConfig
@@ -203,7 +203,7 @@ def main():
         id="refresh_job",
         replace_existing=True,
     )
-
+    logger.info('pool_status', engine.pool.status())
     logger.info("Scheduler started (auto-refresh enabled)")
     scheduler.start()
 

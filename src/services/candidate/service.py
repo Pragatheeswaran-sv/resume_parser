@@ -1,4 +1,6 @@
 import logging
+
+from fastapi import APIRouter, HTTPException, status
 from dotenv import load_dotenv
 from db.connection import SessionLocal
 from sqlalchemy import func, cast
@@ -302,4 +304,112 @@ def export_candidate(search_id, page, page_size, export):
             export = export)
     except Exception as e:
         logger.warning("[export_candidate] Error: %s", str(e), exc_info=True)
+        raise ValueError(str(e))
+
+
+def get_candidate_basic_info(filter_by=None,filter_value=None, page=1, page_size=10, sort_by=None, sort_order=None):
+    try:
+        db = SessionLocal()
+        sort_map = {
+            'candidate_name' : Candidate.name,
+            "email": Candidate.email_address,
+            "phone_number": Candidate.phone_number,
+            "total_experience": Candidate.total_experience,
+            "role": Resume.candidate_role,
+        }
+
+        filter_map = {
+            'candidate_name' : (Candidate.name, 'string'),
+            "email": (Candidate.email_address, 'string'),
+            "phone_number": (Candidate.phone_number, 'string'),
+            "total_experience": (Candidate.total_experience, 'integer'),
+            "role": (Resume.candidate_role, 'string'),
+        }
+
+        query = (
+                db.query(
+                    Candidate.candidate_id,
+                    Candidate.name.label("candidate_name"),
+                    Resume.resume_id,
+                    Resume.candidate_role.label("candidate_role"),
+                    Candidate.email_address,
+                    Candidate.phone_number,
+                    Candidate.total_experience
+                )
+                .join(Resume, Candidate.candidate_id == Resume.candidate_id)
+                .filter(Candidate.is_active == True)
+                # .limit(page_size).offset((page - 1) * page_size)
+                # .all()
+            )
+        sort_order = sort_order if sort_order in ("asc", "desc") else "asc"
+        if sort_by in sort_map:
+            col = sort_map[sort_by]
+            query = query.order_by(col.desc() if sort_order == "desc" else col.asc())
+
+        if filter_by in filter_map and filter_value:
+            col, col_type = filter_map[filter_by]
+            if col_type == 'string':
+                query = query.filter(col.ilike(f"%{filter_value}%"))
+            elif col_type == 'integer':
+                query = query.filter(col == int(filter_value))
+
+        page = int(page)
+        page_size = int(page_size)
+        if page > 0 and page_size > 0:
+            query = query.limit(page_size).offset((page - 1) * page_size)
+
+        data = query.all()
+        data_serialized = [
+            {
+                "candidate_id": row.candidate_id,
+                'candidate_name' : row.candidate_name,
+                "resume_id": row.resume_id,
+                "role": row.candidate_role,
+                "email": row.email_address,
+                "phone_number": row.phone_number,
+                "total_experience": row.total_experience
+            }
+            for row in data
+        ]
+        # if filter_by == None and sort_by == None:
+        #     data = [
+        #         {
+        #             "candidate_id": row.candidate_id,
+        #             'candidate_name' : row.candidate_name,
+        #             "resume_id": row.resume_id,
+        #             "role": row.candidate_role,
+        #             "email": row.email_address,
+        #             "phone_number": row.phone_number,
+        #             "total_experience": row.total_experience
+        #         }
+        #         for row in candidate_info
+        #     ]
+        #     return {
+        #         "status": status.HTTP_200_OK,
+        #         "message": "Candidates basic information retrieved successfully",
+        #         "data": data
+        #     }
+        # elif sort_by != None:
+            
+        
+        # print(len(candidate_info))
+        # data = [
+        #     {
+        #         "candidate_id": row.candidate_id,
+        #         'candidate_name' : row.candidate_name,
+        #         "resume_id": row.resume_id,
+        #         "role": row.candidate_role,
+        #         "email": row.email_address,
+        #         "phone_number": row.phone_number,
+        #         "total_experience": row.total_experience
+        #     }
+        #     for row in candidate_info
+        # ]
+        return {
+            "status": status.HTTP_200_OK,
+            "message": "Candidates basic information retrieved successfully",
+            "data": data_serialized
+        }
+    except Exception as e:
+        logger.warning("[candidate_basic_info] Error: %s", str(e), exc_info=True)
         raise ValueError(str(e))

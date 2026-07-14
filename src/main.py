@@ -1,5 +1,8 @@
 import os
-os.environ["OLLAMA_HOST"] = "http://host.docker.internal:11434"
+
+os.environ.setdefault("OLLAMA_HOST", os.getenv("OLLAMA_HOST", "http://host.docker.internal:11434"))
+os.environ.setdefault("LANGCHAIN_TRACING_V2", os.getenv("LANGCHAIN_TRACING_V2", "false"))
+os.environ.setdefault("LANGCHAIN_PROJECT", os.getenv("LANGCHAIN_PROJECT", "resume-tracker"))
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
