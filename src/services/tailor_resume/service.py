@@ -140,6 +140,33 @@ def parse_llm_json(content):
                 f"Error={e2.msg}"
             )
 
+def filter_skills_by_jd(data, jd_text):
+    jd_lower = jd_text.lower()
+    resume = data.get("tailored_resume", data)
+    skills = resume.get("technical_skills", {})
+    
+    for category, skill_list in skills.items():
+        if isinstance(skill_list, list):
+            skills[category] = [
+                s for s in skill_list
+                if str(s).lower().strip() in jd_lower
+            ]
+    
+    # Also sync skill_gap_analysis
+    existing = set()
+    for cat_list in skills.values():
+        for s in cat_list:
+            existing.add(str(s).lower())
+    gap = data.get("skill_gap_analysis", {})
+    gap["existing_skills"] = list(existing)
+    if gap.get("missing_skills"):
+        gap["missing_skills"] = [
+            s for s in gap["missing_skills"]
+            if str(s).lower() not in existing
+        ]
+    
+    return data
+
 def create_json_completion(client, model, messages):
     try:
         response = client.chat.completions.create(
@@ -659,11 +686,12 @@ Include JD skills/themes. Never copy original summary.
 If JD role ≠ original profession: remove all old-profession terms.
 
 ====================================================================
-6. SKILLS
+6. SKILLS — STRICT FILTERING REQUIRED
 ====================================================================
-Add ONLY skills explicitly in JD_INFO. Do not copy resume skills section.
-Include a resume skill only if the same term appears in JD_INFO.
-All other resume skills must be excluded.
+START with empty categories. Do NOT copy resume skills section.
+RULE: A skill belongs in technical_skills ONLY if its exact name (or a normalized form) appears in JD_INFO. If it is not in JD_INFO, you MUST exclude it.
+EXCEPTION: A resume skill may be included only if it directly supports the target role AND a reasonable recruiter would expect it based solely on JD_INFO content.
+VALIDATION (mandatory before output): Scan every skill in every category. For each skill, confirm you can point to the exact text in JD_INFO that justifies it. If you cannot, remove it.
 
 ====================================================================
 7. RESPONSIBILITIES — GENERAL JD-BASED SYNTHESIS
@@ -840,7 +868,7 @@ JD_INFO:
     except Exception as e:
         print(f"Invalid JSON returned by model: {content}")
         raise ValueError("Model returned invalid JSON") from e
-    
+    data = filter_skills_by_jd(data, jd_info)
     return data
 
 def clean_text(value):
