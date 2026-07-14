@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException, status, Query, Depends
 from src.admin.dependencies import get_current_admin, get_current_admin_or_user
 from typing import List, Dict, Any
-from src.services.candidate.service import candidate_datails, CandidateServiceError
+from src.services.candidate.service import candidate_datails, CandidateServiceError, get_candidate_basic_info
 from src.resume_filter.schemas import ResumeFilterRequest
 from pydantic import ValidationError
 from src.utils.response import serialize_response
@@ -198,6 +198,38 @@ def export_data(search_id: str, page: int, page_size: int, export: bool = False,
         logger.warning("[export_data] Error: %s", str(e), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "status": "error",
+                "message": str(e),
+            })
+
+@router.get("/candidate_basic_info/")  
+def candidate_basic_info(filter_by=None, filter_value=None, page=1, page_size=10, sort_by=None, sort_order=None):
+    """
+        Candidate Basic Information
+
+        Retrieves basic information about active candidates.
+
+        This endpoint queries the database to fetch all active candidates and their corresponding resume information.
+        The response includes the candidate's ID, name, and the ID of their resume.
+
+        Endpoint:
+            GET /candidate_basic_info
+        Returns:
+            list: A list of candidate objects, each containing:
+                - candidate_id (str): Unique identifier for the candidate
+                - candidate_name (str): Name of the candidate
+                - resume_id (str): Unique identifier for the candidate's resume
+        Raises:
+            HTTPException:
+                - 500 Internal Server Error: If there is an issue retrieving candidate data.
+    """
+    try:
+        return get_candidate_basic_info(filter_by=filter_by, filter_value=filter_value, page=page, page_size=page_size, sort_by=sort_by, sort_order=sort_order)
+    except ValueError as e:
+        logger.warning("[candidate_basic_info] Error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
                 "status": "error",
                 "message": str(e),

@@ -1,0 +1,47 @@
+name: CI/CD
+
+on:
+  push:
+    branches: ["develop"]
+  pull_request:
+    branches: ["develop"]
+
+jobs:
+  ci:
+    name: Lint & compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        run: pipx install poetry
+
+      - name: Install dependencies
+        run: poetry install --no-root
+
+      - name: Compile check
+        run: poetry run python -m compileall src db scheduler_worker.py
+
+  docker-build:
+    name: Validate Docker image
+    needs: ci
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t resume-tracker:ci .
+
+  deploy:
+    name: Deploy to Render
+    needs: docker-build
+    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render deploy hook
+        run: curl -fsSL -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
