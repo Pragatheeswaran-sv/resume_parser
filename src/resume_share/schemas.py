@@ -16,7 +16,24 @@ class ShareResumeResponse(BaseModel):
     email_id: Optional[str] = None
 
 
+class RetryShareEmailRequest(BaseModel):
+    email_share_ids: List[str]
+
+
+class RetryShareEmailItem(BaseModel):
+    email_share_id: str
+    success: bool
+    message: str
+
+
+class RetryShareEmailResponse(BaseModel):
+    success: bool
+    message: str
+    results: List[RetryShareEmailItem]
+
+
 # ── Email Provider Config ────────────────────────────────────────────────
+
 
 class EmailProviderConfigCreate(BaseModel):
     provider_name: str
@@ -41,6 +58,7 @@ class EmailProviderConfigUpdate(BaseModel):
 
 
 # ── Email Template ───────────────────────────────────────────────────────
+
 
 class EmailTemplateCreate(BaseModel):
     template_name: str
