@@ -101,4 +101,4 @@ def startup():
 @app.get("/health")
 def health_check() -> dict:
     """Simple health check endpoint."""
-    return {"message": "Resume tracker application running successful", "version": "1.0.1"}
+    return {"message": "Resume tracker application running successful", "version": "1.0.2"}
