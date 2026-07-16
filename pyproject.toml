@@ -31,10 +31,22 @@ dependencies = [
     "lxml (>=6.1.0,<7.0.0)",
     "phonenumbers (>=9.0.29,<10.0.0)",
     "reportlab (>=4.4.4,<5.0.0)",
-    "langchain-ollama (>=1.1.0,<2.0.0)"
+    "langchain-ollama (>=1.1.0,<2.0.0)",
+    "pytest (>=9.1.1,<10.0.0)",
+    "rapidfuzz (>=3.14.5,<4.0.0)",
+    "email-validator (>=2.3.0,<3.0.0)",
+    "tomlkit (>=0.15.0,<0.16.0)"
 ]
 
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+
+[tool.pytest.ini_options]
+python_files = ["test_*.py", "*_test.py", "*_test_case.py"]
+pythonpath = ["."]             
+filterwarnings = [
+    "ignore::DeprecationWarning"
+]
