@@ -28,7 +28,7 @@ jobs:
       - name: Run tests
         run: poetry run pytest -v --tb=short
         env:
-          DATABASE_URL: sqlite:///:memory:
+          DATABASE_URL: "sqlite:///:memory:"
           JWT_SECRET_KEY: test-secret-key
 
       - name: Compile check
