@@ -30,6 +30,7 @@ jobs:
         env:
           DATABASE_URL: "sqlite:///:memory:"
           JWT_SECRET_KEY: test-secret-key
+          SECRET_KEY: "dGVzdC1mZXJuZXQta2V5LWZvci1jaS11c2Utb25seQ=="
 
       - name: Compile check
         run: poetry run python -m compileall src db scheduler_worker.py
