@@ -8,8 +8,9 @@ on:
 
 jobs:
   ci:
-    name: Lint & compile
+    name: Tests & compile
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -23,6 +24,12 @@ jobs:
 
       - name: Install dependencies
         run: poetry install --no-root
+
+      - name: Run tests
+        run: poetry run pytest -v --tb=short
+        env:
+          DATABASE_URL: sqlite:///:memory:
+          JWT_SECRET_KEY: test-secret-key
 
       - name: Compile check
         run: poetry run python -m compileall src db scheduler_worker.py
