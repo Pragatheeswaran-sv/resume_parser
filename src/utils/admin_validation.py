@@ -321,7 +321,7 @@ from src.utils.response import error_response
 
 
 EMAIL_REGEX = r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$"
-ALPHA_REGEX = r"^[A-Za-z]+$"
+ALPHA_REGEX = r"^[A-Za-z ]+$"
 ALPHA_COLUMNS = ["name"]
 
 def build_error(field, message):
@@ -1176,3 +1176,86 @@ def validate_active_model(admin_id):
     )
 
     return validation_response(errors)
+
+import re
+from typing import Dict, Any
+
+EMAIL_REGEX = r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$"
+
+MAX_EMAIL_LENGTH = 254
+MAX_NAME_LENGTH = 1024
+MIN_PASSWORD_LENGTH = 8
+MAX_PASSWORD_LENGTH = 128
+
+
+def validate_admin_payload(payload: Dict[str, Any]):
+    allowed_fields = {"email", "password", "name"}
+
+    # Unexpected fields
+    extra_fields = set(payload.keys()) - allowed_fields
+    if extra_fields:
+        return error_response(
+            400,
+            f"Unexpected field '{extra_fields.pop()}'"
+        )
+
+    email = payload.get("email")
+    password = payload.get("password")
+    name = payload.get("name")
+
+    # Email validations
+    if email is None:
+        return error_response(422, "email must be a non-null string")
+
+    if not isinstance(email, str):
+        return error_response(422, "email must be a string")
+
+    if email == "":
+        return error_response(422, "email cannot be empty")
+
+    if email != email.strip():
+        return error_response(422, "email contains invalid whitespace")
+
+    if len(email) > MAX_EMAIL_LENGTH:
+        return error_response(422, "email exceeds maximum length")
+
+    if not re.match(EMAIL_REGEX, email):
+        return error_response(422, "email format is invalid")
+
+    # Password validations
+    if password is None:
+        return error_response(422, "password must be a non-null string")
+
+    if not isinstance(password, str):
+        return error_response(422, "password must be a string")
+
+    if password == "":
+        return error_response(422, "password cannot be empty")
+
+    if password.strip() == "":
+        return error_response(422, "password cannot be whitespace only")
+
+    if len(password) < MIN_PASSWORD_LENGTH:
+        return error_response(
+            422,
+            "password does not meet length requirements"
+        )
+
+    if len(password) > MAX_PASSWORD_LENGTH:
+        return error_response(
+            422,
+            "password exceeds maximum length"
+        )
+
+    # Name validations (optional)
+    if name is not None:
+        if not isinstance(name, str):
+            return error_response(422, "name must be a string")
+
+        if len(name) > MAX_NAME_LENGTH:
+            return error_response(
+                422,
+                "name exceeds maximum length"
+            )
+
+    return None
