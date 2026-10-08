@@ -60,7 +60,7 @@ def admin_check(email: str, password: str) -> Dict[str, Any]:
     try:
         
         if email == "" or password == "" or not email or not password:
-            # raise ValueError("Email and password must be provided")
+            
             return error_response(400, "Email and password must be provided")
 
         admin = session.query(Admin).filter_by(email_address=email).first()
