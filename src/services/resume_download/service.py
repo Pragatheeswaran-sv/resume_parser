@@ -25,6 +25,7 @@ from src.email_reader.models import Attachment
 from src.resume_filter.models import Resume
 from src.candidate.models import Candidate
 from fastapi import HTTPException  
+from src.utils.attachment_storage import read_attachment
 logger = logging.getLogger(__name__)
 
 BASE_DIR = "/app"  
@@ -58,10 +59,7 @@ def get_file_base64(resume_id) -> dict:
 
         if not filename:
             raise Exception('file name not found')
-        path = get_file_path(filename)
-
-        with open(path, "rb") as f:
-            encoded = base64.b64encode(f.read()).decode()
+        encoded = base64.b64encode(read_attachment(filename, FILES_DIR)).decode()
 
         mime_type, _ = mimetypes.guess_type(filename)
         if mime_type != 'application/pdf':
@@ -149,25 +147,16 @@ def get_download_links(db: Session, candidate_ids: list[str]):
             candidate_folder = os.path.join(temp_folder, candidate_name)
             os.makedirs(candidate_folder, exist_ok=True)
 
-            source_file = os.path.join(
-                UPLOAD_DIR,
-                str(resume.file_name)
-            )
-
-            if not os.path.exists(source_file):
-                logger.warning(
-                    f"File not found for attachment_id "
-                    f"{resume.attachment_id}: {source_file}"
-                )
-                continue
-
-            
             destination_file = os.path.join(
                 candidate_folder,
                 f"{resume.attachment_id}_{resume.file_name}"
             )
-
-            shutil.copy2(source_file, destination_file)
+            try:
+                with open(destination_file, "wb") as destination:
+                    destination.write(read_attachment(resume.file_name, FILES_DIR))
+            except FileNotFoundError:
+                logger.warning("File not found for attachment_id %s", resume.attachment_id)
+                continue
 
         
         zip_path = shutil.make_archive(
