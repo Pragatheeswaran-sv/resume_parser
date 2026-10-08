@@ -35,7 +35,7 @@ from src.auth.models import RefreshToken
 from fastapi import status
 from src.admin.models import Admin, AiModel, AiModelConfig, AiModelversion, Users
 from src.utils.helper import encrypt_data, decrypt_data
-from src.utils.admin_validation import validate_active_model, validate_create_model, validate_delete_user, validate_get_model, validate_get_user, validate_get_user_by_id, validate_list_user, validate_model_config, validate_model_version, validate_new_auth, validate_new_job, validate_toggle_model, validate_update_user
+from src.utils.admin_validation import validate_active_model, validate_admin_payload, validate_create_model, validate_delete_user, validate_get_model, validate_get_user, validate_get_user_by_id, validate_list_user, validate_model_config, validate_model_version, validate_new_auth, validate_new_job, validate_toggle_model, validate_update_user
 from src.utils.response import error_response, internal_server_error_response, not_found_response
 
 load_dotenv()
@@ -60,7 +60,7 @@ def admin_check(email: str, password: str) -> Dict[str, Any]:
     try:
         
         if email == "" or password == "" or not email or not password:
-            # raise ValueError("Email and password must be provided")
+            
             return error_response(400, "Email and password must be provided")
 
         admin = session.query(Admin).filter_by(email_address=email).first()
@@ -486,41 +486,97 @@ def revoke_refresh_tokens(raw_token: str) -> Dict[str, Any]:
         session.close()
 
 
+# def new_admin(payload: dict) -> Dict[str, Any]:
+#     """Create a new administrator account.
+
+#     Args:
+#         payload: Dictionary with ``email``, ``password``, and optional ``name``.
+
+#     Returns:
+#         Dict with the newly created admin's ID and name.
+
+#     Raises:
+#         ValueError: If required fields are missing or the email is already taken.
+#     """
+#     session = SessionLocal()
+#     try:
+#         email = payload.get("email")
+#         password = payload.get("password")
+#         name = payload.get("name")
+
+#         if not email or not password:
+#             # raise ValueError("Email and password are required")
+#             return error_response(400, "Email and password are required")
+
+#         admin = session.query(Admin).filter_by(email_address=email).first()
+#         if admin:
+#             # raise ValueError("Admin with this email already exists")
+#             return error_response(409, "Admin with this email already exists")
+
+#         new_admin_obj = Admin(
+#             name=name,
+#             email_address=email,
+#             password=hash_password(password),
+#         )
+#         session.add(new_admin_obj)
+#         session.commit()
+#         session.refresh(new_admin_obj)
+#         return {
+#             "status": status.HTTP_201_CREATED,
+#             "message": "Admin created successfully",
+#             "data": {
+#                 "admin_id": str(new_admin_obj.admin_id),
+#                 "name": new_admin_obj.name,
+#             },
+#         }
+#     except ValueError:
+#         raise
+#     except Exception as e:
+#         session.rollback()
+#         logger.warning("[new_admin] Error: %s", str(e), exc_info=True)
+#         return internal_server_error_response(str(e))
+#     finally:
+#         session.close()
+
 def new_admin(payload: dict) -> Dict[str, Any]:
-    """Create a new administrator account.
-
-    Args:
-        payload: Dictionary with ``email``, ``password``, and optional ``name``.
-
-    Returns:
-        Dict with the newly created admin's ID and name.
-
-    Raises:
-        ValueError: If required fields are missing or the email is already taken.
-    """
     session = SessionLocal()
+
     try:
-        email = payload.get("email")
-        password = payload.get("password")
+        ALLOWED_FIELDS = {"email", "password", "name"}
+
+        extra_fields = set(payload.keys()) - ALLOWED_FIELDS
+        if extra_fields:
+            return error_response(
+                400,
+                f"Unexpected field '{extra_fields.pop()}'"
+            )
+
+        validation = validate_admin_payload(payload)
+        if validation:
+            return validation
+
+        email = payload["email"]
+        password = payload["password"]
         name = payload.get("name")
 
-        if not email or not password:
-            # raise ValueError("Email and password are required")
-            return error_response(400, "Email and password are required")
-
         admin = session.query(Admin).filter_by(email_address=email).first()
+
         if admin:
-            # raise ValueError("Admin with this email already exists")
-            return error_response(409, "Admin with this email already exists")
+            return error_response(
+                409,
+                "Admin with this email already exists"
+            )
 
         new_admin_obj = Admin(
             name=name,
             email_address=email,
             password=hash_password(password),
         )
+
         session.add(new_admin_obj)
         session.commit()
         session.refresh(new_admin_obj)
+
         return {
             "status": status.HTTP_201_CREATED,
             "message": "Admin created successfully",
@@ -529,12 +585,12 @@ def new_admin(payload: dict) -> Dict[str, Any]:
                 "name": new_admin_obj.name,
             },
         }
-    except ValueError:
-        raise
+
     except Exception as e:
         session.rollback()
         logger.warning("[new_admin] Error: %s", str(e), exc_info=True)
         return internal_server_error_response(str(e))
+
     finally:
         session.close()
 
