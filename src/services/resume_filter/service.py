@@ -33,6 +33,7 @@ from openai import OpenAI
 from anthropic import Anthropic
 
 from src.utils.helper import calculate_match_score, clean_mobile_number, compress_file, decrypt_data, record_model_usage, select_available_model
+from src.utils.attachment_storage import AttachmentStorageError, stage_attachment, upload_attachment
 BASE_DIR = "/app"  
 EXPORT_PATH = os.path.join(BASE_DIR, "export_files")
 
@@ -1048,8 +1049,8 @@ def process_resumes(email_id: UUID) -> dict:
         #     logger.info("Extracted info for %s", att.file_name)
 
         for att in all_attachments:
-            file_path = f"attachments/{att.file_name}"
             try:
+                file_path = stage_attachment(att.file_name)
                 if file_path.endswith(".pdf"):
                     text = extract_text_from_pdf(file_path)
                 elif file_path.endswith(".docx"):
@@ -1098,16 +1099,24 @@ def process_resumes(email_id: UUID) -> dict:
             if not os.path.exists(path):
                 continue
             compressed_name = compress_file(path)
+            compressed_path = os.path.join(os.path.dirname(path), compressed_name)
+            try:
+                stored_name = upload_attachment(compressed_path, compressed_name)
+            except AttachmentStorageError:
+                logger.exception("Failed to persist compressed attachment %s", att.file_name)
+                continue
             attachment = db.query(Attachment).filter(
                 Attachment.attachment_id == att_id
             ).first()
             if attachment:
-                attachment.file_name = compressed_name
+                attachment.file_name = stored_name
                 db.commit()
                 db.refresh(attachment)
             if os.path.exists(path):
                 os.remove(path)
                 logger.info(f"{path} removed successfully")
+            if compressed_path != path and os.path.exists(compressed_path):
+                os.remove(compressed_path)
 
         return {
             "message_id": str(email_id),
