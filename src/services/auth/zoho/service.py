@@ -569,7 +569,7 @@ def zoho_callback(code: str, db=SessionLocal()):
     try:
         logger.info(f"NAV----> Received Zoho callback with code: {code}")
 
-        redirect_url = "http://localhost:3000/login"
+        redirect_url = os.getenv("ZOHO_REDIRECT_URI")
         token_data = {
             "code": code,
             "client_id": os.getenv("ZOHO_CLIENT_ID"),
