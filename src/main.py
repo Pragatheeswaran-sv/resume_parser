@@ -1,4 +1,6 @@
 import os
+import asyncio
+import requests
 
 os.environ.setdefault("OLLAMA_HOST", os.getenv("OLLAMA_HOST", "http://host.docker.internal:11434"))
 os.environ.setdefault("LANGCHAIN_TRACING_V2", os.getenv("LANGCHAIN_TRACING_V2", "false"))
@@ -32,6 +34,8 @@ logging.basicConfig(
 	format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+KEEP_ALIVE_INTERVAL_SECONDS = 180
+keep_alive_task: asyncio.Task[None] | None = None
 
 app = FastAPI(
     title="Resume Tracker API",
@@ -93,10 +97,43 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 @app.on_event("startup")
 def startup():
-    """Initialize database tables on application startup."""
+    """Initialize the database and start Render's best-effort keep-alive."""
+    global keep_alive_task
 
     Base.metadata.create_all(bind=engine)
     logger.info("Database ready")
+
+    service_url = os.getenv("RENDER_EXTERNAL_URL")
+    if service_url:
+        keep_alive_task = asyncio.create_task(keep_render_service_awake(service_url))
+    else:
+        logger.info("Render keep-alive is disabled: RENDER_EXTERNAL_URL is not set")
+
+
+async def keep_render_service_awake(service_url: str) -> None:
+    """Periodically request this Render service's public health endpoint."""
+    health_url = f"{service_url.rstrip('/')}/health"
+    while True:
+        await asyncio.sleep(KEEP_ALIVE_INTERVAL_SECONDS)
+        try:
+            response = await asyncio.to_thread(requests.get, health_url, timeout=10)
+            response.raise_for_status()
+            logger.info("Render keep-alive health check succeeded")
+        except requests.RequestException:
+            logger.exception("Render keep-alive health check failed")
+
+
+@app.on_event("shutdown")
+async def shutdown_keep_alive() -> None:
+    global keep_alive_task
+    if keep_alive_task is not None:
+        keep_alive_task.cancel()
+        try:
+            await keep_alive_task
+        except asyncio.CancelledError:
+            pass
+        keep_alive_task = None
+
 
 @app.get("/health")
 def health_check() -> dict:
