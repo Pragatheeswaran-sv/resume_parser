@@ -9,16 +9,14 @@ POST /api/resumes/multi-download            – batch download URL list
 import os
 import logging
 from uuid import UUID
-
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse
-
 from src.resume_download.schemas import MultiDownloadRequest, previewResumeRequest
 from src.email_reader.models import Attachment
 from src.resume_filter.models import Resume
 from src.admin.dependencies import get_current_admin, get_current_admin_or_user
 from db.connection import SessionLocal
-from src.utils.attachment_storage import (
+from src.integrations.attachment_storage import (
     AttachmentStorageError,
     create_attachment_download_url,
     upload_attachment,
@@ -35,9 +33,7 @@ router = APIRouter(
         500: {"description": "Internal Server Error"},
     },
 )
-
-from src.services.resume_download.service import get_download_links, get_file_base64
-
+from src.resume_download.service import get_download_links, get_file_base64
 BASE_DIR = "/app"   # inside docker
 UPLOAD_DIR = os.path.join(BASE_DIR, "attachments")
 

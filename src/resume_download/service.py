@@ -24,8 +24,8 @@ from src.resume_download.schemas import MultiDownloadRequest
 from src.email_reader.models import Attachment
 from src.resume_filter.models import Resume
 from src.candidate.models import Candidate
-from fastapi import HTTPException  
-from src.utils.attachment_storage import read_attachment
+from fastapi import HTTPException
+from src.integrations.attachment_storage import read_attachment
 logger = logging.getLogger(__name__)
 
 BASE_DIR = "/app"  

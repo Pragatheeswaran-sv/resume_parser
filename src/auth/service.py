@@ -9,8 +9,8 @@ import os
 from urllib.parse import urlencode
 from db.connection import SessionLocal
 from src.email_reader.models import EmailLogs
-from src.services.auth.gmail.service import fetch_emails_gmail
-from src.services.auth.zoho.service import fetch_emails_zoho
+from src.integrations.google import fetch_emails_gmail
+from src.integrations.zoho import fetch_emails_zoho
 from src.auth.schemas import EmailRequest, EmailFetchResponse, EmailFetchResult
 from src.auth.models import OauthCredentials, OauthSource
 from src.admin.models import Users
@@ -20,7 +20,8 @@ logger = logging.getLogger(__name__)
 
 def fetch_emails_oauth() -> EmailFetchResponse:
     """
-    Fetch emails from all active users based on OAuth source (Gmail / Zoho).
+    Fetch emails
+from all active users based on OAuth source (Gmail / Zoho).
 
     This API performs the following steps:
 

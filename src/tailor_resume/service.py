@@ -8,10 +8,10 @@ from tomlkit import value
 import ollama
 import json
 
-from src.services.admin.service import active_model
+from src.admin.service import active_model
 from src.email_reader.models import Attachment
 from src.resume_filter.models import Resume
-from src.services.resume_filter.service import extract_docx_text, extract_text_from_pdf
+from src.resume_filter.service import extract_docx_text, extract_text_from_pdf
 from dotenv import load_dotenv
 from db.connection import SessionLocal
 from sqlalchemy import UUID, String, func, cast, inspect

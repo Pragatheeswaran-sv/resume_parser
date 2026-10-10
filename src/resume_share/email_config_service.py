@@ -9,7 +9,6 @@ API layer can translate them into appropriate HTTP responses.
 import re
 from typing import Any, Dict
 import logging
-
 from fastapi import status
 from sqlalchemy import asc, desc
 

@@ -5,12 +5,11 @@ from pydantic import ValidationError
 from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 from typing import List, Dict, Any
-from src.services.tailor_resume.service import alter_resume
-from src.services.resume_filter.service import (
-    search_resumes, get_master_data,
+from src.tailor_resume.service import alter_resume
+from src.resume_filter.service import (    search_resumes, get_master_data,
     extract_filters_from_query, resolve_dynamic_filters, merge_filters, apply_filters
 )
-from src.services.nl_search.service import _execute_search, _load_search_session, nl_search_initial, nl_search_paginate
+from src.resume_filter.nl_search_service import _execute_search, _load_search_session, nl_search_initial, nl_search_paginate
 from src.resume_filter.schemas import (
     ResumeFilterRequest, DynamicFilterRequest, DynamicFilterResponse,
     NLSearchRequest, NLSearchPaginateRequest, NLSearchResponse,

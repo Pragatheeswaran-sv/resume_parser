@@ -15,8 +15,8 @@ import logging
 import datetime as dt
 import re
 from fastapi import status
-from src.services.redis_client import get_redis, NL_SEARCH_TTL
-from src.services.resume_filter.service import (
+from src.utils.redis_client import get_redis, NL_SEARCH_TTL
+from src.resume_filter.service import (
     extract_filters_from_query,
     resolve_dynamic_filters,
     search_resumes,

@@ -1,7 +1,5 @@
 """Pydantic schemas for resume download and preview endpoints."""
-
 from typing import List, Literal, Optional
-
 from pydantic import BaseModel, field_validator
 
 
@@ -17,7 +15,6 @@ from pydantic import BaseModel, field_validator
 #         if len(v) > 50:
 #             raise ValueError("Cannot request more than 50 resumes at once")
 #         return v
-
 from pydantic import BaseModel, field_validator
 from typing import List, Optional, Literal
 from uuid import UUID

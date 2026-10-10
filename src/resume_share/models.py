@@ -1,7 +1,6 @@
 import uuid
 import datetime
 from zoneinfo import ZoneInfo
-
 from sqlalchemy import (
     UUID,
     Column,

@@ -2,7 +2,7 @@ import logging
 from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException, status
 from typing import Dict, Any
-from src.services.email_reader.service import fetch_emails
+from src.email_reader.service import fetch_emails
 from src.utils.response import serialize_response
 
 load_dotenv()

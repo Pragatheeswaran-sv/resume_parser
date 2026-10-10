@@ -5,7 +5,7 @@ import logging
 import requests
 from db.connection import SessionLocal
 from src.auth.models import OauthCredentials, OauthSource
-from src.services.auth.zoho.service import ZOHO_OAUTH_ENDPOINTS
+from src.integrations.zoho import ZOHO_OAUTH_ENDPOINTS
 import os
 
 logger = logging.getLogger(__name__)

@@ -3,7 +3,6 @@ import logging
 # from .schema import ModelConfigRequest
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException, status
-
 from src.admin.dependencies import get_current_admin, get_current_admin_or_user, get_current_user
 from src.admin.schema import (
     AdminCreate,
@@ -19,9 +18,8 @@ from src.admin.schema import (
     SSOLoginRequest,
     Validate_new_job,
 )
-# from src.services.resume_filter.service import export
-from src.services.admin.service import (
-    active_model,
+# from src.resume_filter.service import export
+from src.admin.service import (    active_model,
     admin_check,
     delete_user,
     get_extraction_config,
@@ -56,7 +54,7 @@ from src.services.admin.service import (
     create_model,
 )
 from typing import List, Dict, Any
-# from src.services.admin.service import (
+# from src.admin.service import (
 #     admin_check, create_model,
 #     delete_user, new_admin,
 #     list_mail, new_auth,

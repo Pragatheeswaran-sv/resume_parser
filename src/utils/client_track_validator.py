@@ -562,8 +562,6 @@
 #         )
 
 #     return errors
-
-
 from datetime import datetime
 from urllib.parse import urlparse
 from uuid import UUID

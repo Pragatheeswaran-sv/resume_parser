@@ -103,7 +103,6 @@ def clean_mobile_number(phone_number):
 
     except Exception:
         return phone_number
-
 from datetime import timedelta
 
 def record_model_usage(model_config_id, tokens_used: int, name: str = None):

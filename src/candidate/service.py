@@ -1,5 +1,4 @@
 import logging
-
 from fastapi import APIRouter, HTTPException, status
 from dotenv import load_dotenv
 from db.connection import SessionLocal
@@ -10,8 +9,7 @@ from src.candidate.models import (
     Education, Role, WorkExperience, Company,
 )
 from src.resume_filter.models import Resume
-from src.services.nl_search.service import _execute_search, _load_search_session
-load_dotenv()
+from src.resume_filter.nl_search_service import _execute_search, _load_search_session
 logger = logging.getLogger(__name__)
 
 VALID_SORT_FIELDS = {"name", "experience", "year", "percentage"}

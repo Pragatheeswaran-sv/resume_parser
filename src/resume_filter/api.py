@@ -11,11 +11,11 @@ from pydantic import ValidationError
 from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 from typing import List, Dict, Any
-from src.services.resume_filter.service import (
+from src.resume_filter.service import (
     search_resumes, get_master_data,
     extract_filters_from_query, resolve_dynamic_filters, merge_filters, apply_filters
 )
-from src.services.nl_search.service import _execute_search, _load_search_session, nl_search_initial, nl_search_paginate
+from src.resume_filter.nl_search_service import _execute_search, _load_search_session, nl_search_initial, nl_search_paginate
 from src.resume_filter.schemas import (
     ResumeFilterRequest, DynamicFilterRequest, DynamicFilterResponse,
     NLSearchRequest, NLSearchPaginateRequest, NLSearchResponse,
@@ -36,7 +36,8 @@ router = APIRouter(
 
 @router.post("/generate_dynamic_filters")
 def generate_dynamic_filters(body: dict) -> Dict[str, Any]:
-    """Generate structured filter payload from a natural-language recruiter query.
+    """Generate structured filter payload
+from a natural-language recruiter query.
 
     The frontend should persist the returned ``dynamic_filters`` in
     localStorage and send them alongside standard UI filters on every
@@ -317,7 +318,8 @@ def nl_search(body: dict) -> Dict[str, Any]:
     Request body (paginate):
     ```json
     {
-        "search_id": "<hex id from first response>",
+        "search_id": "<hex id
+from first response>",
         "page": 2,
         "page_size": 20
     }

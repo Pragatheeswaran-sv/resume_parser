@@ -15,7 +15,7 @@ from src.admin.models import (
     AiModel, AiModelversion, Users, AiModelConfig, ExtractionConfig
 )
 from src.resume_filter.models import Resume
-from src.services.nl_search.service import _execute_search, _load_search_session
+from src.resume_filter.nl_search_service import _execute_search, _load_search_session
 from src.utils.helper import decrypt_data
 load_dotenv()
 logger = logging.getLogger(__name__)

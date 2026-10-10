@@ -1,9 +1,8 @@
 import datetime
 import logging
 from uuid import UUID
-
 from fastapi import APIRouter, HTTPException
-from src.services.background_task.tasks import share_mail_to_client
+from src.celery.tasks import share_mail_to_client
 from src.resume_share.schemas import (
     RetryShareEmailRequest,
     RetryShareEmailResponse,
@@ -11,7 +10,7 @@ from src.resume_share.schemas import (
     ShareResumeResponse,
 )
 from src.resume_share.models import EmailNotification, ist_now
-from src.services.resume_share.service import ResumeShareError, share_resume_via_email
+from src.resume_share.service import ResumeShareError, share_resume_via_email
 from db.connection import SessionLocal
 
 logger = logging.getLogger(__name__)

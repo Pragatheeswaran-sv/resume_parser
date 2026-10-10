@@ -18,9 +18,9 @@ services:
       - "host.docker.internal:host-gateway"
     command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir src
 
-  worker:
+  celery:
     image: resume-tracker:latest
-    container_name: celery_worker
+    container_name: celery
     environment:
       - PYTHONPATH=/app
     command: celery -A src.celery.celery_app.celery worker --loglevel=info --pool=solo
@@ -35,12 +35,12 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
-  scheduler:
+  worker:
     image: resume-tracker:latest
-    container_name: apscheduler_scheduler
-    environment:
-      - PYTHONPATH=/app
-    command: python scheduler_worker.py
+    container_name: worker
+    # environment:
+    #   - PYTHONPATH=/app
+    command: python src/jobs/scheduler_worker.py
     depends_on:
       - api
       - redis
@@ -69,52 +69,4 @@ services:
       - pgdata:/var/lib/postgresql/data
 
 volumes:
-  pgdata:
-
-# services:
-#   api:
-#     build: .
-#     container_name: fastapi_api
-#     ports:
-#       - "8000:8000"
-#     depends_on:
-#       - redis
-#       - db
-#     env_file:
-#       - .env
-#     volumes:
-#       - .:/app
-#     command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir src
-
-#   worker:
-#     build: .
-#     container_name: celery_worker
-#     environment:
-#       - PYTHONPATH=/app
-#     command: celery -A src.celery.celery_app.celery worker --loglevel=info --pool=solo
-#     depends_on:
-#       - redis
-#       - db
-#     env_file:
-#       - .env
-#     volumes:
-#       - .:/app
-
-#   redis:
-#     image: redis:7
-#     ports:
-#       - "6379:6379"
-
-#   db:
-#     image: pgvector/pgvector:pg16
-#     container_name: postgres_pgvector
-#     env_file:
-#       - .env
-#     ports:
-#       - "5436:5432"
-#     volumes:
-#       - pgdata:/var/lib/postgresql/data
-#       - ./src/db:/docker-entrypoint-initdb.d 
-
-# volumes:
-#   pgdata:
+    pgdata:

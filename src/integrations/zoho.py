@@ -13,8 +13,8 @@ from datetime import datetime, timedelta
 from src.email_reader.models import EmailLogs
 from src.auth.models import OauthSource, OauthCredentials
 from src.email_reader.models import Attachment
-from src.services.background_task.tasks import resume_track
-from src.services.auth.gmail.service import save_attachment_bytes
+from src.celery.tasks import resume_track
+from src.integrations.google import save_attachment_bytes
 from urllib.parse import urlparse
 from src.admin.models import Users
 from src.auth.jwt import create_access_token

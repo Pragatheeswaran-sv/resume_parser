@@ -4,11 +4,10 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from dotenv import load_dotenv
 from db.connection import engine
 from db.connection import SessionLocal
-from src.services.auth.service import fetch_emails_oauth
+from src.auth.service import fetch_emails_oauth
 from src.admin.models import ExtractionConfig
-from src.services.admin.service import is_within_extraction_window
-from src.services.email_reader.service import fetch_emails
-
+from src.admin.service import is_within_extraction_window
+from src.email_reader.service import fetch_emails
 load_dotenv()
 
 logging.basicConfig(

@@ -9,20 +9,16 @@ import os
 from urllib.parse import urlencode
 from db.connection import SessionLocal
 from src.email_reader.models import EmailLogs
-from src.services.auth.gmail.service import gmail_login
-from src.services.auth.gmail.service import gmail_callback
-# from src.services.auth.gmail.service import zoho_callback
-from src.services.auth.zoho.service import zoho_callback
-from src.services.auth.gmail.service import fetch_emails_gmail
-from src.services.auth.zoho.service import fetch_emails_zoho
+from src.integrations.google import gmail_login, gmail_callback, fetch_emails_gmail
+# from src.auth.gmail.service import zoho_callback
+from src.integrations.zoho import zoho_login, zoho_callback, fetch_emails_zoho
 from src.auth.schemas import EmailRequest, EmailFetchResponse
-from src.services.auth.zoho.service import zoho_login
 from src.auth.models import OauthCredentials, OauthSource
 from src.admin.models import Users
-from src.services.auth.service import fetch_emails_oauth
-from src.services.auth.service import fetch_oauth_email_by_id
+from src.auth.service import fetch_emails_oauth
+from src.auth.service import fetch_oauth_email_by_id
 from src.auth.schemas import EmailFetchResult
-from src.services.auth.logout_service import logout_user
+from src.auth.logout_service import logout_user
 from src.auth.jwt import decode_access_token
 from jose import JWTError
 load_dotenv()
@@ -148,8 +144,6 @@ def fetch_oauth_emails() -> EmailFetchResponse:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"status": "error", "message": str(e)},
         )
-
-
 from pydantic import BaseModel, EmailStr
 
 

@@ -26,14 +26,12 @@ from src.candidate.models import (
     Candidate, CandidateSkills, CandidateEducation, 
     WorkExperience, Skill, Education, Company, Role
 )
-from src.services.admin.service import active_model, get_model
+from src.admin.service import active_model, get_model
 from src.admin.models import Admin, AiModel, AiModelConfig, AiModelversion
-
 from openai import OpenAI
 from anthropic import Anthropic
-
 from src.utils.helper import calculate_match_score, clean_mobile_number, compress_file, decrypt_data, record_model_usage, select_available_model
-from src.utils.attachment_storage import AttachmentStorageError, stage_attachment, upload_attachment
+from src.integrations.attachment_storage import AttachmentStorageError, stage_attachment, upload_attachment
 BASE_DIR = "/app"  
 EXPORT_PATH = os.path.join(BASE_DIR, "export_files")
 
@@ -584,7 +582,8 @@ def extract_text_from_docx(path):
 #             logger.info(f"is_resume classification result: {data}")
 #         except json.JSONDecodeError as e:
 #             logger.error(f"Invalid JSON returned by model: {content}")
-#             raise ValueError("Model returned invalid JSON") from e
+#             raise ValueError("Model returned invalid JSON")
+# from e
 #         resume_state = data.get("is_resume", False)
 #         return resume_state
 
@@ -619,14 +618,16 @@ def is_resume(text: str) -> bool:
     return bool(data.get("is_resume", False))
     
 def extract_basic_info(resume_text):
-    """Use local Ollama LLM to extract structured info from resume text."""
+    """Use local Ollama LLM to extract structured info
+from resume text."""
     logger.info('This process started=>>>>')
     logger.info("This extract_basic_info executed -----> ")
     OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
     prompt = """
         You are a highly accurate resume parser.
 
-        Extract structured candidate information from the given resume.
+        Extract structured candidate information
+from the given resume.
 
         Return ONLY valid JSON.
         Do NOT add explanation.
@@ -706,7 +707,8 @@ def extract_basic_info(resume_text):
 
         12. Ensure output is valid JSON (parsable).
 
-        13. Infer top-level "role" ONLY from technical skills; do not use summary, titles, company, projects, responsibilities, certifications, education, or any other content. Keep it short and professional; if unclear, return "".
+        13. Infer top-level "role" ONLY
+from technical skills; do not use summary, titles, company, projects, responsibilities, certifications, education, or any other content. Keep it short and professional; if unclear, return "".
 
         14. Example mappings: Python/FastAPI/Django -> Python Developer, React/JS/HTML/CSS -> Frontend Developer, Node/Express/MongoDB -> Backend Developer, React+Node -> Full Stack Developer, Java/Spring -> Java Developer, Selenium/Testing -> QA Engineer, AWS/Docker/K8s/Jenkins -> DevOps Engineer, ML/NLP/TensorFlow -> Machine Learning Engineer, Power BI/Tableau/SQL -> Data Analyst, Python/Pandas/ETL -> Data Engineer, Kotlin/Java -> Android Developer, Swift/iOS -> iOS Developer, PHP/Laravel -> PHP Developer, C#/.NET -> .NET Developer.
 
@@ -723,14 +725,16 @@ def extract_basic_info(resume_text):
     return run_llm_json(prompt, resume_text)
 
 # def extract_basic_info(resume_text):
-#     """Use local Ollama LLM to extract structured info from resume text."""
+#     """Use local Ollama LLM to extract structured info
+# from resume text."""
 #     logger.info('This process started=>>>>')
 #     logger.info("This extract_basic_info executed -----> ")
 #     OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 #     prompt = """
 #         You are a highly accurate resume parser.
 
-#         Extract structured candidate information from the given resume.
+#         Extract structured candidate information
+# from the given resume.
 
 #         Return ONLY valid JSON.
 #         Do NOT add explanation.
@@ -810,7 +814,8 @@ def extract_basic_info(resume_text):
 
 #         12. Ensure output is valid JSON (parsable).
 
-#         13. Infer top-level "role" ONLY from technical skills; do not use summary, titles, company, projects, responsibilities, certifications, education, or any other content. Keep it short and professional; if unclear, return "".
+#         13. Infer top-level "role" ONLY
+# from technical skills; do not use summary, titles, company, projects, responsibilities, certifications, education, or any other content. Keep it short and professional; if unclear, return "".
 
 #         14. Example mappings: Python/FastAPI/Django -> Python Developer, React/JS/HTML/CSS -> Frontend Developer, Node/Express/MongoDB -> Backend Developer, React+Node -> Full Stack Developer, Java/Spring -> Java Developer, Selenium/Testing -> QA Engineer, AWS/Docker/K8s/Jenkins -> DevOps Engineer, ML/NLP/TensorFlow -> Machine Learning Engineer, Power BI/Tableau/SQL -> Data Analyst, Python/Pandas/ETL -> Data Engineer, Kotlin/Java -> Android Developer, Swift/iOS -> iOS Developer, PHP/Laravel -> PHP Developer, C#/.NET -> .NET Developer.
 
@@ -908,7 +913,8 @@ def extract_basic_info(resume_text):
 #             logger.info(f"is_resume classification result: {data}")
 #         except json.JSONDecodeError as e:
 #             logger.error(f"Invalid JSON returned by model: {content}")
-#             raise ValueError("Model returned invalid JSON") from e
+#             raise ValueError("Model returned invalid JSON")
+# from e
        
 #         return data
     
@@ -963,7 +969,8 @@ def extract_basic_info(resume_text):
 
 def clean_json_response(content):
     """
-    Extract valid JSON from LLM response
+    Extract valid JSON
+from LLM response
     """
     if isinstance(content, dict):
         return content
@@ -2312,7 +2319,8 @@ def merge_filters(standard: dict, dynamic: dict) -> dict:
     Merging strategy:
     - List fields (skills, education, roles, companies): union with deduplication.
     - Scalar/range fields: standard wins when present; otherwise use dynamic.
-    - Pagination and sorting fields always come from standard only.
+    - Pagination and sorting fields always come
+from standard only.
     """
 
     if not dynamic:
@@ -2353,7 +2361,8 @@ def merge_filters(standard: dict, dynamic: dict) -> dict:
 
 
 def get_master_data():
-    """Fetch active data from master tables: Roles, Education, Skills."""
+    """Fetch active data
+from master tables: Roles, Education, Skills."""
     
     logger.info("[get_master_data] Fetching master data")
     db = SessionLocal()

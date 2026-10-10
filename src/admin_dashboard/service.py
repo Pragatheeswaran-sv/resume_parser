@@ -15,7 +15,7 @@ from src.admin.models import (
     Users
 )
 from src.resume_filter.models import Resume
-from src.services.nl_search.service import _execute_search, _load_search_session
+from src.resume_filter.nl_search_service import _execute_search, _load_search_session
 load_dotenv()
 logger = logging.getLogger(__name__)
 db = SessionLocal()

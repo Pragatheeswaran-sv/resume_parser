@@ -3,14 +3,12 @@ from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException, status, Query, Depends
 from src.admin.dependencies import get_current_admin, get_current_admin_or_user
 from typing import List, Dict, Any
-from src.services.candidate.service import candidate_datails, CandidateServiceError, get_candidate_basic_info
+from src.candidate.service import candidate_datails, CandidateServiceError, get_candidate_basic_info
 from src.resume_filter.schemas import ResumeFilterRequest
 from pydantic import ValidationError
 from src.utils.response import serialize_response
-from src.services.candidate.service import export_candidate
-from src.services.resume_filter.service import (
-    search_resumes
-)
+from src.candidate.service import export_candidate
+from src.resume_filter.service import (search_resumes)
 
 load_dotenv()
 logger = logging.getLogger(__name__)

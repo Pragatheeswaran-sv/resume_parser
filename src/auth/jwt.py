@@ -1,7 +1,8 @@
 """JWT authentication utilities.
 
 Handles password hashing/verification via bcrypt and JWT token
-creation/decoding using python-jose.  Configuration is pulled from
+creation/decoding using python-jose.  Configuration is pulled
+from
 environment variables so secrets stay out of source control.
 
 Refresh-token rotation

@@ -2,7 +2,6 @@ import logging
 from typing import Any
 from uuid import UUID
 from datetime import datetime, date
-
 from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)
@@ -49,8 +48,6 @@ def safe_raise_http_exception(
         status_code=status_code,
         detail={"status": "error", "message": message},
     )
-
-
 from fastapi import status
 
 

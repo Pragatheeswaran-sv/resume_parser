@@ -4,8 +4,8 @@ import logging
 from dotenv import load_dotenv
 from src.resume_share.models import EmailNotification, ist_now
 from src.resume_share.schemas import ShareResumeResponse
-from src.services.resume_share.service import ResumeShareError, share_resume_via_email
-from src.services.resume_filter.service import process_resumes
+from src.resume_share.service import ResumeShareError, share_resume_via_email
+from src.resume_filter.service import process_resumes
 from src.celery.celery_app import celery
 from uuid import UUID
 from db.connection import SessionLocal
@@ -19,7 +19,8 @@ RETRY_DELAY_SECONDS = 300  # 5 minutes
 
 @celery.task
 def resume_track(email_id: str):
-    """Process resumes extracted from an email's attachments.
+    """Process resumes extracted
+from an email's attachments.
 
     Args:
         email_id: UUID string of the email to process (passed as str for JSON

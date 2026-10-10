@@ -22,8 +22,7 @@ from src.resume_share.models import (
     EmailProviderConfig,
     EmailTemplate,
 )
-from src.services.resume_share.email_sender import send_email
-
+from src.integrations.email_sender import send_email
 logger = logging.getLogger(__name__)
 
 ATTACHMENT_DIR = os.getenv("ATTACHMENT_DIR", "attachments")

@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from src.email_reader.models import EmailLogs
 from src.auth.models import OauthSource, OauthCredentials
 from src.email_reader.models import Attachment
-from src.services.background_task.tasks import resume_track
+from src.celery.tasks import resume_track
 import base64
 from src.auth.jwt import create_access_token
 from email.utils import parseaddr

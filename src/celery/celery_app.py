@@ -17,4 +17,4 @@ celery.conf.update(
     enable_utc=True,
 )
 
-celery.autodiscover_tasks(["src.services.background_task"])
+celery.autodiscover_tasks(["src.tasks"])

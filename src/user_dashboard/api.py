@@ -3,8 +3,7 @@ import logging
 # from .schema import ModelConfigRequest
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException, status
-
-from src.services.user_dashboard.service import user_dashboard
+from src.user_dashboard.service import user_dashboard
 from src.admin.dependencies import get_current_user
 
 load_dotenv()

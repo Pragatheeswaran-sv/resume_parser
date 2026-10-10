@@ -1,7 +1,5 @@
 import logging
-
 from fastapi import APIRouter, Depends, HTTPException, status
-
 from src.admin.dependencies import get_current_admin
 from src.resume_share.schemas import (
     EmailProviderConfigCreate,
@@ -9,8 +7,7 @@ from src.resume_share.schemas import (
     EmailTemplateCreate,
     EmailTemplateUpdate,
 )
-from src.services.resume_share.email_config_service import (
-    create_email_provider_config,
+from src.resume_share.email_config_service import (    create_email_provider_config,
     list_email_provider_configs,
     get_email_provider_config,
     update_email_provider_config,

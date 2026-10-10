@@ -7,8 +7,7 @@ import os
 import uuid
 import logging
 from dotenv import load_dotenv
-from src.services.background_task.tasks import resume_track
-
+from src.celery.tasks import resume_track
 load_dotenv()
 logger = logging.getLogger(__name__)
 
@@ -28,7 +27,8 @@ EMAIL_ACCOUNT = os.getenv("EMAIL_ACCOUNT","")
 PASSWORD = os.getenv("PASSWORD","")
 
 def save_attachment(part, uid):
-    """Save email attachment to attachment directory using a UUID derived from the IMAP UID."""
+    """Save email attachment to attachment directory using a UUID derived
+from the IMAP UID."""
 
     if not os.path.exists(attachment_dir):
         os.makedirs(attachment_dir)
@@ -57,7 +57,8 @@ def save_attachment(part, uid):
 
 def fetch_emails() -> dict:
     """
-    Fetch new emails from IMAP inbox and process them.
+    Fetch new emails
+from IMAP inbox and process them.
 
     - Tracks last processed UID to avoid duplicates
     - Stores email metadata in database

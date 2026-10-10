@@ -231,7 +231,8 @@ def sso_user_login(
     services know the authentication origin.
 
     Args:
-        email: Verified email from the SSO provider.
+        email: Verified email
+from the SSO provider.
         provider: Optional SSO provider identifier (e.g. ``"google"``,
             ``"zoho"``, ``"microsoft"``).  Normalised to lowercase.
 
@@ -1172,7 +1173,6 @@ def list_email_accounts() -> Dict[str, Any]:
     session = SessionLocal()
     try:
         accounts = session.query(Users).all()
-        
         from src.auth.models import OauthCredentials
         
         data = []
@@ -1287,7 +1287,7 @@ def is_within_extraction_window(config: Optional[Dict[str, Any]] = None) -> bool
 
     Args:
         config: Dict with window fields.  If None the active config is loaded
-                from the database automatically.
+from the database automatically.
 
     Returns:
         True if execution is allowed, False otherwise.
@@ -1515,8 +1515,7 @@ def trigger_extraction(user_id: Optional[str] = None) -> Dict[str, Any]:
         ValueError: If the account is not found, blocked, or has extraction
             disabled.
     """
-    from src.services.email_reader.service import fetch_emails
-
+    from src.email_reader.service import fetch_emails
     session = SessionLocal()
     try:
         if user_id:

@@ -1,5 +1,4 @@
 """Persistent attachment storage backed by Supabase's S3-compatible API."""
-
 from __future__ import annotations
 
 import logging

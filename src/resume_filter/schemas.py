@@ -431,7 +431,8 @@ class ErrorResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 class DynamicFilterRequest(BaseModel):
-    """Request body for LLM-powered filter generation from natural language."""
+    """Request body for LLM-powered filter generation
+from natural language."""
     query: str
 
     @field_validator("query", mode="before")

@@ -45,7 +45,8 @@ def content_type_for(file_type: str) -> str:
 
 
 def _cache_key(source_path: str) -> str:
-    """Deterministic cache filename derived from the source path + mtime."""
+    """Deterministic cache filename derived
+from the source path + mtime."""
     stat = os.stat(source_path)
     raw = f"{source_path}:{stat.st_mtime}:{stat.st_size}"
     digest = hashlib.sha256(raw.encode()).hexdigest()[:16]

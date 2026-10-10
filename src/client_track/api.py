@@ -2,16 +2,15 @@ import logging
 from src.client_track.schema import ClientInsertRequest, ClientUpdateRequest, InterviewInsertRequest, InterviewStatusRequest, InterviewStatusUpdateRequest, RoundInsertRequest
 from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException, status, Query, Depends
-from src.services.client_track.service import add_client, add_interview, add_interview_status, add_round, delete_round, modify_client, modify_interview_status, remove_client, remove_interview, rounds, update_round, view_clients, view_interview_status, view_interviews
+from src.client_track.service import add_client, add_interview, add_interview_status, add_round, delete_round, modify_client, modify_interview_status, remove_client, remove_interview, rounds, update_round, view_clients, view_interview_status, view_interviews
 from src.admin.dependencies import get_current_admin_or_user
 from typing import List, Dict, Any
-from src.services.candidate.service import candidate_datails, CandidateServiceError
+from src.candidate.service import candidate_datails, CandidateServiceError
 from src.resume_filter.schemas import ResumeFilterRequest
 from pydantic import ValidationError
 from src.utils.response import serialize_response
-from src.services.candidate.service import export_candidate
-from src.services.resume_filter.service import (
-    search_resumes
+from src.candidate.service import export_candidate
+from src.resume_filter.service import (    search_resumes
 )
 
 load_dotenv()
