@@ -10,7 +10,6 @@ carry a valid JWT whose email exists in ``users``.
 
 import logging
 from typing import Optional
-
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError

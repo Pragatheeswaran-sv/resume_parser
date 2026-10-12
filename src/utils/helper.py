@@ -82,11 +82,12 @@ def decrypt_data(encrypted_value):
     try:
         if isinstance(encrypted_value, str):
             encrypted_value = encrypted_value.encode()
-
+        logger.info("Decrypted: %s", cipher_suite.decrypt(encrypted_value).decode())
         return cipher_suite.decrypt(encrypted_value).decode()
 
     except fernet.InvalidToken:
         # Not a valid encrypted value (plain text or corrupted)
+        logger.warning("Decryption failed: Invalid token for value: %s", encrypted_value)
         return encrypted_value  # return as-is
 
     except Exception:
@@ -103,7 +104,6 @@ def clean_mobile_number(phone_number):
 
     except Exception:
         return phone_number
-
 from datetime import timedelta
 
 def record_model_usage(model_config_id, tokens_used: int, name: str = None):

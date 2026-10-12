@@ -4,11 +4,10 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from dotenv import load_dotenv
 from db.connection import engine
 from db.connection import SessionLocal
-from src.services.auth.service import fetch_emails_oauth
+from src.auth.service import fetch_emails_oauth
 from src.admin.models import ExtractionConfig
-from src.services.admin.service import is_within_extraction_window
-from src.services.email_reader.service import fetch_emails
-
+from src.admin.service import is_within_extraction_window
+from src.email_reader.service import fetch_emails
 load_dotenv()
 
 logging.basicConfig(
@@ -156,13 +155,14 @@ def apply_schedule():
 
     # -------- Create or Update -------- #
     if not job:
-        scheduler.add_job(
+        created_job = scheduler.add_job(
             trigger_email_processing,
             id="email_processing_job",
             replace_existing=True,
+            next_run_time=datetime.now(),
             **trigger_args,
         )
-        logger.info("Job CREATED → %s", trigger_args)
+        logger.info("Job CREATED → %s | First execution scheduled at: %s", trigger_args, created_job.next_run_time)
         return
 
     try:
@@ -176,11 +176,11 @@ def apply_schedule():
             need_update = True  # cron → always update
 
         if need_update:
-            scheduler.reschedule_job(
+            rescheduled_job = scheduler.reschedule_job(
                 "email_processing_job",
                 **trigger_args,
             )
-            logger.info("Job UPDATED → %s", trigger_args)
+            logger.info("Job UPDATED → %s | Next run at: %s", trigger_args, rescheduled_job.next_run_time)
 
     except Exception:
         logger.exception("Failed updating job")
@@ -203,7 +203,7 @@ def main():
         id="refresh_job",
         replace_existing=True,
     )
-    logger.info('pool_status', engine.pool.status())
+    logger.info("pool_status: %s", engine.pool.status())
     logger.info("Scheduler started (auto-refresh enabled)")
     scheduler.start()
 

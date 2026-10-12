@@ -16,7 +16,8 @@ class AdminUpdate(BaseModel):
 
 class SSOLoginRequest(BaseModel):
     """Payload sent by the frontend after the user authenticates with the
-    SSO provider.  The ``email`` field is the verified identity from the
+    SSO provider.  The ``email`` field is the verified identity
+from the
     SSO token; ``provider`` identifies the authentication origin.
 
     Supported providers: ``"google"``, ``"zoho"``, ``"microsoft"``.

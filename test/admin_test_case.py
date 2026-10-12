@@ -16,7 +16,7 @@ class TestAdminLogin:
         """Valid email + password returns 200 with tokens and admin profile."""
         payload = {"email": "admin@example.com", "password": "correct-password"}
 
-        with patch("src.services.admin.service.SessionLocal") as mock_session_local:
+        with patch("src.admin.service.SessionLocal") as mock_session_local:
             mock_session = MagicMock()
             mock_session_local.return_value = mock_session
 
@@ -31,16 +31,16 @@ class TestAdminLogin:
             mock_session.query.return_value.filter_by.return_value.first.return_value = mock_admin
 
             with (
-                patch("src.services.admin.service.verify_password", return_value=True),
+                patch("src.admin.service.verify_password", return_value=True),
                 patch(
-                    "src.services.admin.service.create_access_token",
+                    "src.admin.service.create_access_token",
                     return_value="fake-jwt-token",
                 ),
                 patch(
-                    "src.services.admin.service.generate_refresh_token"
+                    "src.admin.service.generate_refresh_token"
                 ) as mock_gen_rt,
                 patch(
-                    "src.services.admin.service.new_family_id",
+                    "src.admin.service.new_family_id",
                     return_value="family-uuid",
                 ),
             ):
@@ -65,7 +65,7 @@ class TestAdminLogin:
     def test_login_missing_email(self):
         payload = {"email": "", "password": "some-password"}
 
-        with patch("src.services.admin.service.SessionLocal") as mock_session_local:
+        with patch("src.admin.service.SessionLocal") as mock_session_local:
             mock_session = MagicMock()
             mock_session_local.return_value = mock_session
 
@@ -76,7 +76,7 @@ class TestAdminLogin:
     def test_login_missing_password(self):
         payload = {"email": "admin@example.com", "password": ""}
 
-        with patch("src.services.admin.service.SessionLocal") as mock_session_local:
+        with patch("src.admin.service.SessionLocal") as mock_session_local:
             mock_session = MagicMock()
             mock_session_local.return_value = mock_session
 
@@ -88,7 +88,7 @@ class TestAdminLogin:
         """Non-existent email returns 404."""
         payload = {"email": "unknown@example.com", "password": "some-password"}
 
-        with patch("src.services.admin.service.SessionLocal") as mock_session_local:
+        with patch("src.admin.service.SessionLocal") as mock_session_local:
             mock_session = MagicMock()
             mock_session_local.return_value = mock_session
             mock_session.query.return_value.filter_by.return_value.first.return_value = None
@@ -101,7 +101,7 @@ class TestAdminLogin:
         """Incorrect password returns 401."""
         payload = {"email": "admin@example.com", "password": "wrong-password"}
 
-        with patch("src.services.admin.service.SessionLocal") as mock_session_local:
+        with patch("src.admin.service.SessionLocal") as mock_session_local:
             mock_session = MagicMock()
             mock_session_local.return_value = mock_session
 
@@ -111,7 +111,7 @@ class TestAdminLogin:
             mock_session.query.return_value.filter_by.return_value.first.return_value = mock_admin
 
             with patch(
-                "src.services.admin.service.verify_password", return_value=False
+                "src.admin.service.verify_password", return_value=False
             ):
                 response = client.post(self.LOGIN_URL, json=payload)
 

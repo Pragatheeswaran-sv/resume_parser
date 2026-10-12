@@ -7,7 +7,8 @@ logger = logging.getLogger(__name__)
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql://postgres:2023@db:5432/resume_tracker",  # local compose default only
+    "postgresql://postgres:2026@test_db:5432/resume_tracker_test"
+    # "postgresql://postgres:2023@db:5432/resume_tracker",  # local compose default only
 )
 
 logger.info("Database engine initialising")

@@ -11,20 +11,16 @@ from fastapi.exceptions import RequestValidationError
 from dotenv import load_dotenv
 import logging
 from db.connection import engine, Base
-from src.resume_filter.api import router as resume_router
 from src.email_reader.api import router as email_router
 from src.candidate.api import router as candidate_route
 from src.admin.api import router as admin_route
 from src.admin.dependencies import AllowedEmailMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 from src.auth.api import router as auth_router
-from src.resume_download.api import router as resume_download_router
 from src.resume_share.api import router as resume_share_router
-from src.resume_share.admin_api import router as email_config_router
 from src.admin_dashboard.api import router as admin_dashboard
 from src.user_dashboard.api import router as user_dashboard
 from src.client_track.api import router as client
-from src.tailor_resume.api import router as tailor_resume
 
  
 load_dotenv()
@@ -42,18 +38,14 @@ app = FastAPI(
     description="API for tracking, filtering, and searching candidate resumes.",
     version="1.0.0",
 )
-app.include_router(resume_router)
 app.include_router(email_router)
 app.include_router(candidate_route)
 app.include_router(admin_route)
 app.include_router(auth_router)
-app.include_router(resume_download_router)
 app.include_router(resume_share_router)
-app.include_router(email_config_router)
 app.include_router(admin_dashboard)
 app.include_router(user_dashboard)
 app.include_router(client)
-app.include_router(tailor_resume)
 
 app.add_middleware(AllowedEmailMiddleware)
 app.add_middleware(
