@@ -1,234 +1,405 @@
-import logging
-from dotenv import load_dotenv
-from fastapi import APIRouter, HTTPException, status, Query, Depends
-from src.admin.dependencies import get_current_admin, get_current_admin_or_user
-from typing import List, Dict, Any
-from src.candidate.service import candidate_datails, CandidateServiceError, get_candidate_basic_info
-from src.resume_filter.schemas import ResumeFilterRequest
-from pydantic import ValidationError
-from src.utils.response import serialize_response
-from src.candidate.service import export_candidate
-from src.resume_filter.service import (search_resumes)
+"""API route endpoints for candidate management.
 
-load_dotenv()
+All routes cleanly delegate to candidate_service class methods,
+maintaining complete separation between routing and business logic.
+"""
+
+import logging
+from typing import Any, Dict, List, Optional
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+
+from src.admin.dependencies import get_current_admin, get_current_admin_or_user
+from src.candidate.schema import (
+    MultiDownloadRequest,
+    NLSearchResponse,
+)
+from src.candidate.service import candidate_service, CandidateServiceError
+
 logger = logging.getLogger(__name__)
+
 router = APIRouter(
-	prefix="/api",
-	tags=["Candidates"],
-	responses={
-		400: {"description": "Bad Request"},
-		404: {"description": "Not Found"},
-		500: {"description": "Internal Server Error"},
-	},
+    prefix="/api",
+    tags=["Candidates"],
+    responses={
+        400: {"description": "Bad Request"},
+        404: {"description": "Not Found"},
+        500: {"description": "Internal Server Error"},
+    },
 )
 
-# @router.get("/candidates")
-# def candidate_info(
-#     page: str = "1",
-#     sort_by: str = "None",
-#     sort_type: str = "None",
-# ) -> List[Dict[str, Any]]:
-#     """
-#         Get Candidate Details
-
-#         Retrieves complete candidate details by joining multiple related tables
-#         such as Candidate, Education, WorkExperience, Skill, Resume, Company, CandidateSkills, CandidateSkills and Attachment data.
-
-#         Returns:
-#             list: A list of candidate detail objects containing structured profile information.
-
-#         Response Includes:
-#             - candidate_id
-#             - personal details
-#             - education details
-#             - experience details
-#             - skills
-#             - resume information
-
-#         Raises:
-#             HTTPException: If candidate data retrieval fails.
-#     """
-#     try:
-#         return candidate_datails(page, sort_by, sort_type)
-#     except CandidateServiceError as e:
-#         logger.warning("Candidate service error: %s", e.message)
-#         raise HTTPException(
-#             status_code=e.status_code,
-#             detail={"status": "error", "message": e.message},
-#         )
-#     except Exception as e:
-#         logger.error("Unexpected error in candidate_info: %s", str(e), exc_info=True)
-#         raise HTTPException(
-#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-#             detail={
-#                 "status": "error",
-#                 "message": "Failed to get candidate information",
-#             },
-#         )
-    
 
 @router.post("/candidates")
 def get_candidates(
-    filters: Dict[str, Any] = None,
+    filters: Optional[Dict[str, Any]] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
-    """
-    Retrieve candidate information with optional filtering, sorting, and pagination.
-
-    This unified endpoint serves two purposes:
-
-    1. **Fetch All Candidates (Default Behavior)**
-    - If no request body (filters) is provided, the API returns all active candidates.
-    - Supports pagination via `page` and `page_size`.
-
-    2. **Filter Candidates (Structured Filtering)**
-    - If a JSON body is provided, candidates are filtered based on the given criteria.
-    - Only structured database filtering is supported (semantic search is NOT included).
-
-    Filtering Options:
-        - name (str): Filter by candidate name (partial match)
-        - file_name (str): Filter by resume file name
-        - skills (List[str]): List of skill UUIDs
-        - education (List[str]): List of education UUIDs
-        - roles (List[str]): List of role UUIDs
-        - companies (List[str]): List of company names
-        - min_experience (float): Minimum years of experience
-        - max_experience (float): Maximum years of experience
-        - passout_start_year (int): Minimum graduation year
-        - passout_end_year (int): Maximum graduation year
-        - percentage (float): Minimum percentage
-        - sort_by (str): Field to sort by (must be in allowed fields)
-        - sort_order (str): Sorting order ('asc' or 'desc')
-
-    Query Parameters:
-        - page (int, default=1): Page number (must be >= 1)
-        - page_size (int, default=20): Number of records per page (1–100)
-
-    Request Body:
-        - Optional JSON object containing filter criteria.
-        - If empty or not provided, all candidates are returned.
-
-    Returns:
-        list[dict]: A list of candidate records, including:
-            - candidate_id
-            - name, email, phone_number, location
-            - total_experience
-            - education details
-            - skills
-            - work experience
-            - (last element contains total_record count)
-    """
+    """Retrieve candidate information with optional filtering, sorting, and pagination."""
     try:
-        #1: No filters → behave like old /candidates
-        if not filters:
-            return candidate_datails(page, None, None)
-
-        # Filters present → validate & filter
-        try:
-            parsed_filters = ResumeFilterRequest(**filters).model_dump()
-        except ValidationError as ve:
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "status": "error",
-                    "message": "Invalid filter parameters",
-                    "errors": [
-                        {
-                            "field": ".".join(str(loc) for loc in err.get("loc", [])),
-                            "message": err.get("msg", "")
-                        }
-                        for err in ve.errors()
-                    ],
-                },
-            )
-
-        parsed_filters["page"] = page
-        parsed_filters["page_size"] = page_size
-
-        rows = search_resumes(parsed_filters)
-
-        return serialize_response(rows)
-
+        return candidate_service.get_candidates(filters=filters, page=page, page_size=page_size)
+    except HTTPException:
+        raise
     except CandidateServiceError as e:
+        logger.warning("[get_candidates] Service error: %s", str(e), exc_info=True)
         raise HTTPException(
-            status_code=e.status_code,
-            detail={"status": "error", "message": e.message},
+            status_code=getattr(e, "status_code", status.HTTP_400_BAD_REQUEST),
+            detail={"status": "error", "message": str(e)},
         )
-
-    except Exception as e:
-        logger.error("Error in unified candidates API: %s", str(e), exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail={"status": "error", "message": "Failed to fetch candidates"},
-        )
-
-@router.get("/export_data/")
-def export_data(search_id: str, page: int, page_size: int, export: bool = False, _current_admin_or_user = Depends(get_current_admin_or_user)):
-    """
-        Export Data
-
-        Exports all relevant data for the authenticated admin, including connected
-        email accounts, extraction logs, and AI model configurations.
-
-        This endpoint compiles the admin's data into a structured format (e.g., JSON or CSV)
-        and returns it as a downloadable file. The exported data can be used for backup,
-        analysis, or migration purposes.
-
-        Endpoint:
-            GET /export_data
-        Args:
-            _current_admin_or_user (dict):
-                The currently authenticated admin or user (injected via dependency).
-        Returns:
-            dict: A response object containing:
-                - status (str): "success" or "error"
-                - message (str): Description of the operation result
-                - data (dict, optional): Details about the exported file (e.g., download URL)
-        Raises:
-            HTTPException:
-                - 400 Bad Request: If data export fails or admin ID is invalid. 
-    """
-    try:
-        # admin_id = _admin.admin_id
-        return serialize_response(export_candidate(search_id, page, page_size, export))
     except ValueError as e:
-        logger.warning("[export_data] Error: %s", str(e), exc_info=True)
+        logger.warning("[get_candidates] Validation error: %s", str(e), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "status": "error",
-                "message": str(e),
-            })
-
-@router.get("/candidate_basic_info/")  
-def candidate_basic_info(filter_by=None, filter_value=None, page=1, page_size=10, sort_by=None, sort_order=None):
-    """
-        Candidate Basic Information
-
-        Retrieves basic information about active candidates.
-
-        This endpoint queries the database to fetch all active candidates and their corresponding resume information.
-        The response includes the candidate's ID, name, and the ID of their resume.
-
-        Endpoint:
-            GET /candidate_basic_info
-        Returns:
-            list: A list of candidate objects, each containing:
-                - candidate_id (str): Unique identifier for the candidate
-                - candidate_name (str): Name of the candidate
-                - resume_id (str): Unique identifier for the candidate's resume
-        Raises:
-            HTTPException:
-                - 500 Internal Server Error: If there is an issue retrieving candidate data.
-    """
-    try:
-        return get_candidate_basic_info(filter_by=filter_by, filter_value=filter_value, page=page, page_size=page_size, sort_by=sort_by, sort_order=sort_order)
-    except ValueError as e:
-        logger.warning("[candidate_basic_info] Error: %s", str(e), exc_info=True)
+            detail={"status": "error", "message": str(e)},
+        )
+    except Exception as e:
+        logger.error("[get_candidates] Unexpected error: %s", str(e), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={
-                "status": "error",
-                "message": str(e),
-            })
+            detail={"status": "error", "message": str(e)},
+        )
+    finally:
+        logger.info("[get_candidates] Request execution finished.")
+
+
+@router.get("/export_data/")
+def export_data(
+    search_id: str,
+    page: int,
+    page_size: int,
+    export: bool = False,
+    _current_admin_or_user=Depends(get_current_admin_or_user),
+):
+    """Export candidates matching a cached search session as base64-encoded CSV."""
+    try:
+        return candidate_service.export_candidate(
+            search_id=search_id,
+            page=page,
+            page_size=page_size,
+            export=export,
+        )
+    except HTTPException:
+        raise
+    except CandidateServiceError as e:
+        logger.warning("[export_data] Service error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=getattr(e, "status_code", status.HTTP_400_BAD_REQUEST),
+            detail={"status": "error", "message": str(e)},
+        )
+    except ValueError as e:
+        logger.warning("[export_data] Validation error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"status": "error", "message": str(e)},
+        )
+    except Exception as e:
+        logger.error("[export_data] Unexpected error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"status": "error", "message": str(e)},
+        )
+    finally:
+        logger.info("[export_data] Request execution finished.")
+
+
+@router.get("/candidate_basic_info/")
+def candidate_basic_info(
+    filter_by: Optional[str] = None,
+    filter_value: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 10,
+    sort_by: Optional[str] = None,
+    sort_order: Optional[str] = None,
+):
+    """Retrieves basic information about active candidates."""
+    try:
+        return candidate_service.get_candidate_basic_info(
+            filter_by=filter_by,
+            filter_value=filter_value,
+            page=page,
+            page_size=page_size,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        )
+    except HTTPException:
+        raise
+    except CandidateServiceError as e:
+        logger.warning("[candidate_basic_info] Service error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=getattr(e, "status_code", status.HTTP_400_BAD_REQUEST),
+            detail={"status": "error", "message": str(e)},
+        )
+    except ValueError as e:
+        logger.warning("[candidate_basic_info] Validation error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"status": "error", "message": str(e)},
+        )
+    except Exception as e:
+        logger.error("[candidate_basic_info] Unexpected error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"status": "error", "message": str(e)},
+        )
+    finally:
+        logger.info("[candidate_basic_info] Request execution finished.")
+
+
+@router.post("/generate_dynamic_filters")
+def generate_dynamic_filters(body: dict) -> Dict[str, Any]:
+    """Generate structured filter payload from a natural-language recruiter query."""
+    try:
+        return candidate_service.generate_dynamic_filters(body=body)
+    except HTTPException:
+        raise
+    except CandidateServiceError as e:
+        logger.warning("[generate_dynamic_filters] Service error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=getattr(e, "status_code", status.HTTP_400_BAD_REQUEST),
+            detail={"status": "error", "message": str(e)},
+        )
+    except ValueError as e:
+        logger.warning("[generate_dynamic_filters] Validation error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"status": "error", "message": str(e)},
+        )
+    except Exception as e:
+        logger.error("[generate_dynamic_filters] Unexpected error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"status": "error", "message": str(e)},
+        )
+    finally:
+        logger.info("[generate_dynamic_filters] Request execution finished.")
+
+
+@router.post("/filter_resumes")
+def filter_resumes(
+    filters: dict,
+    search_id: str,
+    sort_by: Optional[str] = None,
+    sort_order: Optional[str] = None,
+    page: int = Query(default=1, ge=1, description="Page number (must be >= 1)"),
+    page_size: int = Query(default=20, ge=1, le=100, description="Results per page (1-100)"),
+) -> dict:
+    """Filter resumes stored in the database with pagination support."""
+    try:
+        return candidate_service.filter_resumes(
+            filters=filters,
+            search_id=search_id,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            page=page,
+            page_size=page_size,
+        )
+    except HTTPException:
+        raise
+    except CandidateServiceError as e:
+        logger.warning("[filter_resumes] Service error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=getattr(e, "status_code", status.HTTP_400_BAD_REQUEST),
+            detail={"status": "error", "message": str(e)},
+        )
+    except ValueError as e:
+        logger.warning("[filter_resumes] Validation error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"status": "error", "message": str(e)},
+        )
+    except Exception as e:
+        logger.error("[filter_resumes] Unexpected error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"status": "error", "message": str(e)},
+        )
+    finally:
+        logger.info("[filter_resumes] Request execution finished.")
+
+
+@router.post("/profile_search", response_model=NLSearchResponse)
+def nl_search(body: dict) -> Dict[str, Any]:
+    """Search candidates using a natural-language query."""
+    try:
+        return candidate_service.profile_search(body=body)
+    except HTTPException:
+        raise
+    except CandidateServiceError as e:
+        logger.warning("[nl_search] Service error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=getattr(e, "status_code", status.HTTP_400_BAD_REQUEST),
+            detail={"status": "error", "message": str(e)},
+        )
+    except ValueError as e:
+        logger.warning("[nl_search] Validation error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"status": "error", "message": str(e)},
+        )
+    except Exception as e:
+        logger.error("[nl_search] Unexpected error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"status": "error", "message": str(e)},
+        )
+    finally:
+        logger.info("[nl_search] Request execution finished.")
+
+
+@router.get("/filter_options")
+def show_filter() -> Dict[str, Any]:
+    """Fetch master data for filters: Roles, Education, Skills."""
+    try:
+        return candidate_service.get_filter_options()
+    except HTTPException:
+        raise
+    except CandidateServiceError as e:
+        logger.warning("[show_filter] Service error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=getattr(e, "status_code", status.HTTP_400_BAD_REQUEST),
+            detail={"status": "error", "message": str(e)},
+        )
+    except ValueError as e:
+        logger.warning("[show_filter] Validation error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"status": "error", "message": str(e)},
+        )
+    except Exception as e:
+        logger.error("[show_filter] Unexpected error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"status": "error", "message": str(e)},
+        )
+    finally:
+        logger.info("[show_filter] Request execution finished.")
+
+
+@router.post("/admin/attachments/{attachment_id}/upload")
+def upload_existing_attachment(
+    attachment_id: UUID,
+    expires_in: int = Query(default=3600, ge=60, le=604800),
+    _admin=Depends(get_current_admin),
+):
+    """Upload one existing local attachment to Supabase Storage."""
+    try:
+        return candidate_service.upload_attachment_to_storage(
+            attachment_id=attachment_id,
+            expires_in=expires_in,
+        )
+    except HTTPException:
+        raise
+    except CandidateServiceError as e:
+        logger.warning("[upload_existing_attachment] Service error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=getattr(e, "status_code", status.HTTP_400_BAD_REQUEST),
+            detail={"status": "error", "message": str(e)},
+        )
+    except ValueError as e:
+        logger.warning("[upload_existing_attachment] Validation error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"status": "error", "message": str(e)},
+        )
+    except Exception as e:
+        logger.error("[upload_existing_attachment] Unexpected error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"status": "error", "message": str(e)},
+        )
+    finally:
+        logger.info("[upload_existing_attachment] Request execution finished.")
+
+
+@router.get("/resume_preview/")
+def preview_file(
+    resume_id: Optional[str] = None,
+    _current_admin_or_user=Depends(get_current_admin_or_user),
+):
+    """Fetch attachment file content encoded in base64 for in-browser preview."""
+    try:
+        return candidate_service.preview_file(resume_id=resume_id)
+    except HTTPException:
+        raise
+    except CandidateServiceError as e:
+        logger.warning("[preview_file] Service error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=getattr(e, "status_code", status.HTTP_400_BAD_REQUEST),
+            detail={"status": "error", "message": str(e)},
+        )
+    except ValueError as e:
+        logger.warning("[preview_file] Validation error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"status": "error", "message": str(e)},
+        )
+    except Exception as e:
+        logger.error("[preview_file] Unexpected error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"status": "error", "message": str(e)},
+        )
+    finally:
+        logger.info("[preview_file] Request execution finished.")
+
+
+@router.post("/download-multiple")
+def download_multiple(
+    request: MultiDownloadRequest,
+    _current_admin_or_user=Depends(get_current_admin_or_user),
+):
+    """Create a zip archive of resumes for specified candidates and return base64 payload."""
+    try:
+        return candidate_service.download_multiple_resumes(candidate_ids=request.candidate_ids)
+    except HTTPException:
+        raise
+    except CandidateServiceError as e:
+        logger.warning("[download_multiple] Service error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=getattr(e, "status_code", status.HTTP_400_BAD_REQUEST),
+            detail={"status": "error", "message": str(e)},
+        )
+    except ValueError as e:
+        logger.warning("[download_multiple] Validation error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"status": "error", "message": str(e)},
+        )
+    except Exception as e:
+        logger.error("[download_multiple] Unexpected error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"status": "error", "message": str(e)},
+        )
+    finally:
+        logger.info("[download_multiple] Request execution finished.")
+
+
+@router.post("/modify_resume")
+def modify_resume(payload: Dict, resume_id: str):
+    """Tailor candidate resume against JD and produce updated PDF or docx."""
+    try:
+        return candidate_service.modify_resume(payload=payload, resume_id=resume_id)
+    except HTTPException:
+        raise
+    except CandidateServiceError as e:
+        logger.warning("[modify_resume] Service error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=getattr(e, "status_code", status.HTTP_400_BAD_REQUEST),
+            detail={"status": "error", "message": str(e)},
+        )
+    except ValueError as e:
+        logger.warning("[modify_resume] Validation error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"status": "error", "message": str(e)},
+        )
+    except Exception as e:
+        logger.error("[modify_resume] Unexpected error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"status": "error", "message": str(e)},
+        )
+    finally:
+        logger.info("[modify_resume] Request execution finished.")

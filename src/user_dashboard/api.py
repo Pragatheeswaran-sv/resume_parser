@@ -1,20 +1,28 @@
-import logging
+"""API route endpoints for User Dashboard.
 
-# from .schema import ModelConfigRequest
+All routes cleanly delegate to user_dashboard_service class methods,
+maintaining complete separation between routing and business logic.
+"""
+
+import logging
+from typing import Any, Dict
+
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException, status
-from src.user_dashboard.service import user_dashboard
+
 from src.admin.dependencies import get_current_user
+from src.user_dashboard.service import user_dashboard_service
 
 load_dotenv()
 logger = logging.getLogger(__name__)
 
+# Legacy module-level alias for backward compatibility
+user_dashboard = user_dashboard_service.user_dashboard
 
-# ── Public routes (no auth guard) ─────────────────────────────────────────
 
 router = APIRouter(
     prefix="/api",
-    tags=["Admin"],
+    tags=["User Dashboard"],
     responses={
         400: {"description": "Bad Request"},
         401: {"description": "Unauthorized"},
@@ -24,16 +32,22 @@ router = APIRouter(
     },
 )
 
+
 @router.get("/user_dashboard")
-def get_user_dashboard(_user=Depends(get_current_user)):
-    """Fetch the profile of the currently authenticated admin."""
+def get_user_dashboard(_user=Depends(get_current_user)) -> Dict[str, Any]:
+    """Fetch dashboard metrics for the currently authenticated user."""
     try:
-        user_id = _user.user_id
         user_mail = _user.email_address
-        return user_dashboard(user_mail)
+        return user_dashboard_service.get_dashboard(user_mail)
     except ValueError as e:
-        logger.warning("[get_profile] Error: %s", str(e), exc_info=True)
+        logger.warning("[get_user_dashboard] Validation error: %s", str(e), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"status": "error", "message": str(e)},
+        )
+    except Exception as e:
+        logger.error("[get_user_dashboard] Unexpected error: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"status": "error", "message": str(e)},
         )

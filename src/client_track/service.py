@@ -3,7 +3,7 @@ import logging
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 from src.candidate.models import Candidate
-from src.resume_filter.models import Resume
+from src.candidate.models import Resume
 from src.auth.models import OauthCredentials
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -1922,3 +1922,49 @@ def modify_interview_status(
 
     finally:
         db.close()
+
+
+class ClientTrackService:
+    """Service class for client_track module, delegating to module-level functions."""
+
+    def rounds(self):
+        return rounds()
+
+    def add_round(self, payload: dict, user_name: str):
+        return add_round(payload, user_name)
+
+    def update_round(self, payload: dict, round_id, user_name: str):
+        return update_round(payload, round_id, user_name)
+
+    def delete_round(self, round_id, user_name: str):
+        return delete_round(round_id, user_name)
+
+    def view_clients(self, page: int, page_size: int, filter_column=None, filter_by=None, sort_by=None, sort_order=None):
+        return view_clients(page, page_size, filter_column, filter_by, sort_by, sort_order)
+
+    def add_client(self, payload: dict, user_name: str):
+        return add_client(payload, user_name)
+
+    def modify_client(self, payload: dict, client_id, user_name: str):
+        return modify_client(payload, client_id, user_name)
+
+    def remove_client(self, client_id, user_name: str):
+        return remove_client(client_id, user_name)
+
+    def view_interviews(self, page: int, page_size: int, filter_column=None, filter_by=None, sort_by=None, sort_order=None):
+        return view_interviews(page, page_size, filter_column, filter_by, sort_by, sort_order)
+
+    def add_interview(self, payload: dict, user_name: str):
+        return add_interview(payload, user_name)
+
+    def remove_interview(self, interview_id, user_name: str):
+        return remove_interview(interview_id, user_name)
+
+    def view_interview_status(self, interview_id):
+        return view_interview_status(interview_id)
+
+    def add_interview_status(self, payload: dict, user_name: str):
+        return add_interview_status(payload, user_name)
+
+    def modify_interview_status(self, payload: dict, interview_status_id, user_name: str):
+        return modify_interview_status(payload, interview_status_id, user_name)

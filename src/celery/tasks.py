@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from src.resume_share.models import EmailNotification, ist_now
 from src.resume_share.schemas import ShareResumeResponse
 from src.resume_share.service import ResumeShareError, share_resume_via_email
-from src.resume_filter.service import process_resumes
+from src.candidate.service import process_resumes
 from src.celery.celery_app import celery
 from uuid import UUID
 from db.connection import SessionLocal
@@ -40,8 +40,15 @@ from an email's attachments.
 def share_mail_to_client(
     self, candidate_id, resume_id, to_address, cc_address, share_log_id
 ):
-
     logger.info("the celery function initiated for share_mail")
+
+    if isinstance(share_log_id, dict) and "__value__" in share_log_id:
+        share_log_id = UUID(hex=share_log_id["__value__"]["hex"])
+    elif isinstance(share_log_id, str):
+        try:
+            share_log_id = UUID(share_log_id)
+        except Exception:
+            pass
 
     db = SessionLocal()
 

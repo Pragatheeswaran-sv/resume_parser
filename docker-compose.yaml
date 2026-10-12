@@ -9,7 +9,6 @@ services:
       - "8000:8000"
     depends_on:
       - redis
-      - db
     env_file:
       - .env
     volumes:
@@ -27,7 +26,6 @@ services:
     depends_on:
       - api
       - redis
-      - db
     env_file:
       - .env
     volumes:
@@ -40,11 +38,10 @@ services:
     container_name: worker
     # environment:
     #   - PYTHONPATH=/app
-    command: python src/jobs/scheduler_worker.py
+    command: ["python", "-m", "src.jobs.scheduler_worker"]
     depends_on:
       - api
       - redis
-      - db
     env_file:
       - .env
     volumes:
@@ -58,15 +55,6 @@ services:
     ports:
       - "6379:6379"
 
-  db:
-    image: postgres:16
-    container_name: postgres_db
-    env_file:
-      - .env
-    ports:
-      - "5436:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-
 volumes:
-    pgdata:
+  pgdata:
+    external: true
