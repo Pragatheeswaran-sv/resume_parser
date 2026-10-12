@@ -81,7 +81,7 @@ jobs:
     name: "Deploy to Office Server (${{ inputs.target_env || 'dev' }})"
     runs-on: ubuntu-latest
     needs: build
-    if: ${{ github.event_name == 'workflow_dispatch' && (inputs.target_env == 'dev' || inputs.target_env == 'qa') }}
+    if: ${{ (github.event_name == 'workflow_dispatch' && (inputs.target_env == 'dev' || inputs.target_env == 'qa')) || (github.event_name == 'push' && github.ref_name == 'develop') }}
 
     steps:
       - name: Deploy via SSH
@@ -94,7 +94,7 @@ jobs:
           script: |
             set -e
             BRANCH="${{ github.ref_name }}"
-            TARGET="${{ inputs.target_env }}"
+            TARGET="${{ inputs.target_env || 'dev' }}"
 
             echo "=============================================="
             echo " Deploying Resume Parser Application"
@@ -103,7 +103,7 @@ jobs:
             echo "=============================================="
 
             # Navigate to project deployment directory
-            cd /home/mitrahsoft_main_server/resume_tracker || cd /home/mitrahsoft_main_server/db_nexus/resume_tracker
+            cd /home/mitrahsoft_main_server/resume_parser/resume_parser || cd /home/mitrahsoft_main_server/resume_tracker
             git fetch origin
             git checkout "$BRANCH"
             git pull origin "$BRANCH"

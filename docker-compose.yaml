@@ -4,9 +4,9 @@ services:
       context: .
       dockerfile: dockerfile
     image: resume-tracker:latest
-    container_name: fastapi_api
+    container_name: resume-parser-api
     ports:
-      - "8000:8000"
+      - "${PORT:-8000}:8000"
     depends_on:
       - redis
     env_file:
@@ -19,7 +19,7 @@ services:
 
   celery:
     image: resume-tracker:latest
-    container_name: celery
+    container_name: resume-parser-celery
     environment:
       - PYTHONPATH=/app
     command: celery -A src.celery.celery_app.celery worker --loglevel=info --pool=solo
@@ -35,7 +35,7 @@ services:
 
   worker:
     image: resume-tracker:latest
-    container_name: worker
+    container_name: resume-parser-worker
     # environment:
     #   - PYTHONPATH=/app
     command: ["python", "-m", "src.jobs.scheduler_worker"]
@@ -52,9 +52,6 @@ services:
 
   redis:
     image: redis:7
+    container_name: resume-parser-redis
     ports:
-      - "6379:6379"
-
-volumes:
-  pgdata:
-    external: true
+      - "${REDIS_PORT:-6379}:6379"
