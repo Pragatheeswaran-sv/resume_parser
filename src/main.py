@@ -1,21 +1,26 @@
 import os
-os.environ["OLLAMA_HOST"] = "http://host.docker.internal:11434"
+import asyncio
+import requests
+
+os.environ.setdefault("OLLAMA_HOST", os.getenv("OLLAMA_HOST", "http://host.docker.internal:11434"))
+os.environ.setdefault("LANGCHAIN_TRACING_V2", os.getenv("LANGCHAIN_TRACING_V2", "false"))
+os.environ.setdefault("LANGCHAIN_PROJECT", os.getenv("LANGCHAIN_PROJECT", "resume-tracker"))
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from dotenv import load_dotenv
 import logging
 from db.connection import engine, Base
-from sqlalchemy import text
-from src.resume_filter.api import router as resume_router
 from src.email_reader.api import router as email_router
 from src.candidate.api import router as candidate_route
 from src.admin.api import router as admin_route
 from src.admin.dependencies import AllowedEmailMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 from src.auth.api import router as auth_router
-from src.resume_download.api import router as resume_download_router
- 
+from src.resume_share.api import router as resume_share_router
+from src.admin_dashboard.api import router as admin_dashboard
+from src.user_dashboard.api import router as user_dashboard
+from src.client_track.api import router as client
 
  
 load_dotenv()
@@ -25,18 +30,22 @@ logging.basicConfig(
 	format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+KEEP_ALIVE_INTERVAL_SECONDS = 180
+keep_alive_task: asyncio.Task[None] | None = None
 
 app = FastAPI(
     title="Resume Tracker API",
-    description="API for tracking, filtering, and semantically searching candidate resumes.",
+    description="API for tracking, filtering, and searching candidate resumes.",
     version="1.0.0",
 )
-app.include_router(resume_router)
 app.include_router(email_router)
 app.include_router(candidate_route)
 app.include_router(admin_route)
 app.include_router(auth_router)
-app.include_router(resume_download_router)
+app.include_router(resume_share_router)
+app.include_router(admin_dashboard)
+app.include_router(user_dashboard)
+app.include_router(client)
 
 app.add_middleware(AllowedEmailMiddleware)
 app.add_middleware(
@@ -80,15 +89,45 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 @app.on_event("startup")
 def startup():
-    """Initialize database and pgvector extension on application startup."""
+    """Initialize the database and start Render's best-effort keep-alive."""
+    global keep_alive_task
 
-    with engine.connect() as conn:
-        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        conn.commit()
     Base.metadata.create_all(bind=engine)
-    logger.info("Database & pgvector ready")
+    logger.info("Database ready")
+
+    service_url = os.getenv("RENDER_EXTERNAL_URL")
+    if service_url:
+        keep_alive_task = asyncio.create_task(keep_render_service_awake(service_url))
+    else:
+        logger.info("Render keep-alive is disabled: RENDER_EXTERNAL_URL is not set")
+
+
+async def keep_render_service_awake(service_url: str) -> None:
+    """Periodically request this Render service's public health endpoint."""
+    health_url = f"{service_url.rstrip('/')}/health"
+    while True:
+        await asyncio.sleep(KEEP_ALIVE_INTERVAL_SECONDS)
+        try:
+            response = await asyncio.to_thread(requests.get, health_url, timeout=10)
+            response.raise_for_status()
+            logger.info("Render keep-alive health check succeeded")
+        except requests.RequestException:
+            logger.exception("Render keep-alive health check failed")
+
+
+@app.on_event("shutdown")
+async def shutdown_keep_alive() -> None:
+    global keep_alive_task
+    if keep_alive_task is not None:
+        keep_alive_task.cancel()
+        try:
+            await keep_alive_task
+        except asyncio.CancelledError:
+            pass
+        keep_alive_task = None
+
 
 @app.get("/health")
 def health_check() -> dict:
     """Simple health check endpoint."""
-    return {"message": "Resume tracker application running successful"}
+    return {"message": "Resume tracker application running successful", "version": "1.0.2"}

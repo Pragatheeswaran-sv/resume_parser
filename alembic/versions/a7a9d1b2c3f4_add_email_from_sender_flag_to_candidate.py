@@ -1,7 +1,7 @@
 """add email_from_sender flag to candidates
 
 Revision ID: a7a9d1b2c3f4
-Revises: ee6eabbec140
+Revises: 6f3a2b1c9d8e
 Create Date: 2026-03-30 00:00:00.000000
 
 """
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'a7a9d1b2c3f4'
-down_revision: Union[str, Sequence[str], None] = 'c78006f1b190'
+down_revision: Union[str, Sequence[str], None] = '6f3a2b1c9d8e'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

@@ -76,6 +76,9 @@ class AiModelConfig(Base):
     apikey = Column(String(255), nullable=True)
     version = Column(String(255), nullable=True)
     max_tokens = Column(Integer, nullable=True)
+    token_usage = Column(Integer, nullable=True)
+    base_url = Column(String(255), nullable=True)
+    prioprity_queue = Column(Integer, nullable=True)
     temparature = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=False), default=ist_now, nullable=False)
     updated_at = Column(DateTime(timezone=False), default=ist_now, onupdate=ist_now, nullable=False)
@@ -87,6 +90,31 @@ class AiModelConfig(Base):
     ai_model = relationship("AiModel")
     admin = relationship("Admin")
 
+
+class AiModelUsage(Base):
+    __tablename__ = "ai_model_usage"
+
+    usage_id = Column(UUID, primary_key= True, default= uuid.uuid4)
+    ai_model_config_id = Column(UUID(as_uuid=True), ForeignKey("ai_model_configs.ai_model_config_id"), nullable = True)
+    minute_window_start = Column(DateTime)
+    minute_requests = Column(Integer, default=0)
+    minute_requests_received = Column(Integer, default=0)
+    minute_tokens = Column(Integer, default=0)
+    minute_tokens_used = Column(Integer, default=0)
+    day_window_start = Column(DateTime)
+    day_requests = Column(Integer, default=0)
+    day_tokens = Column(Integer, default=0)
+    total_requests = Column(Integer, default=0)
+    total_tokens = Column(Integer, default=0)
+    last_used_at = Column(DateTime)
+    is_rate_limited = Column(Boolean, default=False)
+    retry_after = Column(DateTime)
+    created_at = Column(DateTime(timezone=False), default=ist_now, nullable=False)
+    updated_at = Column(DateTime(timezone=False), default=ist_now, onupdate=ist_now, nullable=False)
+    created_by = Column(String, nullable = True)
+    updated_by = Column(String, nullable = True)
+
+    ai_model_config = relationship("AiModelConfig")
 
 class ExtractionConfig(Base):
     """Singleton-style table: only one active row at a time."""

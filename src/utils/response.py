@@ -2,7 +2,6 @@ import logging
 from typing import Any
 from uuid import UUID
 from datetime import datetime, date
-
 from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)
@@ -48,4 +47,77 @@ def safe_raise_http_exception(
     raise HTTPException(
         status_code=status_code,
         detail={"status": "error", "message": message},
+    )
+from fastapi import status
+
+
+def success_response(message: str, data=None, status_code=status.HTTP_200_OK):
+    return {
+        "status_code": status_code,
+        "message": message,
+        "data": data,
+    }
+
+
+def validation_error_response(status_code: int, errors: list):
+    return JSONResponse(
+        status_code= status_code,
+        content= errors
+    )
+    # return {
+    #     "status_code": status.HTTP_400_BAD_REQUEST,
+    #     "errors": errors,
+    # }
+
+
+def not_found_response(field: str, message: str):
+    return JSONResponse(
+        status_code = 404,
+        content = {
+            "status_code": status.HTTP_404_NOT_FOUND,
+            "fields": field,
+            "errors": message
+        } 
+    )
+    # return {
+    #     "status_code": status.HTTP_404_NOT_FOUND,
+    #     "errors": [
+    #         {
+    #             "field": field,
+    #             "message": message,
+    #         }
+    #     ],
+    # }
+
+
+def internal_server_error_response(e):
+    return JSONResponse(
+        status_code = 500,
+        content={
+            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "errors": e
+        }
+    )
+
+
+
+    # return {
+    #     "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
+    #     "errors": [
+    #         {
+    #             "field": "server",
+    #             "message": "An unexpected error occurred.",
+    #         }
+    #     ],
+    # }
+
+from fastapi.responses import JSONResponse
+
+def error_response(status_code, errors):
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "status_code": status_code,
+            "errors": errors
+        }
     )

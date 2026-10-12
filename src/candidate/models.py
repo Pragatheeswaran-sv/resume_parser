@@ -4,6 +4,7 @@ from sqlalchemy.orm import relationship
 from db.connection import Base
 import datetime
 from zoneinfo import ZoneInfo
+from src.email_reader.models import Attachment
 
 def ist_now():
     return datetime.datetime.now(ZoneInfo("Asia/Kolkata"))
@@ -136,3 +137,20 @@ class LogUserQuery(Base):
     created_by = Column(String, nullable = True)
     updated_by = Column(String, nullable = True)
     is_active = Column(Boolean, default = True)
+
+
+class Resume(Base):
+    __tablename__ = "resumes"
+
+    resume_id = Column(UUID, primary_key=True, index=True, default= uuid.uuid4)
+    attachment_id = Column(UUID(as_uuid=True), ForeignKey("attachments.attachment_id"), nullable = True)
+    candidate_id = Column(UUID(as_uuid=True), ForeignKey("candidates.candidate_id"), nullable = True)
+    candidate_role = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=False), default=ist_now)
+    updated_at = Column(DateTime(timezone=False), default=ist_now, onupdate=ist_now)
+    created_by = Column(String, nullable = True)
+    updated_by = Column(String, nullable = True)
+    is_active = Column(Boolean, default = True)
+    
+    attachment = relationship("Attachment")
+    candidate = relationship("Candidate")

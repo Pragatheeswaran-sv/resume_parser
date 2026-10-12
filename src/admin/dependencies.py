@@ -10,7 +10,6 @@ carry a valid JWT whose email exists in ``users``.
 
 import logging
 from typing import Optional
-
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
@@ -33,11 +32,13 @@ OPEN_PATHS = {
     "/api/create_admin",
     "/api/admin/login",
     "/api/auth/sso/login",
+    "/api/auth/refresh",
+    "/api/auth/logout",
     "/api/oauth/login/gmail",
     "/api/oauth/login/zoho",
     "/api/auth/gmail/callback",
     "/api/auth/zoho/callback",
-    "/api/emails",
+    "/emails",
     "/api/download/{file_name}"
 }
 
@@ -167,7 +168,11 @@ def get_current_admin_or_user(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={"status": "error", "message": "Account not found or deactivated"},
             )
-        return role, obj
+        result = {
+            "role": role,
+            "data": obj
+        }
+        return result
     finally:
         db.close()
 

@@ -1,220 +1,116 @@
-from fastapi.responses import RedirectResponse
-from fastapi import Request, Depends
-import requests
-import logging
-from dotenv import load_dotenv
-from fastapi import APIRouter, HTTPException, status
-from typing import Dict, Any, List
-import os
-from urllib.parse import urlencode
-from db.connection import SessionLocal
-from src.email_reader.models import EmailLogs
-from src.services.auth.gmail.service import gmail_login
-from src.services.auth.gmail.service import gmail_callback
-# from src.services.auth.gmail.service import zoho_callback
-from src.services.auth.zoho.service import zoho_callback
-from src.services.auth.gmail.service import fetch_emails_gmail
-from src.services.auth.zoho.service import fetch_emails_zoho
-from src.auth.schemas import EmailRequest, EmailFetchResponse, EmailFetchResult
-from src.services.auth.zoho.service import zoho_login
-from src.auth.models import OauthCredentials, OauthSource
-from src.admin.models import Users
-from src.services.auth.service import fetch_emails_oauth
+"""API route endpoints for authentication, OAuth callbacks, and token revocation.
 
-from src.services.auth.logout_service import logout_user
-from src.auth.jwt import decode_access_token
-from jose import JWTError
+All routes delegate cleanly to auth_service class methods,
+maintaining complete separation between routing and business logic.
+"""
+
+import logging
+from typing import Any, Dict
+
+from dotenv import load_dotenv
+from fastapi import APIRouter, HTTPException, Request, status
+
+from src.auth.schemas import EmailFetchResponse, EmailRequest
+from src.auth.service import auth_service
+
 load_dotenv()
 logger = logging.getLogger(__name__)
 
+# Legacy module-level aliases for backward compatibility
+fetch_emails_oauth = auth_service.fetch_emails_oauth
+fetch_oauth_email_by_id = auth_service.fetch_oauth_email_by_id
+logout_user = auth_service.logout_user
+
 router = APIRouter(
     prefix="/api",
-	tags=["Payment-Process"],
-	responses={
-		400: {"description": "Bad Request"},
-		404: {"description": "Not Found"},
-		500: {"description": "Internal Server Error"},
-	},
+    tags=["Auth"],
+    responses={
+        400: {"description": "Bad Request"},
+        401: {"description": "Unauthorized"},
+        404: {"description": "Not Found"},
+        500: {"description": "Internal Server Error"},
+    },
 )
 
-# GMAIL_AUTH_URL = os.getenv("GMAIL_AUTH_URL")
-# GMAIL_TOKEN_URL = os.getenv("GMAIL_TOKEN_URL")
-# GMAIL_CLIENT_ID = os.getenv("GMAIL_CLIENT_ID")
-# GMAIL_CLIENT_SECRET = os.getenv("GMAIL_CLIENT_SECRET")
-# GMAIL_REDIRECT_URI = os.getenv("GMAIL_REDIRECT_URI")
 
 @router.get("/oauth/login/gmail")
-def oauth_gmail_login() -> dict:
+def oauth_gmail_login() -> Dict[str, Any]:
     """Initiate OAuth flow by redirecting user to Google's auth page."""
     try:
-        response = gmail_login()
-        return response
+        return auth_service.gmail_login()
     except Exception as e:
-        logger.error(f"Error occurred while initiating Gmail OAuth: {e}")
+        logger.error("Error occurred while initiating Gmail OAuth: %s", e)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"status": "error", "message": str(e)},
         )
+
 
 @router.get("/auth/gmail/callback")
-def callback(code: str) -> dict:
-    """Handle OAuth callback and exchange code for tokens."""
-
+def gmail_callback(code: str) -> Dict[str, Any]:
+    """Handle OAuth callback and exchange code for Google tokens."""
     try:
-        response = gmail_callback(code)
-        return response
+        return auth_service.gmail_callback(code)
     except Exception as e:
-        logger.error(f"Error occurred while handling Gmail OAuth callback: {e}")
+        logger.error("Error occurred while handling Gmail OAuth callback: %s", e)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"status": "error", "message": str(e)},
         )
 
-@router.get("/auth/zoho/callback")
-def callback(code: str) -> dict:
-    """Handle OAuth callback and exchange code for tokens."""
-
-    try:
-        response = zoho_callback(code)
-        return response
-    except Exception as e:
-        logger.error(f"Error occurred while handling Zoho OAuth callback: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"status": "error", "message": str(e)},
-        )
 
 @router.get("/oauth/login/zoho")
-def oauth_zoho_login() -> dict:
+def oauth_zoho_login() -> Dict[str, Any]:
     """Initiate OAuth flow by redirecting user to Zoho's auth page."""
     try:
-        response = zoho_login()
-        return response
+        return auth_service.zoho_login()
     except Exception as e:
-        logger.error(f"Error occurred while initiating Zoho OAuth: {e}")
+        logger.error("Error occurred while initiating Zoho OAuth: %s", e)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"status": "error", "message": str(e)},
         )
 
-# @router.post("/emails")
-# def fetch_emails_oauth(request: EmailRequest) -> dict:
-#     logger.info(f"NAV----> Fetching emails for email_id: {request.email_id}")
-#     response = fetch_emails_gmail(email_id=request.email_id)
-#     # response = fetch_emails_zoho(email_id=request.email_id)
-#     return response
+
+@router.get("/auth/zoho/callback")
+def zoho_callback(code: str) -> Dict[str, Any]:
+    """Handle OAuth callback and exchange code for Zoho tokens."""
+    try:
+        return auth_service.zoho_callback(code)
+    except Exception as e:
+        logger.error("Error occurred while handling Zoho OAuth callback: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"status": "error", "message": str(e)},
+        )
+
 
 @router.post("/emails")
 def fetch_oauth_emails() -> EmailFetchResponse:
-    """
-    Fetch emails from all active users based on OAuth source (Gmail / Zoho).
-
-    This API performs the following steps:
-
-    1. Retrieves all active email खात (accounts) from `Users`
-    2. For each email:
-        - Finds corresponding OAuth credentials from `OauthCredentials`
-        - Determines the email provider using `OauthSource`
-    3. Based on the provider:
-        - Calls Gmail service if source is `gmail`
-        - Calls Zoho service if source is `zoho`
-    4. Aggregates results for all processed emails
-
-    ### Returns:
-    - message: Status of the operation
-    - results: List of processed emails with provider and status
-
-    ### Possible Errors:
-    - 500: Internal server error
-    """
-
-    logger.info("NAV----> Fetching emails for all active users")
-    db = SessionLocal()
-
-    results = []
-
+    """Fetch emails from all active users based on OAuth source (Gmail / Zoho)."""
     try:
-        # 1. Get all active email
-        respone = fetch_emails_oauth()
-        return respone
+        return auth_service.fetch_emails_oauth()
     except Exception as e:
-        logger.error(f"Error occurred while initiating Zoho OAuth: {e}")
+        logger.error("Error occurred while fetching emails: %s", e)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"status": "error", "message": str(e)},
         )
 
-@router.post("/auth/logout")
-def logout_endpoint(request: Request) -> dict:
-    """
-    Generic logout endpoint that revokes OAuth tokens across all providers.
-    
-    This endpoint:
-    1. Extracts user email from JWT token
-    2. Finds user's OAuth credentials
-    3. Revokes tokens with the appropriate provider (Gmail/Zoho)
-    4. Deletes credentials from database
-    
-    ### Headers:
-    - Authorization: Bearer <JWT_TOKEN>
-    
-    ### Returns:
-    - Status of logout operation and providers that were revoked
-    
-    ### Errors:
-    - 401: Missing or invalid authorization header
-    - 500: Server error during logout
-    """
-    try:
-        # Extract JWT from Authorization header
-        auth_header = request.headers.get("Authorization")
-        
-        if not auth_header or not auth_header.startswith("Bearer "):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={"status": "error", "message": "Missing or invalid Authorization header"}
-            )
-        
-        token = auth_header.split(" ")[1]
-        
-        # Decode token to get email
-        try:
-            payload = decode_access_token(token)
-            email = payload.get("email")  # Standard JWT email claim
-            
-            if not email:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail={"status": "error", "message": "Token missing email claim"}
-                )
-        except JWTError as e:
-            logger.error(f"Invalid token: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={"status": "error", "message": "Invalid or expired token"}
-            )
-        
-        # Perform logout
-        logger.info(f"Logout request for email: {email}")
-        result = logout_user(email)
-        
-        if result["status"] == "success":
-            return {
-                "status": status.HTTP_200_OK,
-                "message": "Logout successful",
-                "data": result.get("data", {})
-            }
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail={"status": "error", "message": result.get("message", "Logout failed")}
-            )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error in logout endpoint: {str(e)}")
+
+@router.post("/emails/process")
+def process_single_email(request: EmailRequest) -> Dict[str, Any]:
+    """Fetch emails for a specific email address."""
+    result = auth_service.fetch_oauth_email_by_id(email_id=request.email_id)
+    if result.get("status") == "error":
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"status": "error", "message": str(e)}
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=result,
         )
+    return result
+
+
+@router.post("/auth/logout")
+def logout_endpoint(request: Request) -> Dict[str, Any]:
+    """Generic logout endpoint that revokes OAuth tokens across providers and updates session."""
+    return auth_service.logout(request.headers.get("Authorization"))

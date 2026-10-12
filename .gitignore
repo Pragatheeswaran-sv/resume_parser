@@ -211,3 +211,7 @@ Resumes/
 attachments/
 
 faiss_index/
+
+# Database dumps and backups
+*.sql
+*.dump

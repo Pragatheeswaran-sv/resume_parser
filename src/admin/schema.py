@@ -16,7 +16,8 @@ class AdminUpdate(BaseModel):
 
 class SSOLoginRequest(BaseModel):
     """Payload sent by the frontend after the user authenticates with the
-    SSO provider.  The ``email`` field is the verified identity from the
+    SSO provider.  The ``email`` field is the verified identity
+from the
     SSO token; ``provider`` identifies the authentication origin.
 
     Supported providers: ``"google"``, ``"zoho"``, ``"microsoft"``.
@@ -33,12 +34,18 @@ class SSOLoginRequest(BaseModel):
         return v.strip().lower()
 
 
+class RefreshTokenRequest(BaseModel):
+    """Body for ``POST /api/auth/refresh`` and ``POST /api/auth/logout``."""
+    refresh_token: str
+
+
 class TokenResponse(BaseModel):
     access_token: str
+    refresh_token: Optional[str] = None
     token_type: str = "bearer"
     role: str
     name: Optional[str] = None
-    email: str
+    email: Optional[str] = None
     provider: Optional[str] = None
 
 
@@ -66,7 +73,9 @@ class AuthorizedUserCreate(BaseModel):
 class AuthorizedUserUpdate(BaseModel):
     name: str | None = None
     email: Optional[str] = None
-    imap_password: Optional[str] = None
+    old_password: Optional[str] = None
+    new_password: Optional[str] = None
+    phone_number: Optional[str] = None
     connect_with: Optional[dict] = None
     is_blocked : Optional[bool] = None
 
@@ -117,11 +126,11 @@ class Validate_new_job(BaseModel):
     interval_minutes: int
     is_paused: bool
     window_enabled: bool
-    window_start_time: str
+    window_start_time: str | None = None
     # window_end_time: str
     # window_timezone: Optional[str]
     schedule_type: str
-    weekday: str
+    weekday: str | None = None
 
 class CreateModelValidate(BaseModel):
     model_name : str

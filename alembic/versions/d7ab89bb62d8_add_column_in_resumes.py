@@ -46,7 +46,7 @@ def downgrade() -> None:
     sa.Column('skills', postgresql.ARRAY(sa.TEXT()), autoincrement=False, nullable=True),
     sa.Column('companies', postgresql.ARRAY(sa.TEXT()), autoincrement=False, nullable=True),
     sa.Column('education', postgresql.JSON(astext_type=sa.Text()), autoincrement=False, nullable=True),
-    sa.Column('embedding', pgvector.sqlalchemy.vector.VECTOR(dim=384), autoincrement=False, nullable=True),
+    sa.Column('embedding', sa.LargeBinary(), autoincrement=False, nullable=True),
     sa.Column('created_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('now()'), autoincrement=False, nullable=False),
     sa.Column('updated_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('now()'), autoincrement=False, nullable=False),
     sa.Column('email_id', sa.INTEGER(), autoincrement=False, nullable=True),

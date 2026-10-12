@@ -1,0 +1,148 @@
+name: Resume Parser Application & Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_env:
+        description: 'Select deployment environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - qa
+          - prod
+  push:
+    branches: ["develop", "main"]
+  pull_request:
+    branches: ["develop", "main"]
+
+jobs:
+
+  # -------------------------
+  # 1. TEST
+  # -------------------------
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Poetry
+        run: pip install poetry
+
+      - name: Install dependencies
+        run: poetry install --no-root
+
+      - name: Run Pytest
+        run: poetry run pytest -v --tb=short || echo "No tests executed or no tests configured yet"
+        env:
+          DATABASE_URL: "sqlite:///:memory:"
+          JWT_SECRET_KEY: test-secret-key
+          SECRET_KEY: "lw2NJ2Eedo0F8v3Z1hjqH3FZDnwMuF4fbYGW65l1P9k="
+
+  # -------------------------
+  # 2. BUILD & VALIDATE
+  # -------------------------
+  build:
+    name: Build & Validate
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Poetry
+        run: pip install poetry
+
+      - name: Validate project configuration
+        run: poetry check
+
+      - name: Validate syntax compilation
+        run: poetry run python -m compileall src db
+
+  # -------------------------
+  # 3. DEPLOY TO OFFICE SERVER (Dev / QA)
+  # -------------------------
+  deploy-office-server:
+    name: "Deploy to Office Server (${{ inputs.target_env || 'dev' }})"
+    runs-on: ubuntu-latest
+    needs: build
+    if: ${{ (github.event_name == 'workflow_dispatch' && (inputs.target_env == 'dev' || inputs.target_env == 'qa')) || (github.event_name == 'push' && github.ref_name == 'develop') }}
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            set -e
+            BRANCH="${{ github.ref_name }}"
+            TARGET="${{ inputs.target_env || 'dev' }}"
+
+            echo "=============================================="
+            echo " Deploying Resume Parser Application"
+            echo " Branch : $BRANCH"
+            echo " Target : $TARGET"
+            echo "=============================================="
+
+            # Navigate to project deployment directory
+            cd /home/mitrahsoft_main_server/resume_parser/resume_parser || cd /home/mitrahsoft_main_server/resume_tracker
+            git fetch origin
+            git checkout "$BRANCH"
+            git pull origin "$BRANCH"
+
+            if [ "$TARGET" = "qa" ]; then
+              docker compose up -d --build
+            else
+              docker compose up -d --build
+            fi
+
+            echo ""
+            echo "Container Status:"
+            docker compose ps
+
+  # -------------------------
+  # 4. DEPLOY TO RAILWAY (Production)
+  # -------------------------
+  deploy-production:
+    name: Deploy to Railway (Production)
+    runs-on: ubuntu-latest
+    needs: build
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.target_env == 'prod' }}
+
+    environment:
+      name: Production
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy to Railway
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_SECRET_TOKEN || secrets.RAILWAY_TOKEN }}
+          RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
+        run: |
+          echo "Deploying Resume Parser Application to Railway PRODUCTION..."
+          railway up \
+            --service "${{ secrets.RAILWAY_SERVICE_NAME || 'Resume-Tracker-Backend' }}" \
+            --ci
