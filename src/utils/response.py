@@ -72,9 +72,9 @@ def validation_error_response(status_code: int, errors: list):
 
 def not_found_response(field: str, message: str):
     return JSONResponse(
-        status_code = 404,
+        status_code = 204,
         content = {
-            "status_code": status.HTTP_404_NOT_FOUND,
+            "status_code": status.HTTP_204_NO_CONTENT,
             "fields": field,
             "errors": message
         } 
