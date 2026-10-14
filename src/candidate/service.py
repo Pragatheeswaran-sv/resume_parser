@@ -71,6 +71,8 @@ from src.integrations.attachment_storage import (
 from src.integrations.llm import llm_service
 from src.utils.response import serialize_response
 from src.utils.helper import (
+    _match_single_skill,
+    _normalize_role_tokens,
     calculate_match_score,
     clean_mobile_number,
     compress_file,
@@ -505,6 +507,7 @@ class CandidateProfileService(BaseService):
 
                 filter_map = {
                     "candidate_name": (Candidate.name, "string"),
+                    "name": (Candidate.name, "string"),
                     "email": (Candidate.email_address, "string"),
                     "phone_number": (Candidate.phone_number, "string"),
                     "total_experience": (Candidate.total_experience, "integer"),
@@ -660,6 +663,23 @@ class CandidateSearchService(BaseService):
         # Step 2: enrich with experience + role via regex on the query text
         enriched_raw = self._complete_query_filters(keyword_raw, user_query)
 
+        # If no skills/roles/education/experience found, check if query represents a candidate name
+        if (
+            not enriched_raw.get("skills")
+            and not enriched_raw.get("roles")
+            and not enriched_raw.get("education")
+            and not enriched_raw.get("min_experience")
+            and not enriched_raw.get("name")
+        ):
+            cleaned_name = re.sub(
+                r"^(?:find|search|show|get|view|filter)?\s*(?:candidate|resumes?|profiles?)?\s*(?:named?|name:?)?\s*",
+                "",
+                user_query or "",
+                flags=re.IGNORECASE,
+            ).strip()
+            if len(cleaned_name) >= 2 and re.search(r"[A-Za-z]", cleaned_name):
+                enriched_raw["name"] = [cleaned_name]
+
         if enriched_raw:
             resolved = self.resolve_dynamic_filters(enriched_raw)
             if resolved:
@@ -696,6 +716,7 @@ class CandidateSearchService(BaseService):
             "skills": "skills", "education": "education", "roles": "roles",
             "companies": "companies", "minexperience": "min_experience",
             "maxexperience": "max_experience", "name": "name",
+            "candidatename": "name",
             "passoutstartyear": "passout_start_year",
             "passoutendyear": "passout_end_year", "percentage": "percentage",
         }
@@ -705,16 +726,53 @@ class CandidateSearchService(BaseService):
             canonical_key = aliases.get(normalized_key)
             if canonical_key and value is not None:
                 result[canonical_key] = value
+            elif normalized_key in ("experience", "totalexperience", "exp", "yearsofexperience") and value is not None:
+                if isinstance(value, (int, float)):
+                    if result.get("min_experience") is None:
+                        result["min_experience"] = float(value)
+                elif isinstance(value, str):
+                    range_m = re.search(r"(\d+(?:\.\d+)?)\s*(?:-|to)\s*(\d+(?:\.\d+)?)", value)
+                    if range_m:
+                        if result.get("min_experience") is None:
+                            result["min_experience"] = float(range_m.group(1))
+                        if result.get("max_experience") is None:
+                            result["max_experience"] = float(range_m.group(2))
+                    else:
+                        num_m = re.search(r"(\d+(?:\.\d+)?)", value)
+                        if num_m and result.get("min_experience") is None:
+                            result["min_experience"] = float(num_m.group(1))
+
+        # Ensure min_experience / max_experience are floats if present
+        for exp_key in ("min_experience", "max_experience"):
+            val = result.get(exp_key)
+            if val is not None:
+                if isinstance(val, (int, float)):
+                    result[exp_key] = float(val)
+                elif isinstance(val, str):
+                    m = re.search(r"(\d+(?:\.\d+)?)", val)
+                    result[exp_key] = float(m.group(1)) if m else None
+                else:
+                    result[exp_key] = None
 
         for field in ("skills", "education", "roles", "companies"):
             if result.get(field) is not None and not isinstance(result[field], list):
                 result[field] = [result[field]]
 
+        if result.get("name") is not None:
+            if isinstance(result["name"], list):
+                cleaned_names = [str(n).strip() for n in result["name"] if str(n).strip()]
+                result["name"] = cleaned_names if cleaned_names else None
+            elif isinstance(result["name"], str):
+                cleaned_name = result["name"].strip()
+                result["name"] = [cleaned_name] if cleaned_name else None
+            else:
+                result["name"] = None
+
         # Remove experience-like terms from skills if accidentally extracted
         exp_patterns = [
-            r'\b\d+\s*(?:-|to)\s*\d+\s*(?:years?|yrs?)',
-            r'\b\d+\+\s*(?:years?|yrs?)(?:\s+of\s+experience|\s+exp)?',
-            r'\b\d+\s*(?:years?|yrs?)(?:\s+of\s+experience|\s+exp)?\b(?!\s*\+)',
+            r'\b\d+\s*(?:-|to)\s*\d+\s*(?:years?|yrs?|exp|yoe)',
+            r'\b\d+\+\s*(?:years?|yrs?|exp|yoe)(?:\s+of\s+experience|\s+exp)?',
+            r'\b\d+\s*(?:years?|yrs?|exp|yoe)(?:\s+of\s+experience|\s+exp)?\b(?!\s*\+)',
         ]
         if result.get("skills"):
             cleaned_skills = []
@@ -731,37 +789,145 @@ class CandidateSearchService(BaseService):
                 result["skills"] = cleaned_skills
 
         text = query or ""
-        if result.get("min_experience") is None:
-            range_match = re.search(
-                r"\b(\d+(?:\.\d+)?)\s*(?:-|to)\s*(\d+(?:\.\d+)?)\s*(?:years?|yrs?)\b",
-                text, re.IGNORECASE,
-            )
-            minimum_match = re.search(
-                r"\b(\d+(?:\.\d+)?)\s*\+\s*(?:years?|yrs?)(?:\s+of)?\s*(?:experience|exp)?\b",
-                text, re.IGNORECASE,
-            )
-            single_match = re.search(
-                r"\b(\d+(?:\.\d+)?)\s*(?:years?|yrs?)(?:\s+of)?\s*(?:experience|exp)?\b(?!\s*\+)",
-                text, re.IGNORECASE,
-            )
-            if range_match:
+        range_match = re.search(
+            r"\b(?:between\s+)?(\d+(?:\.\d+)?)\s*(?:-|to)\s*(\d+(?:\.\d+)?)\s*(?:years?|yrs?|yoe|exp|experience)?\b",
+            text,
+            re.IGNORECASE,
+        )
+        if range_match:
+            if result.get("min_experience") is None:
                 result["min_experience"] = float(range_match.group(1))
+            if result.get("max_experience") is None:
                 result["max_experience"] = float(range_match.group(2))
-            elif minimum_match:
-                result["min_experience"] = float(minimum_match.group(1))
-            elif single_match:
-                result["min_experience"] = float(single_match.group(1))
-
-        # Small local models sometimes classify a job title only as a skill.
-        # Preserve the title as a role so it can still be matched in the database.
-        if not result.get("roles"):
-            role_match = re.search(
-                r"\b([A-Za-z][A-Za-z0-9+#. /-]{0,60}?(?:developer|engineer|architect|analyst|designer|manager|consultant|administrator|specialist))\b",
-                text, re.IGNORECASE,
+        else:
+            max_match = re.search(
+                r"\b(?:max|maximum|up\s+to|less\s+than|under|below|\<=?)\s*(\d+(?:\.\d+)?)\s*(?:years?|yrs?|yoe|exp|experience)?\b",
+                text,
+                re.IGNORECASE,
             )
-            if role_match:
-                result["roles"] = [re.sub(r"\s+", " ", role_match.group(1)).strip()]
+            if max_match:
+                if result.get("max_experience") is None:
+                    result["max_experience"] = float(max_match.group(1))
+            else:
+                if result.get("min_experience") is None:
+                    min_plus_match = re.search(
+                        r"\b(\d+(?:\.\d+)?)\s*\+\s*(?:years?|yrs?|yoe|exp|experience)?\b",
+                        text,
+                        re.IGNORECASE,
+                    )
+                    min_word_match = re.search(
+                        r"\b(?:min|minimum|at\s+least|more\s+than|greater\s+than|above|\>=?)\s*(\d+(?:\.\d+)?)\s*(?:years?|yrs?|yoe|exp|experience)?\b",
+                        text,
+                        re.IGNORECASE,
+                    )
+                    single_match = re.search(
+                        r"\b(\d+(?:\.\d+)?)\s*(?:years?|yrs?|yoe)(?:\s+(?:of\s+)?(?:experience|exp))?\b",
+                        text,
+                        re.IGNORECASE,
+                    )
+                    exp_prefix_match = re.search(
+                        r"\b(?:experience|exp|total\s+experience)\s*(?:of|:|\s)\s*(\d+(?:\.\d+)?)\b",
+                        text,
+                        re.IGNORECASE,
+                    )
+                    if min_plus_match:
+                        result["min_experience"] = float(min_plus_match.group(1))
+                    elif min_word_match:
+                        result["min_experience"] = float(min_word_match.group(1))
+                    elif single_match:
+                        result["min_experience"] = float(single_match.group(1))
+                    elif exp_prefix_match:
+                        result["min_experience"] = float(exp_prefix_match.group(1))
 
+        # Detect role title from query text
+        role_noun_pattern = r"\b(?:developer|engineer|architect|analyst|designer|manager|consultant|administrator|specialist|programmer|scientist|tester|lead)\b"
+        role_title_pattern = r"\b([A-Za-z][A-Za-z0-9+#. /-]{0,50}?" + role_noun_pattern + r")\b"
+        detected_role = None
+        role_match = re.search(role_title_pattern, text, re.IGNORECASE)
+        if role_match:
+            detected_role = re.sub(r"\s+", " ", role_match.group(1)).strip().title()
+
+        roles = [str(r).strip() for r in (result.get("roles") or []) if str(r).strip()]
+
+        # If LLM classified a job title as a skill, move it to roles
+        raw_skills = [str(s).strip() for s in (result.get("skills") or []) if str(s).strip()]
+        non_role_skills = []
+        for s in raw_skills:
+            if re.search(role_noun_pattern + r"$", s, re.IGNORECASE):
+                s_title = s.title()
+                if s_title not in roles:
+                    roles.append(s_title)
+            else:
+                non_role_skills.append(s)
+
+        if not roles and detected_role:
+            roles = [detected_role]
+        elif detected_role:
+            # Upgrade generic single word role (e.g. 'Analyst') to full title ('Data Analyst') if detected in query
+            upgraded = []
+            for r in roles:
+                if r.lower() in detected_role.lower() and len(r) < len(detected_role):
+                    upgraded.append(detected_role)
+                else:
+                    upgraded.append(r)
+            roles = list(dict.fromkeys(upgraded))
+
+        if not result.get("name"):
+            name_match = re.search(
+                r"\b(?:candidate\s+name|candidate\s+named|candidate|name\s+is|named|name|resume\s+of|profile\s+of)\s*[:=]?\s*([A-Za-z][A-Za-z.'-]{1,25}(?:\s+[A-Za-z][A-Za-z.'-]{1,25})?)\b",
+                text,
+                re.IGNORECASE,
+            )
+            if name_match:
+                potential_name = name_match.group(1).strip()
+                if (
+                    potential_name.lower() not in KEYWORD_STOP_WORDS
+                    and not re.search(role_noun_pattern, potential_name, re.IGNORECASE)
+                ):
+                    result["name"] = [potential_name]
+
+        # Clean experience, candidate, and name prefixes from roles
+        extracted_names = result.get("name") or []
+        cleaned_roles = []
+        for r in roles:
+            clean_r = re.sub(
+                r"^(?:\d+\+?\s*|\b(?:years?|yrs?|yoe|experience|exp|of|candidates?|resumes?|profiles?)\b\s*)+",
+                "",
+                r,
+                flags=re.IGNORECASE,
+            ).strip()
+            for cand_n in extracted_names:
+                clean_r = re.sub(r"\b" + re.escape(str(cand_n)) + r"\b", "", clean_r, flags=re.IGNORECASE).strip()
+            if clean_r:
+                cleaned_roles.append(clean_r)
+        roles = list(dict.fromkeys(cleaned_roles))
+
+        # Filter out role tokens from skills unless explicitly requested as skills
+        skill_clause_match = re.search(
+            r"\b(?:with|skills?\s*(?:in|of|:)?|having|knowing)\s+([a-zA-Z0-9+#,\s/]+)",
+            text, re.IGNORECASE,
+        )
+        skill_clause_text = skill_clause_match.group(1).lower() if skill_clause_match else ""
+        skill_clause_text = re.sub(r"\b\d+\+?\s*(?:years?|yrs?)[^,]*", "", skill_clause_text)
+
+        role_tokens = set()
+        for r in roles:
+            for w in re.findall(r"[a-zA-Z0-9+#]+", r.lower()):
+                role_tokens.add(w)
+
+        final_skills = []
+        for s in non_role_skills:
+            s_lower = s.lower().strip()
+            s_tokens = set(re.findall(r"[a-zA-Z0-9+#]+", s_lower))
+
+            # If skill consists of role tokens (e.g. 'data' or 'analyst' from 'Data Analyst')
+            if s_tokens.issubset(role_tokens):
+                if not skill_clause_text or not re.search(r"\b" + re.escape(s_lower) + r"\b", skill_clause_text):
+                    continue
+            final_skills.append(s)
+
+        result["roles"] = roles
+        result["skills"] = final_skills
         return result
 
     def extract_filters_from_query(self, query: str) -> dict:
@@ -769,9 +935,31 @@ class CandidateSearchService(BaseService):
         prompt = """Extract recruiter-search filters. Return JSON only with exactly these keys:
 {"skills":[],"education":[],"roles":[],"companies":[],"min_experience":null,"max_experience":null,"name":null,"passout_start_year":null,"passout_end_year":null,"percentage":null}
 
-Extract all stated skills and job titles. Keep multiword titles intact.
-Experience is years: "3+ years" means min_experience 3; "3-5 years" means min_experience 3 and max_experience 5.
-Example: "python developer with 3+ years of exp" returns roles ["Python Developer"], skills ["Python"], min_experience 3.
+CRITICAL INSTRUCTIONS:
+1. ROLES VS SKILLS:
+   - If the user query is a job role/title (e.g. "data analyst", "python developer", "frontend engineer"), extract it under "roles" ONLY (e.g. roles: ["Data Analyst"]).
+   - DO NOT put words from the role title (such as "data", "analyst", "python", "developer") into "skills".
+   - ONLY extract "skills" if the query explicitly mentions skills, tools, or technologies separate from the role title (e.g. "data analyst with python and sql skills", "skills in react", "python developer with django").
+2. EXPERIENCE:
+   - If the query mentions experience (e.g. "3 years", "3+ years", "3-5 years", "3 to 5 years", "minimum 3 years", "3 yrs exp", "4 years of experience", "up to 5 years"):
+     - For single value, minimum, or "+": set "min_experience" to the number as integer or float (e.g. "3+ years" -> min_experience: 3).
+     - For ranges: set both "min_experience" and "max_experience" (e.g. "3-5 years" -> min_experience: 3, max_experience: 5).
+     - For maximum: set "max_experience" (e.g. "up to 5 years" -> max_experience: 5).
+     - Always return experience as numeric values (e.g. 3, not "3" or "3+").
+3. CANDIDATE NAME:
+   - If the query searches for a person/candidate by name (e.g. "John Doe", "candidate Aarav", "find Alice Smith", "John"), extract it under "name" (e.g. name: "John Doe").
+4. Examples:
+   - "data analyst" -> {"roles": ["Data Analyst"], "skills": []}
+   - "python developer 3+ years" -> {"roles": ["Python Developer"], "skills": [], "min_experience": 3}
+   - "python developer with 3-5 years exp" -> {"roles": ["Python Developer"], "skills": [], "min_experience": 3, "max_experience": 5}
+   - "data analyst with 3 years experience" -> {"roles": ["Data Analyst"], "skills": [], "min_experience": 3}
+   - "data analyst with python and sql skills" -> {"roles": ["Data Analyst"], "skills": ["Python", "SQL"]}
+   - "frontend developer with react, typescript, 4 years" -> {"roles": ["Frontend Developer"], "skills": ["React", "TypeScript"], "min_experience": 4}
+   - "candidates with aws and docker skills" -> {"roles": [], "skills": ["AWS", "Docker"]}
+   - "John Doe" -> {"name": "John Doe", "roles": [], "skills": []}
+   - "candidate Aarav Sharma" -> {"name": "Aarav Sharma", "roles": [], "skills": []}
+   - "John Doe python developer" -> {"name": "John Doe", "roles": ["Python Developer"], "skills": []}
+
 Use [] or null when absent. Do not omit or add keys."""
         with self.get_session() as db:
             try:
@@ -887,33 +1075,100 @@ Use [] or null when absent. Do not omit or add keys."""
                 return {}
 
     def resolve_dynamic_filters(self, dynamic_filters: dict) -> dict:
-        """Convert human-readable names to UUID-based values matching database records."""
+        """Convert human-readable names to UUID-based values matching database records.
+
+        Skills and roles are resolved by fetching all DB rows once and matching
+        in Python (alias-aware / fuzzy for skills; token-overlap for roles).
+        The matched IDs are then used with an IN operator when filtering candidates.
+        """
         if not dynamic_filters or not isinstance(dynamic_filters, dict):
             return {}
 
         with self.get_session() as db:
             resolved: dict = {}
             try:
-                def _match_ids(model, id_attr, name_attr, values: list) -> list:
-                    ids = []
+                def _match_skill_ids(values: list) -> list:
+                    """Fetch all skills once, match each query keyword using
+                    alias-aware / fuzzy comparison, return matched UUIDs."""
+                    if not values:
+                        return []
+                    all_skills = db.query(Skill.skill_id, Skill.skill).all()
+                    matched_ids = []
                     for value in values:
-                        if not value or not isinstance(value, str):
+                        if not value or not isinstance(value, str) or not value.strip():
                             continue
-                        clean_value = value.strip()
-                        if not clean_value:
+                        query_kw = value.strip()
+                        for row in all_skills:
+                            if _match_single_skill(query_kw, [row.skill]):
+                                sid = str(row.skill_id)
+                                if sid not in matched_ids:
+                                    matched_ids.append(sid)
+                    return matched_ids
+
+                def _match_role_ids(values: list) -> list:
+                    """Fetch all roles once, match each query keyword using
+                    case-insensitive exact check then token-overlap, return matched UUIDs."""
+                    if not values:
+                        return []
+                    all_roles = db.query(Role.role_id, Role.role).all()
+                    matched_ids = []
+                    for value in values:
+                        if not value or not isinstance(value, str) or not value.strip():
                             continue
+                        query_kw = value.strip().lower()
+                        q_tokens = set(_normalize_role_tokens(query_kw))
+                        for row in all_roles:
+                            db_name = (row.role or "").strip().lower()
+                            # exact case-insensitive match
+                            if query_kw == db_name:
+                                rid = str(row.role_id)
+                                if rid not in matched_ids:
+                                    matched_ids.append(rid)
+                                continue
+                            # token overlap: threshold scales with query length
+                            #  1 token  → exact only (no overlap shortcut)
+                            #  2 tokens → both must match (strict)
+                            #  3+ tokens → at least ceil(2/3) must match
+                            if len(q_tokens) < 2:
+                                continue
+                            db_tokens = set(_normalize_role_tokens(db_name))
+                            if not db_tokens:
+                                continue
+                            overlap = q_tokens & db_tokens
+                            if len(q_tokens) == 2:
+                                required = 2           # both tokens must match
+                            else:
+                                required = max(2, -(-len(q_tokens) * 2 // 3))  # ceil(2/3)
+                            if len(overlap) >= required:
+                                rid = str(row.role_id)
+                                if rid not in matched_ids:
+                                    matched_ids.append(rid)
+                    return matched_ids
 
-                        matches = db.query(model).filter(name_attr.ilike(clean_value)).all()
-                        if not matches:
-                            matches = db.query(model).filter(name_attr.ilike(f"%{clean_value}%")).all()
-
-                        if matches:
-                            ids.extend(str(getattr(match, id_attr)) for match in matches)
-                    return list(dict.fromkeys(ids))
+                def _match_ids(model, id_attr, name_attr, values: list) -> list:
+                    """Generic fallback: fetch all rows once, case-insensitive exact match
+                    then IN operator — used for education and other simple tables."""
+                    if not values:
+                        return []
+                    query_lower = [
+                        v.strip().lower() for v in values
+                        if v and isinstance(v, str) and v.strip()
+                    ]
+                    if not query_lower:
+                        return []
+                    all_rows = db.query(model).all()
+                    ids = []
+                    for row in all_rows:
+                        db_val = (getattr(row, name_attr.key, None) or "").strip().lower()
+                        if db_val in query_lower:
+                            rid = str(getattr(row, id_attr))
+                            if rid not in ids:
+                                ids.append(rid)
+                    return ids
 
                 skill_names = dynamic_filters.get("skills")
                 if skill_names and isinstance(skill_names, list):
-                    skill_ids = _match_ids(Skill, "skill_id", Skill.skill, skill_names)
+                    skill_ids = _match_skill_ids(skill_names)
                     if skill_ids:
                         resolved["skills"] = skill_ids
 
@@ -925,11 +1180,11 @@ Use [] or null when absent. Do not omit or add keys."""
 
                 role_names = dynamic_filters.get("roles")
                 if role_names and isinstance(role_names, list):
-                    role_ids = _match_ids(Role, "role_id", Role.role, role_names)
+                    role_ids = _match_role_ids(role_names)
                     if role_ids:
                         resolved["roles"] = list(dict.fromkeys(role_ids))
                     else:
-                        # Keep an unmatched title so search_resumes can also search
+                        # Keep the raw title so search_resumes can also search
                         # Resume.candidate_role, which may not have a master Role row.
                         resolved["roles"] = [
                             role.strip() for role in role_names
@@ -953,9 +1208,14 @@ Use [] or null when absent. Do not omit or add keys."""
                             except (ValueError, TypeError):
                                 pass
 
-                name_val = dynamic_filters.get("name")
-                if name_val and isinstance(name_val, str) and name_val.strip():
-                    resolved["name"] = [name_val.strip()]
+                name_val = dynamic_filters.get("name") or dynamic_filters.get("candidate_name")
+                if name_val:
+                    if isinstance(name_val, str) and name_val.strip():
+                        resolved["name"] = [name_val.strip()]
+                    elif isinstance(name_val, list):
+                        cleaned_names = [str(n).strip() for n in name_val if str(n).strip()]
+                        if cleaned_names:
+                            resolved["name"] = cleaned_names
 
                 for field in ("passout_start_year", "passout_end_year"):
                     val = dynamic_filters.get(field)
@@ -1137,17 +1397,21 @@ Use [] or null when absent. Do not omit or add keys."""
 
                 conditions = [Candidate.is_active == True]
 
-                name_list = filters.get("name")
-                if isinstance(name_list, list) and name_list:
-                    name_conditions = [
-                        Candidate.name.ilike(f"%{str(name).strip()}%")
-                        for name in name_list
-                        if str(name).strip()
-                    ]
+                name_val = filters.get("name") or filters.get("candidate_name")
+                if name_val:
+                    name_list = [name_val] if isinstance(name_val, str) else list(name_val)
+                    name_conditions = []
+                    for name_item in name_list:
+                        raw_item = str(name_item).strip()
+                        if not raw_item:
+                            continue
+                        tokens = [tok for tok in raw_item.split() if tok]
+                        if len(tokens) == 1:
+                            name_conditions.append(Candidate.name.ilike(f"%{tokens[0]}%"))
+                        elif len(tokens) > 1:
+                            name_conditions.append(and_(*[Candidate.name.ilike(f"%{tok}%") for tok in tokens]))
                     if name_conditions:
                         conditions.append(or_(*name_conditions))
-                elif isinstance(name_list, str) and name_list.strip():
-                    conditions.append(Candidate.name.ilike(f"%{name_list.strip()}%"))
 
                 min_exp = _safe_float(filters.get("min_experience"))
                 if min_exp is not None:
@@ -1424,39 +1688,59 @@ Use [] or null when absent. Do not omit or add keys."""
                 data = query.all()
                 jd_role_values = filters.get("roles") or []
                 jd_role_ids = []
-                jd_role = ""
+                jd_role_names = []
                 for value in jd_role_values:
                     try:
                         jd_role_ids.append(UUID(str(value)))
                     except (ValueError, TypeError):
-                        if not jd_role:
-                            jd_role = str(value)
+                        if str(value).strip():
+                            jd_role_names.append(str(value).strip())
                 if jd_role_ids:
-                    jd_role_row = db.query(Role.role).filter(Role.role_id.in_(jd_role_ids)).first()
-                    if jd_role_row:
-                        jd_role = jd_role_row.role
+                    db_roles = [r.role for r in db.query(Role.role).filter(Role.role_id.in_(jd_role_ids)).all()]
+                else:
+                    db_roles = []
+                jd_roles = list(dict.fromkeys(db_roles + jd_role_names))
 
-                jd_skill = filters.get("skills") or []
-                jd_skills = [
-                    skill.skill for skill in db.query(Skill.skill).filter(Skill.skill_id.in_(jd_skill)).all()
-                ]
-
-                jd_exp = normalize_experience(filters.get("max_experience", 0))
+                jd_skill_values = filters.get("skills") or []
+                jd_skill_ids = []
+                jd_skill_names = []
+                for item in jd_skill_values:
+                    try:
+                        jd_skill_ids.append(UUID(str(item)))
+                    except (ValueError, TypeError):
+                        if str(item).strip():
+                            jd_skill_names.append(str(item).strip())
+                if jd_skill_ids:
+                    db_skills = [
+                        skill.skill for skill in db.query(Skill.skill).filter(Skill.skill_id.in_(jd_skill_ids)).all()
+                    ]
+                else:
+                    db_skills = []
+                jd_skills = list(dict.fromkeys(db_skills + jd_skill_names))
 
                 results = []
                 for row in data:
                     candidate_info = row.candidate_info
                     candidate_skills_list = candidate_info.get("skills", [])
                     rate_skill = [
-                        item.get("skill")
+                        item.get("skill") if isinstance(item, dict) else str(item)
                         for item in candidate_skills_list
-                        if isinstance(item, dict) and item.get("skill")
+                        if (isinstance(item, dict) and item.get("skill")) or (isinstance(item, str) and item.strip())
                     ]
-                    rate_experience = normalize_experience(candidate_info.get("total_experience", 0))
-                    rate_role = candidate_info.get("candidate_role", "") or ""
+
+                    candidate_roles = []
+                    resume_role = candidate_info.get("candidate_role", "") or ""
+                    if resume_role.strip():
+                        candidate_roles.append(resume_role.strip())
+                    for exp in candidate_info.get("work_experience", []):
+                        if isinstance(exp, dict) and exp.get("role"):
+                            candidate_roles.append(str(exp["role"]).strip())
 
                     candidate_rating = calculate_match_score(
-                        jd_role, rate_role, jd_skills, rate_skill, jd_exp, rate_experience
+                        jd_role=jd_roles,
+                        candidate_role=candidate_roles if candidate_roles else resume_role,
+                        jd_skills=jd_skills,
+                        candidate_skills=rate_skill,
                     )
                     candidate_info["candidate_rating"] = candidate_rating.get("star_rating")
                     results.append(candidate_info)
@@ -1675,15 +1959,31 @@ Use [] or null when absent. Do not omit or add keys."""
     def apply_filters(self, candidates: list, filters: dict) -> list:
         """Apply filters in-memory on candidate records returned from DB."""
         filtered_candidates = []
-        filter_dict = filters.get("filters", {}) if isinstance(filters, dict) else {}
+        filter_dict = filters.get("filters") if (isinstance(filters, dict) and "filters" in filters) else filters
+        if not isinstance(filter_dict, dict):
+            filter_dict = {}
+
+        name_filter_val = filter_dict.get("name") or filter_dict.get("candidate_name")
+        name_entries = []
+        if name_filter_val:
+            if isinstance(name_filter_val, str):
+                name_entries = [name_filter_val.strip()]
+            elif isinstance(name_filter_val, list):
+                name_entries = [str(n).strip() for n in name_filter_val if str(n).strip()]
 
         for candidate in candidates:
             matched = True
 
-            if filter_dict.get("name"):
-                search_names = [str(n).lower() for n in filter_dict["name"]]
+            if name_entries:
                 candidate_name = (candidate.get("name") or "").lower()
-                if not any(name in candidate_name for name in search_names):
+
+                def _matches_name_entry(entry: str, cand_name: str) -> bool:
+                    tokens = [t.lower() for t in entry.split() if t]
+                    if not tokens:
+                        return True
+                    return all(tok in cand_name for tok in tokens)
+
+                if not any(_matches_name_entry(entry, candidate_name) for entry in name_entries):
                     matched = False
 
             if matched and filter_dict.get("location"):
@@ -1847,7 +2147,9 @@ Use [] or null when absent. Do not omit or add keys."""
 
         try:
             raw_filters = self.extract_filters_from_query(req.query)
-            logger.info("[generate_dynamic_filters] LLM extracted: %s", raw_filters)
+            if not raw_filters:
+                raw_filters, _ = self._fallback_extract_and_resolve(req.query)
+            logger.info("[generate_dynamic_filters] Extracted filters: %s", raw_filters)
 
             try:
                 validated = DynamicFilterResponse(**raw_filters).model_dump(exclude_none=True)
