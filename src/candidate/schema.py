@@ -52,10 +52,17 @@ class ResumeFilterRequest(BaseModel):
     def validate_experience(cls, v, info):
         if v is None or v == "":
             return None
-        try:
-            val = float(v)
-        except (ValueError, TypeError):
-            raise ValueError(f"{info.field_name} must be a valid number, got '{v}'")
+        if isinstance(v, str):
+            m = re.search(r"(\d+(?:\.\d+)?)", v)
+            if m:
+                val = float(m.group(1))
+            else:
+                raise ValueError(f"{info.field_name} must be a valid number, got '{v}'")
+        else:
+            try:
+                val = float(v)
+            except (ValueError, TypeError):
+                raise ValueError(f"{info.field_name} must be a valid number, got '{v}'")
         if val < 0:
             raise ValueError(f"{info.field_name} cannot be negative")
         if val > 50:
@@ -155,7 +162,10 @@ class ResumeFilterRequest(BaseModel):
     @classmethod
     def validate_name_list(cls, v, info):
         if v is None:
-            return v
+            return None
+
+        if isinstance(v, str):
+            v = [v] if v.strip() else []
 
         if not isinstance(v, list):
             raise ValueError(f"{info.field_name} must be a list of strings")
@@ -168,7 +178,8 @@ class ResumeFilterRequest(BaseModel):
                 )
             validated.append(item.strip())
 
-        return validated
+        return validated if validated else None
+
 
     @model_validator(mode="after")
     def validate_experience_range(self):
@@ -289,6 +300,20 @@ class DynamicFilterResponse(BaseModel):
     passout_start_year: Optional[int] = None
     passout_end_year: Optional[int] = None
     percentage: Optional[float] = None
+    file_name: Optional[str] = None
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def coerce_name(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, list):
+            joined = " ".join(str(x).strip() for x in v if str(x).strip())
+            return joined if joined else None
+        if isinstance(v, str):
+            cleaned = v.strip()
+            return cleaned if cleaned else None
+        return str(v)
 
     @field_validator("min_experience", "max_experience", mode="before")
     @classmethod

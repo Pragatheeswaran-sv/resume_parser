@@ -178,98 +178,217 @@ def record_model_usage(model_config_id, tokens_used: int, name: str = None):
     finally:
         db.close()
 
+def _normalize_role_tokens(text):
+    return re.findall(r"[a-zA-Z0-9+#]+", str(text or "").lower())
+
+
+def _compare_single_roles(target, candidate):
+    t = str(target or "").lower().strip()
+    c = str(candidate or "").lower().strip()
+    if not t:
+        return 100.0
+    if not c:
+        return 0.0
+    if t == c:
+        return 100.0
+
+    tsr = fuzz.token_set_ratio(t, c)
+    if tsr == 100.0:
+        return 100.0
+
+    sort_r = fuzz.token_sort_ratio(t, c)
+    return round((tsr * 0.70) + (sort_r * 0.30), 2)
+
+
+SKILL_ALIASES = [
+    {"react", "reactjs", "react.js", "react js"},
+    {"node", "nodejs", "node.js", "node js"},
+    {"vue", "vuejs", "vue.js", "vue js"},
+    {"next", "nextjs", "next.js", "next js"},
+    {"angular", "angularjs", "angular.js", "angular js"},
+    {"postgres", "postgresql"},
+    {"mongo", "mongodb"},
+    {"aws", "amazon web services"},
+    {"gcp", "google cloud platform", "google cloud"},
+    {"k8s", "kubernetes"},
+    {"docker", "containerization", "containers"},
+    {"golang", "go"},
+    {"js", "javascript"},
+    {"ts", "typescript"},
+    {"py", "python"},
+    {"rest", "restful", "rest api", "restful api", "rest apis", "restful apis"},
+    {"ci/cd", "cicd", "ci cd"},
+    {"nlp", "natural language processing"},
+    {"ml", "machine learning"},
+    {"ai", "artificial intelligence"},
+    {"dl", "deep learning"},
+    {"tf", "tensorflow"},
+]
+
+SKILL_ALIAS_MAP = {}
+for group in SKILL_ALIASES:
+    primary = sorted(group, key=len)[0]
+    for name in group:
+        SKILL_ALIAS_MAP[name.lower().strip()] = primary
+
+
+def _norm_skill(s):
+    return re.sub(r"[^a-z0-9+#]", "", str(s).lower())
+
+
+def _match_single_skill(jd_skill_raw, candidate_skills):
+    jd_raw = str(jd_skill_raw).lower().strip()
+    jd_norm = _norm_skill(jd_raw)
+    jd_alias = SKILL_ALIAS_MAP.get(jd_raw) or SKILL_ALIAS_MAP.get(jd_norm)
+
+    for c_s in candidate_skills:
+        c_raw = str(c_s).lower().strip()
+        if not c_raw:
+            continue
+        if jd_raw == c_raw:
+            return True
+        c_norm = _norm_skill(c_raw)
+        if jd_norm and jd_norm == c_norm:
+            return True
+        c_alias = SKILL_ALIAS_MAP.get(c_raw) or SKILL_ALIAS_MAP.get(c_norm)
+        if jd_alias and c_alias and jd_alias == c_alias:
+            return True
+        if len(jd_norm) >= 4 and len(c_norm) >= 4:
+            if fuzz.ratio(jd_norm, c_norm) >= 88:
+                return True
+            if re.search(r"\b" + re.escape(jd_raw) + r"\b", c_raw):
+                return True
+    return False
+
+
 def calculate_match_score(
-    jd_role,
-    candidate_role,
-    jd_skills,
-    candidate_skills,
-    required_exp,
-    candidate_exp
+    jd_role=None,
+    candidate_role=None,
+    jd_skills=None,
+    candidate_skills=None,
+    required_exp=None,
+    candidate_exp=None,
 ):
+    """
+    Calculate candidate match score based on skills and role only.
 
-    if isinstance(jd_role, list):
-        jd_role = " ".join(map(str, jd_role))
+    Weights
+    -------
+    Skills : 85 points
+    Role   : 15 points
+    Total  : 100 points
 
-    if isinstance(candidate_role, list):
-        candidate_role = " ".join(map(str, candidate_role))
+    When only one signal is provided the full 100 pts collapse onto that
+    signal so the scale stays consistent.
+    required_exp / candidate_exp are accepted for backward-compatibility
+    but are not used in scoring.
+    """
+    if isinstance(jd_role, str):
+        jd_roles = [jd_role.strip()] if jd_role.strip() else []
+    elif isinstance(jd_role, (list, tuple, set)):
+        jd_roles = [str(r).strip() for r in jd_role if str(r).strip()]
+    else:
+        jd_roles = []
 
-    jd_role = str(jd_role or "").lower().strip()
-    candidate_role = str(candidate_role or "").lower().strip()
+    if isinstance(candidate_role, str):
+        cand_roles = [candidate_role.strip()] if candidate_role.strip() else []
+    elif isinstance(candidate_role, (list, tuple, set)):
+        cand_roles = [str(r).strip() for r in candidate_role if str(r).strip()]
+    else:
+        cand_roles = []
 
-    title_score = fuzz.partial_ratio(
-        jd_role,
-        candidate_role
-    )
+    if not jd_roles:
+        role_score = 100.0
+        has_role = False
+    elif not cand_roles:
+        role_score = 0.0
+        has_role = True
+    else:
+        has_role = True
+        scores = [
+            _compare_single_roles(target, cand)
+            for target in jd_roles
+            for cand in cand_roles
+        ]
+        role_score = max(scores) if scores else 0.0
 
-    jd_skills = [
-        str(skill).lower().strip()
-        for skill in (jd_skills or [])
-        if skill
-    ]
+    jd_skills_clean = []
+    if isinstance(jd_skills, (list, tuple, set)):
+        jd_skills_clean = list(dict.fromkeys([str(s).strip() for s in jd_skills if str(s).strip()]))
+    elif isinstance(jd_skills, str) and jd_skills.strip():
+        jd_skills_clean = [jd_skills.strip()]
 
-    candidate_skills = [
-        str(skill).lower().strip()
-        for skill in (candidate_skills or [])
-        if skill
-    ]
-
-    jd_skills = list(set(jd_skills))
-    candidate_skills = list(set(candidate_skills))
+    cand_skills_clean = []
+    if isinstance(candidate_skills, (list, tuple, set)):
+        cand_skills_clean = list(dict.fromkeys([str(s).strip() for s in candidate_skills if str(s).strip()]))
+    elif isinstance(candidate_skills, str) and candidate_skills.strip():
+        cand_skills_clean = [candidate_skills.strip()]
 
     matched_skills = []
-
-    for jd_skill in jd_skills:
-        for candidate_skill in candidate_skills:
-            if jd_skill.lower() == candidate_skill.lower():
-                matched_skills.append(jd_skill)
-  
-    skill_score = (
-        (len(matched_skills) / len(jd_skills)) * 100
-        if jd_skills else 0
-    )
-    
-    def _to_float(value):
-        try:
-            return float(value or 0)
-        except (TypeError, ValueError):
-            return 0.0
-    required_exp = _to_float(required_exp)
-    candidate_exp = _to_float(candidate_exp)
-
-    if required_exp == 0 and candidate_exp == 0:
-        experience_score = 100
-    elif candidate_exp >= required_exp:
-        experience_score = 100
+    if not jd_skills_clean:
+        skill_score = 100.0
+        has_skills = False
     else:
-        experience_score = (
-            candidate_exp / required_exp
-        ) * 100
-   
-    final_score = (
-        title_score * 0.1 +
-        skill_score * 0.8 +
-        experience_score * 0.1
-    )
-    final_score = round(final_score, 2)
+        has_skills = True
+        for s in jd_skills_clean:
+            if _match_single_skill(s, cand_skills_clean):
+                matched_skills.append(s)
+        skill_score = (len(matched_skills) / len(jd_skills_clean)) * 100.0
 
-    if final_score >= 85:
+    # ── Weighted final score & star rating ──────────────────────────────────
+    if has_skills and has_role:
+        # Score based on both existing skills and role
+        final_score = (skill_score * 0.70) + (role_score * 0.30)
+        final_score = round(final_score, 2)
+        if final_score >= 85:
+            stars = "5"
+        elif final_score >= 70:
+            stars = "4"
+        elif final_score >= 50:
+            stars = "3"
+        elif final_score >= 25:
+            stars = "2"
+        else:
+            stars = "1"
+
+    elif has_skills:
+        # Score based on skills only
+        final_score = round(skill_score, 2)
+        if final_score == 100.0:
+            stars = "5"
+        elif final_score >= 75:
+            stars = "4"
+        elif final_score >= 50:
+            stars = "3"
+        elif final_score >= 25:
+            stars = "2"
+        else:
+            stars = "1"
+
+    elif has_role:
+        # Role only: full star if role exists, otherwise 2.5 or 3 stars
+        if role_score >= 70.0:
+            final_score = 100.0
+            stars = "5"
+        elif role_score >= 50.0:
+            final_score = 60.0
+            stars = "3"
+        else:
+            final_score = 50.0
+            stars = "2.5"
+
+    else:
+        # Neither skills nor role filtered
+        final_score = 100.0
         stars = "5"
-    elif final_score >= 70:
-        stars = "4"
-    elif final_score >= 55:
-        stars = "3"
-    elif final_score >= 40:
-        stars = "2"
-    else:
-        stars = "1"
-    
+
     return {
         "final_score": final_score,
         "star_rating": stars,
-        "title_score": round(title_score, 2),
         "skill_score": round(skill_score, 2),
-        "experience_score": round(experience_score, 2),
-        "matched_skills": matched_skills
+        "role_score": round(role_score, 2),
+        "title_score": round(role_score, 2),
+        "matched_skills": matched_skills,
     }
 
 
