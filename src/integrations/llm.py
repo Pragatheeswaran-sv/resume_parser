@@ -32,7 +32,7 @@ class LLMService:
         """
         Unified LLM call function with:
         - Automatic DB model configuration & priority fallback
-        - Support for OpenAI, Claude (Anthropic), and Ollama
+        - Support for OpenAI, Groq, Claude (Anthropic), and Ollama
         - Automatic token usage recording
         - Safe JSON extraction & parsing (if is_json=True)
         """
@@ -88,7 +88,23 @@ class LLMService:
                     content = response.choices[0].message.content.strip()
                     record_model_usage(model_config_id, response.usage.total_tokens, admin_name)
 
-                # ---------------- 2. Claude (Anthropic) ----------------
+                # ---------------- 2. Groq (OpenAI-compatible API) ----------------
+                elif model == "groq":
+                    if not api_key:
+                        raise Exception("Groq API key not configured")
+                    client = OpenAI(
+                        api_key=api_key,
+                        base_url=base_url or "https://api.groq.com/openai/v1",
+                    )
+                    kwargs = {"model": version, "messages": messages}
+                    if is_json:
+                        kwargs["response_format"] = {"type": "json_object"}
+                    response = client.chat.completions.create(**kwargs)
+                    content = response.choices[0].message.content.strip()
+                    if response.usage:
+                        record_model_usage(model_config_id, response.usage.total_tokens, admin_name)
+
+                # ---------------- 3. Claude (Anthropic) ----------------
                 elif model == "claude":
                     if not api_key:
                         raise Exception("Claude API key not configured")
@@ -108,7 +124,7 @@ class LLMService:
                     total_tokens = response.usage.input_tokens + response.usage.output_tokens
                     record_model_usage(model_config_id, total_tokens, admin_name)
 
-                # ---------------- 3. Ollama ----------------
+                # ---------------- 4. Ollama ----------------
                 else:
                     chat_kwargs = {
                         "model": version,

@@ -42,7 +42,7 @@ from sqlalchemy.dialects.postgresql import aggregate_order_by
 from sqlalchemy.orm import Session
 
 from db.connection import SessionLocal
-from src.admin.models import Admin
+from src.admin.models import Admin, AiModelConfig
 from src.candidate.models import (
     Attachment,
     Candidate,
@@ -635,39 +635,156 @@ class CandidateSearchService(BaseService):
         return attempts
 
     def _fallback_extract_and_resolve(self, user_query: str) -> Tuple[dict, dict]:
-        """Try keyword-based filters so simple searches work without LLM."""
+        """Try keyword-based filters so simple searches work without LLM.
+
+        Strategy:
+        1. Keyword-match skills/education from tokens in the query.
+        2. Apply _complete_query_filters to extract experience ranges and
+           job-title roles from the raw query text via regex.
+        3. Merge both sources, then resolve to UUIDs.
+        """
+        # Step 1: collect only skill and education matches via keyword search
+        # (avoid adding roles/companies from token matching — they produce false positives)
+        keyword_raw: dict = {}
         for raw_filters in self._keyword_filter_attempts(user_query):
-            resolved = self.resolve_dynamic_filters(raw_filters)
+            for field in ("skills", "education"):
+                if field in raw_filters:
+                    resolved_partial = self.resolve_dynamic_filters({field: raw_filters[field]})
+                    if resolved_partial.get(field):
+                        existing = keyword_raw.get(field, [])
+                        for item in raw_filters[field]:
+                            if item not in existing:
+                                existing.append(item)
+                        keyword_raw[field] = existing
+
+        # Step 2: enrich with experience + role via regex on the query text
+        enriched_raw = self._complete_query_filters(keyword_raw, user_query)
+
+        if enriched_raw:
+            resolved = self.resolve_dynamic_filters(enriched_raw)
             if resolved:
-                logger.info("[nl_search] Keyword fallback matched: %s -> %s", raw_filters, resolved)
-                return raw_filters, resolved
+                logger.info(
+                    "[nl_search] Keyword fallback matched: %s -> %s",
+                    enriched_raw, resolved,
+                )
+                return enriched_raw, resolved
+
+        # Step 3: last-resort — return scalar-only fields even without UUID resolution
+        scalar_only: dict = {}
+        for k in ("min_experience", "max_experience", "name"):
+            if enriched_raw.get(k) is not None:
+                scalar_only[k] = enriched_raw[k]
+        if enriched_raw.get("roles"):
+            scalar_only["roles"] = enriched_raw["roles"]
+        if enriched_raw.get("skills"):
+            scalar_only["skills"] = enriched_raw["skills"]
+
+        if scalar_only:
+            resolved = self.resolve_dynamic_filters(scalar_only) or scalar_only
+            logger.info(
+                "[nl_search] Keyword fallback (scalar only): %s -> %s",
+                scalar_only, resolved,
+            )
+            return scalar_only, resolved
+
         return {}, {}
+
+    @staticmethod
+    def _complete_query_filters(extracted: dict, query: str) -> dict:
+        """Normalize LLM keys and recover basic criteria omitted by an LLM."""
+        aliases = {
+            "skills": "skills", "education": "education", "roles": "roles",
+            "companies": "companies", "minexperience": "min_experience",
+            "maxexperience": "max_experience", "name": "name",
+            "passoutstartyear": "passout_start_year",
+            "passoutendyear": "passout_end_year", "percentage": "percentage",
+        }
+        result: dict = {}
+        for key, value in (extracted or {}).items():
+            normalized_key = re.sub(r"[^a-z]", "", str(key).lower())
+            canonical_key = aliases.get(normalized_key)
+            if canonical_key and value is not None:
+                result[canonical_key] = value
+
+        for field in ("skills", "education", "roles", "companies"):
+            if result.get(field) is not None and not isinstance(result[field], list):
+                result[field] = [result[field]]
+
+        # Remove experience-like terms from skills if accidentally extracted
+        exp_patterns = [
+            r'\b\d+\s*(?:-|to)\s*\d+\s*(?:years?|yrs?)',
+            r'\b\d+\+\s*(?:years?|yrs?)(?:\s+of\s+experience|\s+exp)?',
+            r'\b\d+\s*(?:years?|yrs?)(?:\s+of\s+experience|\s+exp)?\b(?!\s*\+)',
+        ]
+        if result.get("skills"):
+            cleaned_skills = []
+            for skill in result["skills"]:
+                s = str(skill).lower()
+                is_exp = False
+                for pat in exp_patterns:
+                    if re.search(pat, s, re.IGNORECASE):
+                        is_exp = True
+                        break
+                if not is_exp:
+                    cleaned_skills.append(skill)
+            if cleaned_skills != result["skills"]:
+                result["skills"] = cleaned_skills
+
+        text = query or ""
+        if result.get("min_experience") is None:
+            range_match = re.search(
+                r"\b(\d+(?:\.\d+)?)\s*(?:-|to)\s*(\d+(?:\.\d+)?)\s*(?:years?|yrs?)\b",
+                text, re.IGNORECASE,
+            )
+            minimum_match = re.search(
+                r"\b(\d+(?:\.\d+)?)\s*\+\s*(?:years?|yrs?)(?:\s+of)?\s*(?:experience|exp)?\b",
+                text, re.IGNORECASE,
+            )
+            single_match = re.search(
+                r"\b(\d+(?:\.\d+)?)\s*(?:years?|yrs?)(?:\s+of)?\s*(?:experience|exp)?\b(?!\s*\+)",
+                text, re.IGNORECASE,
+            )
+            if range_match:
+                result["min_experience"] = float(range_match.group(1))
+                result["max_experience"] = float(range_match.group(2))
+            elif minimum_match:
+                result["min_experience"] = float(minimum_match.group(1))
+            elif single_match:
+                result["min_experience"] = float(single_match.group(1))
+
+        # Small local models sometimes classify a job title only as a skill.
+        # Preserve the title as a role so it can still be matched in the database.
+        if not result.get("roles"):
+            role_match = re.search(
+                r"\b([A-Za-z][A-Za-z0-9+#. /-]{0,60}?(?:developer|engineer|architect|analyst|designer|manager|consultant|administrator|specialist))\b",
+                text, re.IGNORECASE,
+            )
+            if role_match:
+                result["roles"] = [re.sub(r"\s+", " ", role_match.group(1)).strip()]
+
+        return result
 
     def extract_filters_from_query(self, query: str) -> dict:
         """Use LLM to convert a natural-language query into structured filters."""
-        prompt = """
-        You are a hiring-query parser.
+        prompt = """Extract recruiter-search filters. Return JSON only with exactly these keys:
+{"skills":[],"education":[],"roles":[],"companies":[],"min_experience":null,"max_experience":null,"name":null,"passout_start_year":null,"passout_end_year":null,"percentage":null}
 
-        Extract filters from short queries, skills lists, role searches, or full job descriptions.
-        Return ONLY valid JSON.
-
-        Schema:
-        {
-        "skills": [],
-        "education": [],
-        "roles": [],
-        "companies": [],
-        "min_experience": null,
-        "max_experience": null,
-        "name": null,
-        "passout_start_year": null,
-        "passout_end_year": null,
-        "percentage": null
-        }
-        """
+Extract all stated skills and job titles. Keep multiword titles intact.
+Experience is years: "3+ years" means min_experience 3; "3-5 years" means min_experience 3 and max_experience 5.
+Example: "python developer with 3+ years of exp" returns roles ["Python Developer"], skills ["Python"], min_experience 3.
+Use [] or null when absent. Do not omit or add keys."""
         with self.get_session() as db:
             try:
-                admin = db.query(Admin).filter(Admin.is_active == True).first()
+                # Find an admin that has at least one active model config
+                admin = (
+                    db.query(Admin)
+                    .join(AiModelConfig, AiModelConfig.admin_id == Admin.admin_id)
+                    .filter(Admin.is_active == True, AiModelConfig.is_active == True)
+                    .first()
+                )
+                if not admin:
+                    # Fallback: any active admin (will trigger the "no model" error below)
+                    admin = db.query(Admin).filter(Admin.is_active == True).first()
                 if not admin:
                     logger.warning("[extract_filters_from_query] No admin found")
                     raise CandidateServiceError("No admin found", status_code=500)
@@ -681,6 +798,10 @@ class CandidateSearchService(BaseService):
                 version = model_info.get("version_name", "llama3").lower()
                 base_url = model_info.get("base_url")
                 api_key = decrypt_data(model_info.get("apikey"))
+                logger.info(
+                    "[nl_search] Selected LLM configuration | provider=%s | model=%s | base_url=%s | config_id=%s",
+                    model, version, base_url or "<provider-default>", model_config_id,
+                )
 
                 message = [
                     {
@@ -698,6 +819,22 @@ class CandidateSearchService(BaseService):
                     content = response.choices[0].message.content.strip()
                     token_used = response.usage.total_tokens
                     record_model_usage(model_config_id, token_used, admin.name)
+
+                elif model == "groq":
+                    if not api_key:
+                        raise CandidateServiceError("Groq API key not found", status_code=500)
+                    client = OpenAI(
+                        api_key=api_key,
+                        base_url=base_url or "https://api.groq.com/openai/v1",
+                    )
+                    response = client.chat.completions.create(
+                        model=version,
+                        messages=message,
+                        response_format={"type": "json_object"},
+                    )
+                    content = response.choices[0].message.content.strip()
+                    if response.usage:
+                        record_model_usage(model_config_id, response.usage.total_tokens, admin.name)
 
                 elif model == "claude":
                     if not api_key:
@@ -724,12 +861,26 @@ class CandidateSearchService(BaseService):
                 if not isinstance(parsed, dict):
                     return {}
 
+                logger.info(
+                    "[nl_search] LLM extracted filters | query=%r | filters=%s",
+                    query, parsed,
+                )
+
                 allowed_keys = {
                     "skills", "education", "roles", "companies",
                     "min_experience", "max_experience", "name",
                     "passout_start_year", "passout_end_year", "percentage",
                 }
-                return {k: v for k, v in parsed.items() if k in allowed_keys and v is not None}
+                normalized = self._complete_query_filters(parsed, query)
+                extracted_filters = {
+                    k: v for k, v in normalized.items()
+                    if k in allowed_keys and v is not None
+                }
+                logger.info(
+                    "[nl_search] Normalized filters | query=%r | filters=%s",
+                    query, extracted_filters,
+                )
+                return extracted_filters
 
             except Exception as e:
                 logger.error("[extract_filters_from_query] Extraction failed: %s", str(e), exc_info=True)
@@ -777,6 +928,13 @@ class CandidateSearchService(BaseService):
                     role_ids = _match_ids(Role, "role_id", Role.role, role_names)
                     if role_ids:
                         resolved["roles"] = list(dict.fromkeys(role_ids))
+                    else:
+                        # Keep an unmatched title so search_resumes can also search
+                        # Resume.candidate_role, which may not have a master Role row.
+                        resolved["roles"] = [
+                            role.strip() for role in role_names
+                            if isinstance(role, str) and role.strip()
+                        ]
 
                 companies = dynamic_filters.get("companies")
                 if companies and isinstance(companies, list):
@@ -845,6 +1003,10 @@ class CandidateSearchService(BaseService):
             pass
 
         resolved = self.resolve_dynamic_filters(raw_filters)
+        logger.info(
+            "[nl_search] Resolved database filters | extracted=%s | resolved=%s",
+            raw_filters, resolved,
+        )
         if not resolved:
             fallback_raw, fallback_resolved = self._fallback_extract_and_resolve(user_query)
             if fallback_resolved:
@@ -1038,6 +1200,17 @@ class CandidateSearchService(BaseService):
                             except ValueError:
                                 role_name_terms.append(term)
 
+                        # A profile may store a generic title ("Developer") while
+                        # the query contains a specialization ("Python Developer").
+                        for term in list(role_name_terms):
+                            title_suffix = re.search(
+                                r"\b(developer|engineer|architect|analyst|designer|manager|consultant|administrator|specialist)$",
+                                term, re.IGNORECASE,
+                            )
+                            if title_suffix:
+                                role_name_terms.append(title_suffix.group(1))
+                        role_name_terms = list(dict.fromkeys(role_name_terms))
+
                         if uuid_role_ids:
                             role_ids.extend(
                                 row.role_id
@@ -1051,14 +1224,27 @@ class CandidateSearchService(BaseService):
                             )
                         role_ids = list(dict.fromkeys(role_ids))
 
+                    role_conditions = []
                     if role_ids:
-                        conditions.append(
+                        role_conditions.append(
                             Candidate.candidate_id.in_(
                                 db.query(WorkExperience.candidate_id).filter(
                                     WorkExperience.role_id.in_(role_ids)
                                 )
                             )
                         )
+                    if role_name_terms:
+                        resume_role_filters = [
+                            Resume.candidate_role.ilike(f"%{term}%")
+                            for term in role_name_terms
+                        ]
+                        role_conditions.append(
+                            Candidate.candidate_id.in_(
+                                db.query(Resume.candidate_id).filter(or_(*resume_role_filters))
+                            )
+                        )
+                    if role_conditions:
+                        conditions.append(or_(*role_conditions))
 
                 education = filters.get("education")
                 if isinstance(education, list) and education:
@@ -1236,9 +1422,19 @@ class CandidateSearchService(BaseService):
                 query = query.limit(page_size).offset((page - 1) * page_size)
 
                 data = query.all()
-                jd_role_ids = filters.get("roles") or []
-                jd_role_row = db.query(Role.role).filter(Role.role_id.in_(jd_role_ids)).first()
-                jd_role = jd_role_row.role if jd_role_row else ""
+                jd_role_values = filters.get("roles") or []
+                jd_role_ids = []
+                jd_role = ""
+                for value in jd_role_values:
+                    try:
+                        jd_role_ids.append(UUID(str(value)))
+                    except (ValueError, TypeError):
+                        if not jd_role:
+                            jd_role = str(value)
+                if jd_role_ids:
+                    jd_role_row = db.query(Role.role).filter(Role.role_id.in_(jd_role_ids)).first()
+                    if jd_role_row:
+                        jd_role = jd_role_row.role
 
                 jd_skill = filters.get("skills") or []
                 jd_skills = [
@@ -1696,7 +1892,7 @@ class CandidateSearchService(BaseService):
             )
 
         try:
-            is_combined = "filter" in filters or "dynamic_filters" in filters
+            is_combined = "filters" in filters or "dynamic_filters" in filters
 
             if is_combined:
                 logger.info("[filter_resumes] Combined filter mode detected (standard + dynamic)")
@@ -1971,7 +2167,16 @@ class CandidateParserService(BaseService):
     ) -> dict:
         """Select available model and call it with retries."""
         with self.get_session() as db:
-            admin = db.query(Admin).filter(Admin.is_active == True).first()
+            # Find an admin that has at least one active model config
+            admin = (
+                db.query(Admin)
+                .join(AiModelConfig, AiModelConfig.admin_id == Admin.admin_id)
+                .filter(Admin.is_active == True, AiModelConfig.is_active == True)
+                .first()
+            )
+            if not admin:
+                # Fallback: any active admin
+                admin = db.query(Admin).filter(Admin.is_active == True).first()
             if not admin:
                 raise CandidateServiceError("No admin found", status_code=500)
             admin_id = admin.admin_id
@@ -2004,6 +2209,22 @@ class CandidateParserService(BaseService):
                     response = client.chat.completions.create(model=version, messages=message)
                     content = response.choices[0].message.content.strip()
                     record_model_usage(model_config_id, response.usage.total_tokens, admin_name)
+
+                elif model == "groq":
+                    if not api_key:
+                        raise CandidateServiceError("Groq API key not found", status_code=500)
+                    client = OpenAI(
+                        api_key=api_key,
+                        base_url=base_url or "https://api.groq.com/openai/v1",
+                    )
+                    response = client.chat.completions.create(
+                        model=version,
+                        messages=message,
+                        response_format={"type": "json_object"},
+                    )
+                    content = response.choices[0].message.content.strip()
+                    if response.usage:
+                        record_model_usage(model_config_id, response.usage.total_tokens, admin_name)
 
                 elif model == "claude":
                     if not api_key:

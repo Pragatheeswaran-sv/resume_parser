@@ -320,13 +320,36 @@ def select_available_model(admin_id, exclude_ids: set = None):
                 AiModelUsage,
                 AiModelUsage.ai_model_config_id == AiModelConfig.ai_model_config_id,
             )
-            .filter(AiModelConfig.admin_id == admin_id)
+            .filter(
+                AiModelConfig.admin_id == admin_id,
+                AiModelConfig.is_active == True,
+            )
             .order_by(
                 AiModelConfig.prioprity_queue.asc().nullslast(),
                 AiModelConfig.created_at.asc(),
             )
             .all()
         )
+        if not rows:
+            # Check if there are *any* configs (even inactive) to give a better error message
+            any_configs = (
+                db.query(AiModelConfig)
+                .filter(AiModelConfig.admin_id == admin_id)
+                .first()
+            )
+            if any_configs:
+                logger.warning(
+                    "[select_available_model] Model configs exist but NONE are active (is_active=False) "
+                    "for admin_id=%s — call the toggle-model API to activate a configuration.",
+                    admin_id,
+                )
+            else:
+                logger.warning(
+                    "[select_available_model] No model configuration found at all for admin_id=%s",
+                    admin_id,
+                )
+            return None
+
         chosen_config = None
         chosen_usage = None
         dirty = False
@@ -343,28 +366,19 @@ def select_available_model(admin_id, exclude_ids: set = None):
                 usage.is_rate_limited = True
                 usage.retry_after = (usage.minute_window_start or now) + timedelta(minutes=1)
                 dirty = True
+            logger.warning(
+                "[select_available_model] Config unavailable | config_id=%s | priority=%s",
+                config.ai_model_config_id, config.prioprity_queue,
+            )
 
         if chosen_config is None:
-            already_all_off = all(not c.is_active for c, _ in rows)
-
-            if not already_all_off:
-                db.query(AiModelConfig).filter(
-                    AiModelConfig.admin_id == admin_id
-                ).update({AiModelConfig.is_active: False}, synchronize_session=False)
-                dirty = True
-
             if dirty:
                 db.commit()
+            logger.warning(
+                "[select_available_model] No available active model configuration for admin_id=%s",
+                admin_id,
+            )
             return None
-        
-        if not chosen_config.is_active:
-            db.query(AiModelConfig).filter(
-                AiModelConfig.admin_id == admin_id,
-                AiModelConfig.ai_model_config_id != chosen_config.ai_model_config_id,
-                AiModelConfig.is_active == True,
-            ).update({AiModelConfig.is_active: False}, synchronize_session=False)
-            chosen_config.is_active = True
-            dirty = True
 
         if chosen_usage and chosen_usage.is_rate_limited:
             chosen_usage.is_rate_limited = False

@@ -1962,6 +1962,7 @@ class AdminModelService(BaseService):
             version = payload.get("version") if payload.get("version") else None
             max_tokens = payload.get("max_tokens") if payload.get("max_tokens") else None
             temperature = payload.get("temperature") if payload.get("temperature") else None
+            base_url = payload.get("base_url") if payload.get("base_url") else None
             request_per_minute = payload.get("request_per_minute") if payload.get("request_per_minute") else None
             request_per_day = payload.get("request_per_day") if payload.get("request_per_day") else None
             token_per_minute = payload.get("token_per_minute") if payload.get("token_per_minute") else None
@@ -2020,6 +2021,7 @@ class AdminModelService(BaseService):
                 version = version,
                 max_tokens = max_tokens,
                 temparature = temperature,
+                base_url = base_url,
                 prioprity_queue = priority_queue,
                 is_active = False
             )
