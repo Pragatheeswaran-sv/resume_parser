@@ -1002,7 +1002,10 @@ Use [] or null when absent. Do not omit or add keys."""
                 if model == "openai":
                     if not api_key:
                         raise CandidateServiceError("OpenAI API key not found", status_code=500)
-                    client = OpenAI(api_key=api_key, base_url=base_url)
+                    client = OpenAI(
+                        api_key=api_key,
+                        base_url=base_url or "https://api.openai.com/v1",
+                    )
                     response = client.chat.completions.create(model=version, messages=message)
                     content = response.choices[0].message.content.strip()
                     token_used = response.usage.total_tokens
@@ -1027,7 +1030,10 @@ Use [] or null when absent. Do not omit or add keys."""
                 elif model == "claude":
                     if not api_key:
                         raise CandidateServiceError("Claude API key not found", status_code=500)
-                    client = Anthropic(api_key=api_key)
+                    client = Anthropic(
+                        api_key=api_key,
+                        base_url=base_url or "https://api.anthropic.com",
+                    )
                     response = client.messages.create(
                         model=version,
                         max_tokens=1000,
@@ -2507,7 +2513,10 @@ class CandidateParserService(BaseService):
                 if model == "openai":
                     if not api_key:
                         raise CandidateServiceError("OpenAI API key not found", status_code=500)
-                    client = OpenAI(api_key=api_key, base_url=base_url)
+                    client = OpenAI(
+                        api_key=api_key,
+                        base_url=base_url or "https://api.openai.com/v1",
+                    )
                     response = client.chat.completions.create(model=version, messages=message)
                     content = response.choices[0].message.content.strip()
                     record_model_usage(model_config_id, response.usage.total_tokens, admin_name)
@@ -2531,7 +2540,10 @@ class CandidateParserService(BaseService):
                 elif model == "claude":
                     if not api_key:
                         raise CandidateServiceError("Claude API key not found", status_code=500)
-                    client = Anthropic(api_key=api_key)
+                    client = Anthropic(
+                        api_key=api_key,
+                        base_url=base_url or "https://api.anthropic.com",
+                    )
                     response = client.messages.create(
                         model=version,
                         max_tokens=1000,
@@ -2602,6 +2614,11 @@ class CandidateParserService(BaseService):
             "education": [{"qualification": "", "institution": "", "percentage": "", "passout_year": ""}],
             "work_experience": [{"company_name": "", "role": "", "start_date": "", "end_date": ""}]
         }
+
+        Rules:
+        - For work_experience: Extract all work experience, company employments, client engagements, or projects worked on. If an explicit employer/company is given, use it. If client organizations or projects are listed without a distinct employer header (e.g. 'Hollweg Assessment Partners', 'Wagepoint'), use the client or project name as company_name. If no company or client is named, use 'Independent'.
+        - For role in work_experience: extract the role or job title for that experience (e.g. 'Software Engineer', 'SQL Developer'). If not explicitly stated per job, infer it from the candidate's primary role.
+        - For start_date and end_date in work_experience: extract in "YYYY-MM" or "YYYY" format (or "present" for current role). If start_date or end_date is NOT provided in the resume, leave it as null or empty string. Do NOT invent dates or use the current date.
         """
         data = llm_service.call_llm(
             prompt=prompt + "\n\nDocument:\n" + resume_text[:12000],
@@ -2609,6 +2626,14 @@ class CandidateParserService(BaseService):
             is_json=True,
             # max_tokens=2000,
         )
+        try:
+            logger.info(
+                "[extract_basic_info] LLM successfully extracted JSON:\n%s",
+                json.dumps(data, indent=2, default=str) if isinstance(data, (dict, list)) else data,
+            )
+        except Exception:
+            logger.info("[extract_basic_info] LLM successfully extracted JSON: %s", data)
+
         return data
 
     @staticmethod
@@ -2765,9 +2790,12 @@ class CandidateParserService(BaseService):
                         for work_exp_item in work_experience_list:
                             if isinstance(work_exp_item, dict):
                                 company_name = work_exp_item.get("company_name", "").strip()
-                                role_name = work_exp_item.get("role", "Unknown").strip()
+                                role_name = work_exp_item.get("role", "").strip() or extracted_role or "Software Professional"
                                 start_date = work_exp_item.get("start_date", "")
                                 end_date = work_exp_item.get("end_date", "")
+
+                                if not company_name and (role_name or start_date or end_date):
+                                    company_name = "Independent"
 
                                 if company_name:
                                     company = (
@@ -2794,27 +2822,34 @@ class CandidateParserService(BaseService):
                                     end_dt = None
                                     try:
                                         if start_date:
-                                            if len(start_date) == 4:
-                                                start_dt = datetime.date(int(start_date), 1, 1)
-                                            elif len(start_date) == 7:
-                                                year, month = start_date.split("-")
-                                                start_dt = datetime.date(int(year), int(month), 1)
+                                            s_str = str(start_date).strip()
+                                            if s_str and s_str.lower() not in {"null", "none", "n/a", "na", "undefined", "present", ""}:
+                                                if len(s_str) == 4 and s_str.isdigit():
+                                                    start_dt = datetime.date(int(s_str), 1, 1)
+                                                elif len(s_str) == 7 and "-" in s_str:
+                                                    parts = s_str.split("-")
+                                                    if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+                                                        start_dt = datetime.date(int(parts[0]), int(parts[1]), 1)
                                     except (ValueError, TypeError):
-                                        pass
+                                        start_dt = None
 
                                     try:
-                                        if end_date and end_date.lower() != "present":
-                                            if len(end_date) == 4:
-                                                end_dt = datetime.date(int(end_date), 12, 31)
-                                            elif len(end_date) == 7:
-                                                year, month = end_date.split("-")
-                                                if month == "12":
-                                                    end_dt = datetime.date(int(year), 12, 31)
-                                                else:
-                                                    next_month = datetime.date(int(year), int(month) + 1, 1)
-                                                    end_dt = next_month - datetime.timedelta(days=1)
+                                        if end_date:
+                                            e_str = str(end_date).strip()
+                                            if e_str and e_str.lower() not in {"null", "none", "n/a", "na", "undefined", "present", ""}:
+                                                if len(e_str) == 4 and e_str.isdigit():
+                                                    end_dt = datetime.date(int(e_str), 12, 31)
+                                                elif len(e_str) == 7 and "-" in e_str:
+                                                    parts = e_str.split("-")
+                                                    if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+                                                        year, month = parts
+                                                        if month == "12":
+                                                            end_dt = datetime.date(int(year), 12, 31)
+                                                        else:
+                                                            next_month = datetime.date(int(year), int(month) + 1, 1)
+                                                            end_dt = next_month - datetime.timedelta(days=1)
                                     except (ValueError, TypeError):
-                                        pass
+                                        end_dt = None
 
                                     is_work_exp = (
                                         db.query(WorkExperience)
@@ -2899,6 +2934,7 @@ class CandidateParserService(BaseService):
                             os.remove(file_path)
                         continue
 
+                    logger.info("Extracting candidate info from attachment: %s", att.file_name)
                     info = self.extract_basic_info(text)
                     if info:
                         info["file_name"] = att.file_name
@@ -2921,12 +2957,34 @@ class CandidateParserService(BaseService):
             for att_id, path in kept_files:
                 if not os.path.exists(path):
                     continue
-                compressed_name = compress_file(path)
-                compressed_path = os.path.join(os.path.dirname(path), compressed_name)
+
+                compressed_name = None
+                compressed_path = None
                 try:
-                    stored_name = attachment_storage_service.upload_attachment(compressed_path, compressed_name)
-                except AttachmentStorageError:
-                    continue
+                    res_name = compress_file(path)
+                    if (
+                        res_name
+                        and isinstance(res_name, str)
+                        and not res_name.startswith("File does not exist")
+                        and not res_name.startswith("Unsupported")
+                        and "failed" not in res_name.lower()
+                    ):
+                        c_path = os.path.join(os.path.dirname(path), res_name)
+                        if os.path.exists(c_path):
+                            compressed_name = res_name
+                            compressed_path = c_path
+                except Exception as comp_err:
+                    logger.warning("Compression failed for %s: %s; keeping original file", path, comp_err)
+
+                # Target file to keep locally and upload
+                target_path = compressed_path if compressed_path and os.path.exists(compressed_path) else path
+                target_name = os.path.basename(target_path)
+
+                try:
+                    stored_name = attachment_storage_service.upload_attachment(target_path, target_name)
+                except AttachmentStorageError as exc:
+                    logger.warning("Storage upload failed for %s: %s; keeping local copy", target_path, exc)
+                    stored_name = target_name
 
                 attachment = db.query(Attachment).filter(Attachment.attachment_id == att_id).first()
                 if attachment:
@@ -2934,10 +2992,11 @@ class CandidateParserService(BaseService):
                     db.commit()
                     db.refresh(attachment)
 
-                if os.path.exists(path):
-                    os.remove(path)
-                if compressed_path != path and os.path.exists(compressed_path):
-                    os.remove(compressed_path)
+                # Remove only the duplicate uncompressed original if a distinct compressed copy exists
+                if compressed_path and os.path.exists(compressed_path) and path != compressed_path:
+                    if os.path.exists(path):
+                        os.remove(path)
+                # target_path is ALWAYS kept in the local directory
 
             return {
                 "message_id": str(email_id),

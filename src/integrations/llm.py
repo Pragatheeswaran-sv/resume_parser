@@ -74,7 +74,10 @@ class LLMService:
                 if model == "openai":
                     if not api_key:
                         raise Exception("OpenAI API key not configured")
-                    client = OpenAI(api_key=api_key, base_url=base_url)
+                    client = OpenAI(
+                        api_key=api_key,
+                        base_url=base_url or "https://api.openai.com/v1",
+                    )
                     
                     kwargs = {
                         "model": version,
@@ -108,7 +111,10 @@ class LLMService:
                 elif model == "claude":
                     if not api_key:
                         raise Exception("Claude API key not configured")
-                    client = Anthropic(api_key=api_key)
+                    client = Anthropic(
+                        api_key=api_key,
+                        base_url=base_url or "https://api.anthropic.com",
+                    )
 
                     # Extract user messages without the system prompt for Anthropic
                     user_msgs = [m for m in messages if m.get("role") != "system"]

@@ -12,7 +12,7 @@ import requests
 from db.connection import SessionLocal
 from src.admin.models import Users
 from src.auth.jwt import create_access_token
-from src.auth.models import OauthCredentials, OauthSource
+from src.auth.models import OauthCredentials, OauthSource, ist_now
 from src.celery.tasks import resume_track
 from src.email_reader.models import Attachment, EmailLogs
 from src.integrations.google import google_service
@@ -20,13 +20,14 @@ from src.integrations.google import google_service
 load_dotenv()
 logger = logging.getLogger(__name__)
 
-CLIENT_ID = os.getenv("ZOHO_CLIENT_ID")
-CLIENT_SECRET = os.getenv("ZOHO_CLIENT_SECRET")
-REDIRECT_URI = os.getenv("ZOHO_REDIRECT_URI")
+CLIENT_ID = os.getenv("ZOHO_CLIENT_ID", "").strip().strip('"')
+CLIENT_SECRET = os.getenv("ZOHO_CLIENT_SECRET", "").strip().strip('"')
+REDIRECT_URI = os.getenv("ZOHO_REDIRECT_URI", "").strip().strip('"')
 ATTACHMENT_DIR = os.getenv("ATTACHMENT_DIR", "attachments")
 ALLOWED_EXTENSIONS = (".pdf", ".docx", ".doc")
 
 ZOHO_OAUTH_ENDPOINTS = [
+    "https://accounts.zoho.in/oauth/v2/token",
     "https://accounts.zoho.com/oauth/v2/token",
     "https://accounts.zoho.eu/oauth/v2/token",
     "https://accounts.zoho.com.au/oauth/v2/token",
@@ -34,7 +35,6 @@ ZOHO_OAUTH_ENDPOINTS = [
     "https://accounts.zohocloud.ca/oauth/v2/token",
     "https://accounts.zoho.sa/oauth/v2/token",
     "https://accounts.zoho.com.cn/oauth/v2/token",
-    "https://accounts.zoho.in/oauth/v2/token",
 ]
 
 
@@ -43,7 +43,7 @@ class ZohoIntegrationService:
 
     def zoho_login(self) -> Dict[str, Any]:
         try:
-            zoho_auth_base = "https://accounts.zoho.com"
+            zoho_auth_base = os.getenv("ZOHO_AUTH_URL", "https://accounts.zoho.in").strip().rstrip("/")
             auth_url = (
                 f"{zoho_auth_base}/oauth/v2/auth"
                 f"?scope=ZohoMail.messages.ALL,ZohoMail.accounts.READ,ZohoMail.folders.READ"
@@ -186,7 +186,7 @@ class ZohoIntegrationService:
                 existing_cred.refresh_token = refresh_token or existing_cred.refresh_token
                 existing_cred.expires_in = expires_in
                 existing_cred.api_domain = api_domain or existing_cred.api_domain
-                existing_cred.updated_at = datetime.utcnow()
+                existing_cred.updated_at = ist_now().replace(tzinfo=None)
             else:
                 new_cred = OauthCredentials(
                     email=email,
@@ -196,6 +196,7 @@ class ZohoIntegrationService:
                     source_id=source.source_id,
                     api_domain=api_domain,
                     created_by=email,
+                    updated_at=ist_now().replace(tzinfo=None),
                 )
                 db.add(new_cred)
 
@@ -246,6 +247,42 @@ class ZohoIntegrationService:
             if close_db:
                 db.close()
 
+    def refresh_zoho_token(self, cred: OauthCredentials, db=None) -> str:
+        """Force refreshes the Zoho OAuth access token using the stored refresh token."""
+        if not cred.refresh_token:
+            raise Exception(
+                f"Zoho token for {cred.email} cannot be refreshed: refresh_token is missing. "
+                "Please reconnect your Zoho account via OAuth to grant offline access."
+            )
+
+        token_url = self.get_zoho_accounts_token_url(cred.api_domain or "https://www.zohoapis.in")
+        payload = {
+            "refresh_token": cred.refresh_token,
+            "client_id": CLIENT_ID,
+            "client_secret": CLIENT_SECRET,
+            "grant_type": "refresh_token",
+        }
+
+        logger.info("Refreshing Zoho access token for %s using %s", cred.email, token_url)
+        res = requests.post(token_url, data=payload, timeout=10)
+        res.raise_for_status()
+
+        data = res.json()
+        if "error" in data:
+            raise Exception(f"Zoho token refresh failed for {cred.email}: {data.get('error')}")
+
+        cred.access_token = data["access_token"]
+        if "expires_in" in data:
+            cred.expires_in = data["expires_in"]
+        cred.updated_at = ist_now().replace(tzinfo=None)
+
+        if db:
+            db.commit()
+            db.refresh(cred)
+
+        logger.info("Zoho access token refreshed successfully for %s", cred.email)
+        return cred.access_token
+
     def get_valid_zoho_token(self, email: str, db=None) -> str:
         close_db = False
         if db is None:
@@ -253,7 +290,7 @@ class ZohoIntegrationService:
             close_db = True
 
         try:
-            logger.info(f"Fetching Zoho token for {email}")
+            logger.info("Fetching Zoho token for %s", email)
 
             cred = (
                 db.query(OauthCredentials)
@@ -262,32 +299,27 @@ class ZohoIntegrationService:
             )
 
             if not cred:
-                raise Exception("Zoho credentials not found")
+                raise Exception(f"Zoho credentials not found for {email}")
 
-            expires_at = cred.updated_at + timedelta(seconds=cred.expires_in)
+            now = ist_now().replace(tzinfo=None)
+            updated_at = cred.updated_at or now
+            expires_in = cred.expires_in or 3600
+            expires_at = updated_at + timedelta(seconds=expires_in)
 
-            if datetime.utcnow() >= expires_at:
-                logger.info("Zoho token expired, refreshing...")
-
-                token_url = self.get_zoho_accounts_token_url(cred.api_domain)
-
-                payload = {
-                    "refresh_token": cred.refresh_token,
-                    "client_id": CLIENT_ID,
-                    "client_secret": CLIENT_SECRET,
-                    "grant_type": "refresh_token",
-                }
-
-                res = requests.post(token_url, data=payload, timeout=10)
-                res.raise_for_status()
-
-                data = res.json()
-
-                cred.access_token = data["access_token"]
-                cred.expires_in = data["expires_in"]
-                cred.updated_at = datetime.utcnow()
-
-                db.commit()
+            # Refresh if expired or expiring within 5 minutes
+            if now >= (expires_at - timedelta(minutes=5)):
+                logger.info("Zoho token for %s is expired or expiring soon, refreshing...", email)
+                if cred.refresh_token:
+                    return self.refresh_zoho_token(cred, db)
+                else:
+                    logger.warning(
+                        "Zoho token for %s has expired and no refresh_token is present in DB.",
+                        email
+                    )
+                    raise Exception(
+                        f"Zoho session expired for {email} and no refresh token is stored. "
+                        "Please re-login via Zoho OAuth to grant offline access."
+                    )
 
             return cred.access_token
         finally:
@@ -384,7 +416,23 @@ class ZohoIntegrationService:
             headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
             api_domain = cred.api_domain
 
-            account_id = self.get_account_id(api_domain, headers)
+            try:
+                account_id = self.get_account_id(api_domain, headers)
+            except requests.exceptions.HTTPError as exc:
+                if exc.response is not None and exc.response.status_code == 401:
+                    if cred.refresh_token:
+                        logger.warning("Zoho API returned 401 for %s; forcing token refresh...", email_id)
+                        access_token = self.refresh_zoho_token(cred, db)
+                        headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
+                        account_id = self.get_account_id(api_domain, headers)
+                    else:
+                        raise Exception(
+                            f"Zoho returned 401 Unauthorized for {email_id} and no refresh_token is present in DB. "
+                            "Please re-login via Zoho OAuth to grant offline access."
+                        ) from exc
+                else:
+                    raise
+
             folders = self.get_folders(api_domain, account_id, headers)
 
             inbox_id = next(
@@ -471,4 +519,5 @@ zoho_service = ZohoIntegrationService()
 zoho_login = zoho_service.zoho_login
 zoho_callback = zoho_service.zoho_callback
 get_valid_zoho_token = zoho_service.get_valid_zoho_token
+refresh_zoho_token = zoho_service.refresh_zoho_token
 fetch_emails_zoho = zoho_service.fetch_emails_zoho

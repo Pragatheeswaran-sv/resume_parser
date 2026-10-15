@@ -11,6 +11,9 @@ from src.auth import models
 from src.resume_share import models 
 from src.client_track import models 
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from alembic import context
 
@@ -18,7 +21,9 @@ from alembic import context
 # access to the values within the .ini file in use.
 config = context.config
 
-config.set_main_option("sqlalchemy.url", os.getenv("DATABASE_URL", ""))
+db_url = os.getenv("DATABASE_URL", "")
+if db_url:
+    config.set_main_option("sqlalchemy.url", db_url.replace("%", "%%"))
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
