@@ -26,12 +26,11 @@ def compress_pdf(input_path, output_path):
                 object_stream_mode=pikepdf.ObjectStreamMode.generate
             )
         size = os.path.getsize(output_path)
-        compressed_file_path = output_path.split('/')
-        compressed_file_path = compressed_file_path[-1]
-        logger.info(f"PDF compressed: {output_path} with size of {size}", compressed_file_path)
+        compressed_file_path = os.path.basename(output_path)
+        logger.info(f"PDF compressed: {output_path} with size of {size}")
         return compressed_file_path
     except Exception as e:
-        return(f"PDF compression failed: {e}")
+        return f"PDF compression failed: {e}"
 
 
 def compress_docx(input_path, output_path):
@@ -43,8 +42,7 @@ def compress_docx(input_path, output_path):
                     buffer = zin.read(item.filename)
                     zout.writestr(item, buffer)
         size = os.path.getsize(output_path)
-        compressed_file_path = output_path.split('/')
-        compressed_file_path = compressed_file_path[-1]
+        compressed_file_path = os.path.basename(output_path)
         logger.info(f"DOCX compressed: {output_path} with size of {size}")
         return compressed_file_path
     except Exception as e:
