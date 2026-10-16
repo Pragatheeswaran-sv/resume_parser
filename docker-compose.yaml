@@ -5,6 +5,7 @@ services:
       dockerfile: dockerfile
     image: resume-tracker:latest
     container_name: resume-parser-api
+    restart: unless-stopped
     ports:
       - "${PORT:-8000}:8000"
     depends_on:
@@ -15,11 +16,12 @@ services:
       - .:/app
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir src
+    command: uvicorn src.main:app --host 0.0.0.0 --port 8000
 
   celery:
     image: resume-tracker:latest
     container_name: resume-parser-celery
+    restart: unless-stopped
     environment:
       - PYTHONPATH=/app
     command: celery -A src.celery.celery_app.celery worker --loglevel=info --pool=solo
